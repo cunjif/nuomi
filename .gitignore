@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+target/
+src-tauri/target/
+crates/*/target/
+
+# Local databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Secrets & env
+.env*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Codebase-memory artifacts (team-shared graph is optional)
+.codebase-memory/

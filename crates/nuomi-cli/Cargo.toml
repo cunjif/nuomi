@@ -1,0 +1,23 @@
+[package]
+name = "nuomi-cli"
+description = "Nuomi headless acceptance entrypoint: run / resume / REPL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nuomi"
+path = "src/main.rs"
+
+[dependencies]
+nuomi-core = { path = "../nuomi-core" }
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
