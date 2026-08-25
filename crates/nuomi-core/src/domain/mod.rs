@@ -4,9 +4,9 @@ pub mod entities;
 pub mod run_state;
 
 pub use entities::{
-    Approval, ApprovalDecision, EventRecord, MemoryEntry, PromptStatus, PromptVersion,
-    ProviderConfig, ProviderProtocol, Role, Run, Schedule, Session, Task, TaskStatus, Team,
-    TeamTopology, WhiteBoardNote,
+    AgentProfile, Approval, ApprovalDecision, CliFlavor, EventRecord, MemoryEntry, PromptStatus,
+    PromptVersion, ProviderConfig, ProviderProtocol, Role, Run, Schedule, Session, Task,
+    TaskStatus, Team, TeamTopology, WhiteBoardNote,
 };
 pub use run_state::{ApprovalOutcome, RunEvent, RunState, TransitionError};
 

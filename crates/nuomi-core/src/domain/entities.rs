@@ -262,3 +262,49 @@ pub struct PromptVersion {
     pub activated_at: Option<i64>,
     pub created_at: i64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CliFlavor {
+    ClaudeCode,
+    Codex,
+    Plain,
+}
+
+impl CliFlavor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CliFlavor::ClaudeCode => "claude_code",
+            CliFlavor::Codex => "codex",
+            CliFlavor::Plain => "plain",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<CliFlavor> {
+        match s {
+            "claude_code" => Some(CliFlavor::ClaudeCode),
+            "codex" => Some(CliFlavor::Codex),
+            "plain" => Some(CliFlavor::Plain),
+            _ => None,
+        }
+    }
+}
+
+/// An executable external CLI agent (Claude Code / Codex / custom scripts).
+/// `args` is a JSON array template supporting a `{prompt}` placeholder;
+/// `env` is a JSON object of extra environment variables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentProfile {
+    pub id: String,
+    pub name: String,
+    /// Adapter kind; v1 only supports `cli`.
+    pub adapter: String,
+    pub flavor: CliFlavor,
+    pub command: String,
+    pub args: serde_json::Value,
+    pub env: serde_json::Value,
+    pub working_dir: Option<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}

@@ -25,6 +25,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0002_tasks_runs.sql"
         )),
     ),
+    (
+        3,
+        "0003_agent_profiles",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0003_agent_profiles.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -95,6 +103,7 @@ mod tests {
             "runs",
             "approvals",
             "schedules",
+            "agent_profiles",
         ] {
             let n: i64 = conn
                 .query_row(
