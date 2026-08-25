@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nuomi-core", "crates/nuomi-cli"]
+members = ["crates/nuomi-core", "crates/nuomi-cli", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
