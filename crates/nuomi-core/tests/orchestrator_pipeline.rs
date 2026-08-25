@@ -128,16 +128,24 @@ async fn pipeline_runs_three_roles_end_to_end_with_whiteboard_and_events() {
         vec!["finding"; 3]
     );
 
-    // Events: one append-only `message` per stage, monotonic seq.
+    // Events: since ADR-0002 mirroring, each stage persists a `whiteboard`
+    // note mirror followed by its `message` record, seq-ordered.
     let events =
         nuomi_core::store::repos::events::list_by_aggregate(&db.0, "session", &session_id, None)
             .unwrap();
-    assert_eq!(events.len(), 3);
+    assert_eq!(events.len(), 6);
     assert_eq!(
-        events.iter().map(|e| e.seq).collect::<Vec<_>>(),
-        vec![1, 2, 3]
+        events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        vec![
+            "whiteboard",
+            "message",
+            "whiteboard",
+            "message",
+            "whiteboard",
+            "message"
+        ]
     );
-    assert_eq!(events[2].payload["content"], "review approved");
+    assert_eq!(events[5].payload["content"], "review approved");
 
     // Final summary contains the last output.
     assert!(outcome.final_output.contains("review approved"));

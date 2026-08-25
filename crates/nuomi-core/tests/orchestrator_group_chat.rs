@@ -175,16 +175,41 @@ async fn handoff_transfers_control_and_syncs_context() {
         ]
     );
 
-    // Events are appended per turn with monotonic seq.
+    // Events: since ADR-0002 mirroring, each turn persists a `whiteboard`
+    // note mirror followed by its `message` record, seq-ordered.
     let db = nuomi_core::store::Db::open(&db_path).unwrap();
     let events =
         nuomi_core::store::repos::events::list_by_aggregate(&db.0, "session", &session_id, None)
             .unwrap();
+    assert_eq!(events.len(), 6);
     assert_eq!(
         events.iter().map(|e| e.seq).collect::<Vec<_>>(),
-        vec![1, 2, 3]
+        vec![1, 2, 3, 4, 5, 6]
     );
-    assert!(events.iter().all(|e| e.kind == "message"));
+    assert_eq!(
+        events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        vec![
+            "whiteboard",
+            "message",
+            "whiteboard",
+            "message",
+            "whiteboard",
+            "message"
+        ]
+    );
+    let message_bodies: Vec<&str> = events
+        .iter()
+        .filter(|e| e.kind == "message")
+        .filter_map(|e| e.payload["content"].as_str())
+        .collect();
+    assert_eq!(
+        message_bodies,
+        vec![
+            "alice opening finding",
+            "bob counter finding",
+            "carol final conclusion"
+        ]
+    );
 
     // Context sync: Bob's request must contain Alice's utterance (shared history).
     let bob_requests = llm_bob.requests.lock().unwrap();
