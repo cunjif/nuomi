@@ -5,8 +5,10 @@ pub mod events;
 pub mod memory;
 pub mod prompts;
 pub mod providers;
+pub mod roles;
 pub mod sessions;
 pub mod tasks_runs;
+pub mod teams;
 pub mod whiteboard;
 
 pub use agent_profiles::{count, delete, get, insert, list, update};

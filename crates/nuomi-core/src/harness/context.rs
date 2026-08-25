@@ -73,6 +73,13 @@ impl Context {
         self.bus.subscribe()
     }
 
+    /// Clones a handle onto the kernel event bus (cheap: shared broadcast
+    /// hub). Needed by components that publish outside the plugin-lifecycle
+    /// path, e.g. the WhiteBoard mirror in team runs.
+    pub fn bus(&self) -> EventBus {
+        self.bus.clone()
+    }
+
     /// Number of registered services (introspection/testing).
     pub async fn service_count(&self) -> usize {
         self.services.read().await.len()
@@ -128,5 +135,14 @@ mod tests {
         let ev = rx.recv().await.unwrap();
         assert_eq!(ev.topic, "test.tick");
         assert_eq!(ev.payload["n"], 1);
+    }
+
+    #[tokio::test]
+    async fn cloned_bus_handle_publishes_to_subscribers() {
+        let ctx = Context::default();
+        let bus = ctx.bus();
+        let mut rx = bus.subscribe();
+        bus.publish(Event::new("bus.clone", serde_json::json!({})));
+        assert_eq!(rx.recv().await.unwrap().topic, "bus.clone");
     }
 }
