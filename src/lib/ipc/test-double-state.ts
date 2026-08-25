@@ -8,6 +8,7 @@ import type {
   ApprovalDto,
   EventDto,
   FileEntryDto,
+  IntegrationDto,
   ProviderDto,
   RoleDto,
   ScheduleDto,
@@ -28,6 +29,7 @@ interface DoubleState {
   agentProfiles: AgentProfileDto[];
   roles: RoleDto[];
   teams: TeamDto[];
+  integrations: IntegrationDto[];
   whiteboardNotes: WhiteBoardNoteDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
@@ -46,6 +48,7 @@ export const tdState: DoubleState = {
   agentProfiles: [],
   roles: [],
   teams: [],
+  integrations: [],
   whiteboardNotes: [],
   sensitiveTools: null,
   onlineAuthorized: false,
@@ -84,6 +87,7 @@ export function tdReset(): void {
   tdState.agentProfiles.length = 0;
   tdState.roles.length = 0;
   tdState.teams.length = 0;
+  tdState.integrations.length = 0;
   tdState.whiteboardNotes.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;

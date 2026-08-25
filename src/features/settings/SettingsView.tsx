@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { ipc } from "../../lib/ipc/client";
 import { CliAgentsSection } from "./CliAgentsSection";
+import { IntegrationsSection } from "./IntegrationsSection";
 import { OnlineAuthToggle } from "./OnlineAuthToggle";
 import { ProviderForm } from "./ProviderForm";
 import { RolesSection } from "./RolesSection";
@@ -64,6 +65,7 @@ export function SettingsView(): ReactNode {
       <CliAgentsSection />
       <RolesSection />
       <TeamsSection />
+      <IntegrationsSection />
       <OnlineAuthToggle />
     </div>
   );

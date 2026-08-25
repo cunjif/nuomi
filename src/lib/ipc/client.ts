@@ -100,6 +100,13 @@ export const ipc = {
   runTeamOnTask: (taskId: string, teamId: string) => unwrap(current.runTeamOnTask(taskId, teamId)),
   runTeamSession: (sessionId: string, teamId: string, task: string) =>
     unwrap(current.runTeamSession(sessionId, teamId, task)),
+  listIntegrations: () => unwrap(current.listIntegrations()),
+  upsertIntegration: (input: Parameters<Commands["upsertIntegration"]>[0]) =>
+    unwrap(current.upsertIntegration(input)),
+  deleteIntegration: (integrationId: string) =>
+    unwrap(current.deleteIntegration(integrationId)),
+  testIntegration: (integrationId: string) =>
+    unwrap(current.testIntegration(integrationId)),
 };
 
 export type Ipc = typeof ipc;

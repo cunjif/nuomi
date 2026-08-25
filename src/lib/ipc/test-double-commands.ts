@@ -6,6 +6,8 @@
 import type {
   AgentProfileInput,
   IpcError,
+  IntegrationDto,
+  IntegrationInput,
   JsonValue,
   ProviderInput,
   Result,
@@ -41,6 +43,26 @@ const slug = (text: string): string =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
+
+/** Webhook URLs are write-only: DTOs carry protocol+host+last-4 chars only (SPEC D5). */
+function maskWebhookUrl(raw: string): string {
+  const tail = raw.slice(-4);
+  try {
+    return `${new URL(raw).origin}/***${tail}`;
+  } catch {
+    return `***${tail}`;
+  }
+}
+
+/** Only absolute http(s) URLs are valid webhook endpoints. */
+function isValidWebhookUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 export function testDoubleCommands(): CommandSet {
   const cmds: CommandSet = {
@@ -401,6 +423,48 @@ export function testDoubleCommands(): CommandSet {
     },
     async runTeamSession(_sessionId, _teamId, _task) {
       return ok({ finalOutput: "team ok", converged: true, rounds: 1 });
+    },
+    async listIntegrations() {
+      return ok([...tdState.integrations]);
+    },
+    async upsertIntegration(input: IntegrationInput) {
+      if (!isValidWebhookUrl(input.webhookUrl)) {
+        return err("integration.invalid", `webhook url is not a valid http(s) url: ${input.name}`);
+      }
+      const now = Date.now();
+      // `name` is the idempotency key: an existing integration is updated in place.
+      const existing = tdState.integrations.find((i) => i.name === input.name);
+      if (existing) {
+        existing.kind = input.kind;
+        existing.webhookUrlMasked = maskWebhookUrl(input.webhookUrl);
+        existing.events = [...input.events];
+        existing.enabled = input.enabled;
+        existing.updatedAt = now;
+        return ok({ ...existing });
+      }
+      const created: IntegrationDto = {
+        id: nextId("integ"),
+        name: input.name,
+        kind: input.kind,
+        webhookUrlMasked: maskWebhookUrl(input.webhookUrl),
+        events: [...input.events],
+        enabled: input.enabled,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.integrations.push(created);
+      return ok({ ...created });
+    },
+    async deleteIntegration(integrationId) {
+      const idx = tdState.integrations.findIndex((i) => i.id === integrationId);
+      if (idx < 0) return err("integration.not_found", `integration#${integrationId} not found`);
+      tdState.integrations.splice(idx, 1);
+      return ok(null);
+    },
+    async testIntegration(integrationId) {
+      const integration = tdState.integrations.find((i) => i.id === integrationId);
+      if (!integration) return err("integration.not_found", `integration#${integrationId} not found`);
+      return ok({ ok: true, error: null });
     },
   };
   return cmds;
