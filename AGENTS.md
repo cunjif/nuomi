@@ -114,6 +114,7 @@ pnpm contracts:gen           # 重新生成 IPC 绑定 regenerate TS bindings（
 cargo fmt --all              # 格式化 format (workspace root)
 cargo clippy --all-targets -- -D warnings   # lint 必须零警告 must be clean
 cargo test                   # Rust 测试 rust tests
+pnpm coverage:rust           # Rust 行覆盖率 summary（cargo-llvm-cov；下钻 HTML: pnpm coverage:rust:html）rust line coverage
 ```
 
 ## 7. 工作流硬规则 / Workflow Hard Rules

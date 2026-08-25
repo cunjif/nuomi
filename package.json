@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
-    "contracts:gen": "cargo run -p nuomi-shell --bin contracts_gen"
+    "contracts:gen": "cargo run -p nuomi-shell --bin contracts_gen",
+    "coverage:rust": "cargo llvm-cov --workspace --summary-only",
+    "coverage:rust:html": "cargo llvm-cov --workspace --html --output-dir target/llvm-cov"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
