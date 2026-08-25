@@ -45,4 +45,8 @@ pub enum ProviderError {
 
     #[error("keyring error: {0}")]
     Keyring(String),
+
+    /// Error surfaced by an external CLI agent adapter (`adapters::cli`).
+    #[error("cli agent '{agent}': {message}")]
+    CliAgent { agent: String, message: String },
 }
