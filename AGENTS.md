@@ -72,8 +72,8 @@ nuomi/
 | Entity 实体 | 含义 / Meaning |
 |---|---|
 | **ProviderConfig** Provider 配置 | 一个模型服务端点：协议（OpenAICompatible/AnthropicCompatible）、base URL、keyring 密钥引用、能力标签、Master/Slave 角色。A model endpoint config with capability tags and master/slave role. |
-| **Role** 角色 | 同一 Provider 之上的行为覆盖层：SystemPrompt 覆盖、工具集白名单、温度等参数。Behavior overlay on a provider. |
-| **Team** 团队 | 多个 Role 的组合与协作拓扑（pipeline/router/group_chat）+ 群聊参数（最大轮数、Selector 配置）。Composition of roles + collaboration topology. |
+| **Role** 角色 | 同一 Provider 之上的行为覆盖层：SystemPrompt 覆盖、工具集白名单、温度等参数；params.agent_profile_id 可绑定 CLI Agent。Behavior overlay on a provider; params.agent_profile_id binds a CLI Agent. |
+| **Team** 团队 | 多个 Role 的组合与协作拓扑（pipeline/router/group_chat）+ 群聊参数（最大轮数、Selector 配置）；经 services/team_runner 物化执行，Run 行生命周期接入 tasks_runs。Composition of roles + collaboration topology; materialized and executed via services/team_runner, run lifecycle wired into tasks_runs. |
 | **AgentProfile** 智能体档案 | 可执行的 agent 定义：名称、adapter 类型（v1 支持 cli，claude_code/codex/plain 三方言）、启动命令或 provider+role 绑定；经 providers/adapters 的 LlmProvider 接入编排，配置存 SQLite agent_profiles（SPEC 见 docs/specs/cli-agents-m1.md）。An executable agent definition. |
 | **Session** 会话 | 一轮对话/转录，可续传可回放（`nuomi resume`）。Resumable conversation. |
 | **EventRecord** 事件 | 只追加的事件日志：`thought \| tool_call \| tool_result \| message \| state_changed \| usage`。Append-only event log. |
@@ -141,7 +141,7 @@ cargo test                   # Rust 测试 rust tests
 ## 9. 当前阶段 / Current Phase — Harness 内核优先（Kernel-First）
 
 里程碑路线 / Milestones: **K0** workspace 脚手架 + 迁移框架 → **K1** 插件内核 (Plugin/Context/EventBus) → **K2** 存储层 repositories → **K3** Provider 层 (OpenAICompatible/AnthropicCompatible) + Master-Slave 编排 → **K4** Loop Engine (ReAct) + SystemPrompt 插件 → **K5** Memory/Hook/MCP 插件 → **K6** Role/Team 编排（Pipeline · Router · 群聊 Selector+Handoff）+ WhiteBoard → **K7** headless CLI (run/resume/REPL) → **K8** Self-Evolution（反思进化 + 白名单联网学习）。
-已交付 / Delivered: **M-CLI1** CLI Agent 接入（adapters/cli + AgentProfile 存储 + Settings 管理）✅。下一目标 / Next: **M-TEAM1** Team 编排接入桌面壳。
+已交付 / Delivered: **M-CLI1** CLI Agent 接入（adapters/cli + AgentProfile 存储 + Settings 管理）✅；**M-TEAM1** Team 编排接入桌面壳（team_runner 物化注册表 + Run 生命周期接线 + Roles/Teams 管理与看板运行入口）✅。下一目标 / Next: 自发组队（auto-forming team）与 Telemetry/Bot 集成（下一批候选）。
 UI 里程碑回归时恢复: Board → Approvals → Scheduler → DAG。
 
 绿地纪律 / Greenfield discipline: 目录结构与命名现在定死；宁可先建空模块 + TODO 占位，也不要出现第二套并行约定。Structure beats consistency-recovered later.
