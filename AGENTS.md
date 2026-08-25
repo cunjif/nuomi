@@ -142,7 +142,7 @@ pnpm coverage:rust           # Rust 行覆盖率 summary（cargo-llvm-cov；下�
 ## 9. 当前阶段 / Current Phase — Harness 内核优先（Kernel-First）
 
 里程碑路线 / Milestones: **K0** workspace 脚手架 + 迁移框架 → **K1** 插件内核 (Plugin/Context/EventBus) → **K2** 存储层 repositories → **K3** Provider 层 (OpenAICompatible/AnthropicCompatible) + Master-Slave 编排 → **K4** Loop Engine (ReAct) + SystemPrompt 插件 → **K5** Memory/Hook/MCP 插件 → **K6** Role/Team 编排（Pipeline · Router · 群聊 Selector+Handoff）+ WhiteBoard → **K7** headless CLI (run/resume/REPL) → **K8** Self-Evolution（反思进化 + 白名单联网学习）。
-已交付 / Delivered: **M-CLI1** CLI Agent 接入（adapters/cli + AgentProfile 存储 + Settings 管理）✅；**M-TEAM1** Team 编排接入桌面壳（team_runner 物化注册表 + Run 生命周期接线 + Roles/Teams 管理与看板运行入口）✅。下一目标 / Next: 自发组队（auto-forming team）与 Telemetry/Bot 集成（下一批候选）。
+已交付 / Delivered: **M-CLI1** CLI Agent 接入（adapters/cli + AgentProfile 存储 + Settings 管理）✅；**M-TEAM1** Team 编排接入桌面壳（team_runner 物化注册表 + Run 生命周期接线 + Roles/Teams 管理与看板运行入口）✅；**M-BOT1** Telemetry/Bot 集成（出站 sink 抽象 + 飞书签名 webhook + 批量遥测导出 + Settings 管理）✅。下一目标 / Next: pr.md 主需求已全量落地，转入打磨与增强阶段（候选：亮色主题打磨、Monaco 体验、自发组队 dry-run 预览等）。
 UI 里程碑回归时恢复: Board → Approvals → Scheduler → DAG。
 
 绿地纪律 / Greenfield discipline: 目录结构与命名现在定死；宁可先建空模块 + TODO 占位，也不要出现第二套并行约定。Structure beats consistency-recovered later.
