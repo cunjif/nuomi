@@ -83,6 +83,7 @@ async fn task_board_transition_auto_dispatches_run() {
 #[tokio::test]
 async fn workspace_sandbox_rejects_escape() {
     let (state, dir) = boot(vec![]).await;
+    state.switch_workspace(dir.path().to_path_buf()).unwrap();
     commands::impl_write_file(&state, "a/b.txt".into(), "hello".into())
         .await
         .unwrap();
@@ -97,7 +98,6 @@ async fn workspace_sandbox_rejects_escape() {
 
     let err = commands::impl_read_file(&state, "../escape.txt".into()).await;
     assert!(err.is_err());
-    let _ = dir;
 }
 
 #[tokio::test]
