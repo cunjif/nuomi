@@ -70,16 +70,33 @@ export function useSessionStream(sessionId: string | null): {
   const [liveEntries, setLiveEntries] = useState<ChatEntry[]>([]);
   const liveActivityRef = useRef(false);
   const lastSeqRef = useRef(0);
+  /** Highest persisted message seq already swapped into the live buffer. */
+  const lastMessageSeqRef = useRef(0);
 
   useEffect(() => {
     lastSeqRef.current = historyQuery.data?.at(-1)?.seq ?? 0;
   }, [historyQuery.data]);
 
+  // Stable delegate: the subscription exists before handleBatch is built,
+  // but every flush routes to the latest handler.
+  const batchDelegateRef = useRef<(batch: DomainEvent[]) => void>(() => {});
+  const flow = useDomainEvents(
+    sessionId !== null ? [sessionChannel(sessionId)] : [],
+    (batch) => batchDelegateRef.current(batch),
+  );
+
   const handleBatch = useCallback(
     (batch: DomainEvent[]) => {
       let gap = false;
       for (const ev of batch) {
-        if (ev.seq !== undefined && ev.sessionId === sessionId) {
+        // session.delta carries a NON-PERSISTENT stream ordinal (dedupe and
+        // ordering within the live stream only); it must never feed durable
+        // gap recovery, which is keyed on events-table seq.
+        if (
+          ev.seq !== undefined &&
+          ev.type !== "session.delta" &&
+          ev.sessionId === sessionId
+        ) {
           if (ev.seq > lastSeqRef.current + 1) gap = true;
           else lastSeqRef.current = Math.max(lastSeqRef.current, ev.seq);
         }
@@ -88,6 +105,27 @@ export function useSessionStream(sessionId: string | null): {
         if (ev.type === "session.delta") {
           liveActivityRef.current = true;
           setStreamText((prev) => prev + asString(p.text));
+        } else if (ev.type === "session.message") {
+          // Persisted authority arriving live. Order matters: record the
+          // message bookkeeping FIRST, then swap the buffer (the batch loop
+          // is synchronous, so no delta can slip in between).
+          const msgSeq = typeof p.seq === "number" ? p.seq : null;
+          if (msgSeq !== null && msgSeq <= lastMessageSeqRef.current) continue;
+          if (msgSeq !== null) lastMessageSeqRef.current = msgSeq;
+          liveActivityRef.current = true;
+          const deltaTo = typeof p.deltaTo === "number" ? p.deltaTo : null;
+          if (deltaTo !== null && sessionId !== null) {
+            // Retire exactly the delta range this answer covers; buffered
+            // deltas beyond it still apply.
+            flow.markDeltasApplied(sessionId, deltaTo);
+            setStreamText(asString(p.role) === "assistant" ? asString(p.content) : "");
+          } else {
+            // No coverage info: the full persisted log supersedes whatever
+            // we buffered — clear and freeze deltas seen so far.
+            if (sessionId !== null) flow.dropPendingDeltas(sessionId);
+            setStreamText("");
+            setLiveEntries([]);
+          }
         } else if (ev.type === "tool.call") {
           liveActivityRef.current = true;
           setLiveEntries((prev) => [
@@ -103,9 +141,15 @@ export function useSessionStream(sessionId: string | null): {
       }
       if (gap && sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
     },
-    [qc, sessionId],
+    [flow, qc, sessionId],
   );
-  useDomainEvents(sessionId !== null ? [sessionChannel(sessionId)] : [], handleBatch);
+  batchDelegateRef.current = handleBatch;
+  useEffect(() => {
+    // Kernel keeps its live delta ordinal per session; switching sessions
+    // means the counter restarts at 1 — forget our tracking.
+    flow.resetDeltaTracking();
+    lastMessageSeqRef.current = 0;
+  }, [flow, sessionId]);
 
   const entries = useMemo(() => {
     const history = historyQuery.data !== undefined ? toEntries(historyQuery.data) : [];

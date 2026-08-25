@@ -9,6 +9,15 @@ export type DomainEvent = {
   taskId?: string;
   runId?: string;
   sessionId?: string;
+  /**
+   * DUAL MEANING, discriminated by `type`:
+   *  - on `session.delta`: NON-PERSISTENT live-stream ordinal injected by the
+   *    kernel (per-session counter starting at 1) — dedupe/reorder only,
+   *    never persisted, never used for history gap recovery;
+   *  - on every other event (`session.message`, whiteboard notes, …): the
+   *    AUTHORITATIVE per-aggregate seq of the durable row (events table),
+   *    recoverable via listEvents(afterSeq).
+   */
   seq?: number;
   payload: JsonValue;
 };
