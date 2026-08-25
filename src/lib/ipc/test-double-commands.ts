@@ -5,11 +5,17 @@
  */
 import type {
   AgentProfileInput,
+  IpcError,
+  JsonValue,
   ProviderInput,
   Result,
+  RoleDto,
+  RoleInput,
   ScheduleDto,
   SessionDto,
   TaskDto,
+  TeamDto,
+  TeamInput,
 } from "./bindings.gen";
 import type { commands as Commands } from "./bindings.gen";
 import { listDir, nextId, tdState } from "./test-double-state";
@@ -21,6 +27,20 @@ const err = (code: string, message: string): Result<never, { generic: { code: st
   status: "error",
   error: { generic: { code, message } },
 });
+const errWithDetails = (code: string, message: string, details: JsonValue): Result<never, IpcError> => ({
+  status: "error",
+  error: { generic: { code, message, details } },
+});
+
+/** Preset member roles every auto-formed team binds (deterministic). */
+const AUTO_FORM_ROLE_IDS = ["role-auto-planner", "role-auto-worker"] as const;
+
+/** Deterministic slug: keep letters/digits (CJK included), collapse the rest to `-`. */
+const slug = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
 
 export function testDoubleCommands(): CommandSet {
   const cmds: CommandSet = {
@@ -233,6 +253,154 @@ export function testDoubleCommands(): CommandSet {
     },
     async checkCliAgent(_profileId) {
       return ok({ ok: true, versionLine: "fake-cli 1.0.0", error: null });
+    },
+    async listRoles() {
+      return ok([...tdState.roles]);
+    },
+    async upsertRole(role: RoleInput) {
+      if (role.name.trim().length === 0) {
+        return err("role.invalid", "role name must not be empty");
+      }
+      const now = Date.now();
+      // `name` is the idempotency key: an existing role is updated in place.
+      const existing = tdState.roles.find((r) => r.name === role.name);
+      if (existing) {
+        existing.providerId = role.providerId;
+        existing.systemPromptOverride = role.systemPromptOverride;
+        existing.toolAllowlist = [...role.toolAllowlist];
+        existing.temperature = role.temperature;
+        existing.maxTokens = role.maxTokens;
+        existing.params = role.params;
+        existing.updatedAt = now;
+        return ok({ ...existing });
+      }
+      const created: RoleDto = {
+        id: nextId("role"),
+        name: role.name,
+        providerId: role.providerId,
+        systemPromptOverride: role.systemPromptOverride,
+        toolAllowlist: [...role.toolAllowlist],
+        temperature: role.temperature,
+        maxTokens: role.maxTokens,
+        params: role.params,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.roles.push(created);
+      return ok({ ...created });
+    },
+    async deleteRole(roleId) {
+      const idx = tdState.roles.findIndex((r) => r.id === roleId);
+      if (idx < 0) return err("role.not_found", `role#${roleId} not found`);
+      tdState.roles.splice(idx, 1);
+      return ok(null);
+    },
+    async listTeams() {
+      return ok([...tdState.teams]);
+    },
+    async upsertTeam(team: TeamInput) {
+      if (team.name.trim().length === 0) {
+        return err("team.invalid", "team name must not be empty");
+      }
+      if (team.memberRoleIds.length === 0) {
+        return err("team.member_missing", "team needs at least one member role");
+      }
+      const missing = team.memberRoleIds.filter((id) => !tdState.roles.some((r) => r.id === id));
+      if (missing.length > 0) {
+        return errWithDetails(
+          "team.member_missing",
+          `unknown member roles: ${missing.join(", ")}`,
+          { missing },
+        );
+      }
+      const now = Date.now();
+      // `name` is the idempotency key: an existing team is updated in place.
+      const existing = tdState.teams.find((t) => t.name === team.name);
+      if (existing) {
+        existing.topology = team.topology;
+        existing.memberRoleIds = [...team.memberRoleIds];
+        existing.config = team.config;
+        existing.updatedAt = now;
+        return ok({ ...existing });
+      }
+      const created: TeamDto = {
+        id: nextId("team"),
+        name: team.name,
+        topology: team.topology,
+        memberRoleIds: [...team.memberRoleIds],
+        config: team.config,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.teams.push(created);
+      return ok({ ...created });
+    },
+    async deleteTeam(teamId) {
+      const idx = tdState.teams.findIndex((t) => t.id === teamId);
+      if (idx < 0) return err("team.not_found", `team#${teamId} not found`);
+      tdState.teams.splice(idx, 1);
+      return ok(null);
+    },
+    async listWhiteboardNotes(sessionId) {
+      const notes = tdState.whiteboardNotes
+        .filter((n) => n.sessionId === sessionId)
+        .sort((a, b) => a.seq - b.seq);
+      return ok(notes);
+    },
+    async formTeam(task, _sessionId) {
+      const trimmed = task.trim();
+      if (trimmed.length === 0) {
+        return err("task.invalid", "task text must not be empty");
+      }
+      const now = Date.now();
+      // Mirror the real former: the two preset member roles exist before the team row.
+      for (const roleId of AUTO_FORM_ROLE_IDS) {
+        if (!tdState.roles.some((r) => r.id === roleId)) {
+          tdState.roles.push({
+            id: roleId,
+            name: `auto-${roleId === AUTO_FORM_ROLE_IDS[0] ? "planner" : "worker"}`,
+            providerId: null,
+            systemPromptOverride: null,
+            toolAllowlist: [],
+            temperature: null,
+            maxTokens: null,
+            params: {},
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      const n = tdState.teams.filter((t) => t.id.startsWith("auto-team-")).length + 1;
+      const created: TeamDto = {
+        id: `auto-team-${n}`,
+        name: `auto-${slug(trimmed).slice(0, 12)}-${n}`,
+        topology: "group_chat",
+        memberRoleIds: [...AUTO_FORM_ROLE_IDS],
+        config: { max_rounds: 6 },
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.teams.push(created);
+      return ok({ ...created });
+    },
+    async runTeamOnTask(taskId, teamId) {
+      const task = tdState.tasks.find((t) => t.id === taskId);
+      if (task === undefined) return err("task.not_found", `task#${taskId} not found`);
+      if (!tdState.teams.some((t) => t.id === teamId)) {
+        return err("team.not_found", `team#${teamId} not found`);
+      }
+      const run = {
+        id: nextId("run"),
+        taskId,
+        sessionId: task.sessionId ?? nextId("s"),
+        status: "succeeded",
+        heartbeatAt: Date.now(),
+      };
+      tdState.runs.push(run);
+      return ok(run);
+    },
+    async runTeamSession(_sessionId, _teamId, _task) {
+      return ok({ finalOutput: "team ok", converged: true, rounds: 1 });
     },
   };
   return cmds;

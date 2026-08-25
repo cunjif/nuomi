@@ -7,7 +7,9 @@ import { ipc } from "../../lib/ipc/client";
 import { CliAgentsSection } from "./CliAgentsSection";
 import { OnlineAuthToggle } from "./OnlineAuthToggle";
 import { ProviderForm } from "./ProviderForm";
+import { RolesSection } from "./RolesSection";
 import { SensitiveToolsEditor } from "./SensitiveToolsEditor";
+import { TeamsSection } from "./TeamsSection";
 
 /** U13 settings: providers + sensitive tools + evolution authorization. */
 export function SettingsView(): ReactNode {
@@ -60,6 +62,8 @@ export function SettingsView(): ReactNode {
       </div>
       <SensitiveToolsEditor />
       <CliAgentsSection />
+      <RolesSection />
+      <TeamsSection />
       <OnlineAuthToggle />
     </div>
   );

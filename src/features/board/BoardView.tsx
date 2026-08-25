@@ -31,6 +31,36 @@ export function BoardView(): ReactNode {
     onError: (e) => toast.error(`${t("board.moveFailed")}: ${describeError(e)}`),
   });
 
+  const runWithTeamMut = useMutation({
+    mutationFn: ({ taskId, teamId }: { taskId: string; teamId: string }) =>
+      ipc.runTeamOnTask(taskId, teamId),
+    onSuccess: (run, vars) => {
+      void qc.invalidateQueries({ queryKey: ["runs", vars.taskId] });
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      toast.success(t("board.runWithTeamStarted", { runId: run.id }));
+    },
+    onError: (e) => toast.error(`${t("board.runWithTeamFailed")}: ${describeError(e)}`),
+  });
+
+  const autoFormRunMut = useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) => {
+      const task = (tasksQuery.data ?? []).find((x) => x.id === taskId);
+      const text = [task?.title ?? "", task?.description ?? ""].filter(Boolean).join("\n");
+      const team = await ipc.formTeam(text, null);
+      const run = await ipc.runTeamOnTask(taskId, team.id);
+      return { team, run };
+    },
+    onSuccess: ({ team, run }, vars) => {
+      void qc.invalidateQueries({ queryKey: ["runs", vars.taskId] });
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(
+        t("board.autoFormStarted", { team: team.name, members: team.memberRoleIds.length, run: run.id }),
+      );
+    },
+    onError: (e) => toast.error(`${t("board.autoFormFailed")}: ${describeError(e)}`),
+  });
+
   // Global channel keeps the board live (task/run state transitions).
   useDomainEvents([DOMAIN_CHANNEL], (batch) => {
     if (batch.some((e) => e.type.startsWith("task.") || e.type.startsWith("run."))) {
@@ -85,6 +115,8 @@ export function BoardView(): ReactNode {
                   tasks={grouped.get(status) ?? []}
                   onOpenRuns={setRunDrawerTask}
                   onMove={(taskId, next) => moveMut.mutate({ taskId, status: next })}
+                  onRunWithTeam={(taskId, teamId) => runWithTeamMut.mutate({ taskId, teamId })}
+                  onAutoFormRun={(taskId) => autoFormRunMut.mutate({ taskId })}
                 />
               ))}
             </div>

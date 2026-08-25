@@ -10,10 +10,12 @@ interface BoardColumnProps {
   tasks: TaskDto[];
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
+  onRunWithTeam: (taskId: string, teamId: string) => void;
+  onAutoFormRun: (taskId: string) => void;
 }
 
 /** One kanban column = one droppable status bucket. */
-export function BoardColumn({ status, tasks, onOpenRuns, onMove }: BoardColumnProps): ReactNode {
+export function BoardColumn({ status, tasks, onOpenRuns, onMove, onRunWithTeam, onAutoFormRun }: BoardColumnProps): ReactNode {
   const { t } = useTranslation();
   const { setNodeRef, isOver } = useDroppable({ id: status });
   return (
@@ -30,7 +32,14 @@ export function BoardColumn({ status, tasks, onOpenRuns, onMove }: BoardColumnPr
       </h3>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} onOpenRuns={onOpenRuns} onMove={onMove} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            onOpenRuns={onOpenRuns}
+            onMove={onMove}
+            onRunWithTeam={onRunWithTeam}
+            onAutoFormRun={onAutoFormRun}
+          />
         ))}
         {tasks.length === 0 && <p className="px-1 text-xs text-ink-muted">—</p>}
       </div>

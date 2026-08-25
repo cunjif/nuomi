@@ -9,9 +9,12 @@ import type {
   EventDto,
   FileEntryDto,
   ProviderDto,
+  RoleDto,
   ScheduleDto,
   SessionDto,
   TaskDto,
+  TeamDto,
+  WhiteBoardNoteDto,
 } from "./bindings.gen";
 
 interface DoubleState {
@@ -23,6 +26,9 @@ interface DoubleState {
   schedules: ScheduleDto[];
   providers: ProviderDto[];
   agentProfiles: AgentProfileDto[];
+  roles: RoleDto[];
+  teams: TeamDto[];
+  whiteboardNotes: WhiteBoardNoteDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
   /** path → entry; dirs have content === null */
@@ -38,6 +44,9 @@ export const tdState: DoubleState = {
   schedules: [],
   providers: [],
   agentProfiles: [],
+  roles: [],
+  teams: [],
+  whiteboardNotes: [],
   sensitiveTools: null,
   onlineAuthorized: false,
   files: new Map(),
@@ -73,6 +82,9 @@ export function tdReset(): void {
   tdState.schedules.length = 0;
   tdState.providers.length = 0;
   tdState.agentProfiles.length = 0;
+  tdState.roles.length = 0;
+  tdState.teams.length = 0;
+  tdState.whiteboardNotes.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
   tdState.files.clear();

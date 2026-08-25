@@ -89,6 +89,17 @@ export const ipc = {
   deleteAgentProfile: (profileId: string) =>
     unwrap(current.deleteAgentProfile(profileId)),
   checkCliAgent: (profileId: string) => unwrap(current.checkCliAgent(profileId)),
+  listRoles: () => unwrap(current.listRoles()),
+  upsertRole: (role: Parameters<Commands["upsertRole"]>[0]) => unwrap(current.upsertRole(role)),
+  deleteRole: (roleId: string) => unwrap(current.deleteRole(roleId)),
+  listTeams: () => unwrap(current.listTeams()),
+  upsertTeam: (team: Parameters<Commands["upsertTeam"]>[0]) => unwrap(current.upsertTeam(team)),
+  deleteTeam: (teamId: string) => unwrap(current.deleteTeam(teamId)),
+  listWhiteboardNotes: (sessionId: string) => unwrap(current.listWhiteboardNotes(sessionId)),
+  formTeam: (task: string, sessionId: string | null) => unwrap(current.formTeam(task, sessionId)),
+  runTeamOnTask: (taskId: string, teamId: string) => unwrap(current.runTeamOnTask(taskId, teamId)),
+  runTeamSession: (sessionId: string, teamId: string, task: string) =>
+    unwrap(current.runTeamSession(sessionId, teamId, task)),
 };
 
 export type Ipc = typeof ipc;
