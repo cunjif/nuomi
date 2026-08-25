@@ -23,9 +23,10 @@
   4. 同提交内更新前端消费端与 test-double。
 
 ## 事件通道 / Event channel
-- 唯一通道 `event://domain`，payload 为 `DomainEvent` 判别联合：`{ type, taskId?, runId?, seq?, payload }`。
-- 高频流（日志 token、tool_result）只推增量小包；全量历史用命令 + 游标分页查询（`listEvents(runId, cursor)`）。Stream deltas only; history via cursor pagination.
-- 事件必须携带单调递增 `seq`（每 Run 内），前端断线重连按 seq 补拉。Monotonic per-run seq for gap recovery.
+- 多通道命名空间（ADR-0002）：会话级通道 `event://session/{session_id}`（高频增量：thought/tool_call/tool_result/message）+ 全局通道 `event://domain`（低频结构化：task/run 状态迁移、审批、调度触发）。
+- 高频流（日志 token、tool_result）只推增量小包；全量历史用命令 + 游标分页查询（`listEvents(sessionId, afterSeq)`）。Stream deltas only; history via cursor pagination.
+- 会话通道事件必须携带单调递增 `seq`（每 Session 内），前端断线重连按 seq 补拉。Monotonic per-session seq for gap recovery.
+- 每条事件先落 EventRecord 再 emit。Persist before emit.
 
 ## 版本化 / Versioning
 - 只加不改删：新增字段必须给默认值；重命名/删除视为破坏性变更走 ADR。Additive only; renames/removals need an ADR.
