@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light theme (default per html:not(.dark)) */
+  --nuomi-surface: #f5f6f8;
+  --nuomi-surface-raised: #ffffff;
+  --nuomi-surface-overlay: #e8eaef;
+  --nuomi-ink: #1f2430;
+  --nuomi-ink-muted: #5b6572;
+  --nuomi-accent: #3b5bdb;
+  --nuomi-ok: #2f9e44;
+  --nuomi-warn: #b8860b;
+  --nuomi-danger: #c92a2a;
+}
+
+.dark {
+  --nuomi-surface: #1e2229;
+  --nuomi-surface-raised: #262b33;
+  --nuomi-surface-overlay: #2f3540;
+  --nuomi-ink: #e6e6e6;
+  --nuomi-ink-muted: #9aa3ad;
+  --nuomi-accent: #7aa2f7;
+  --nuomi-ok: #9ece6a;
+  --nuomi-warn: #e0af68;
+  --nuomi-danger: #f7768e;
+}
+
+body {
+  @apply bg-surface text-ink font-sans antialiased;
+}
