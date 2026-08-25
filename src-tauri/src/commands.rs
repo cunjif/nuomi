@@ -9,15 +9,18 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
-    AgentProfile, CliFlavor, EventRecord, ProviderConfig, ProviderProtocol, Role, RunState,
-    Schedule, Task, TaskStatus, Team, TeamTopology, WhiteBoardNote,
+    AgentProfile, CliFlavor, EventRecord, Integration, IntegrationKind, ProviderConfig,
+    ProviderProtocol, Role, RunState, Schedule, Task, TaskStatus, Team, TeamTopology,
+    WhiteBoardNote,
 };
 use nuomi_core::evolution::research::{
     online_authorized as core_online_authorized, set_online_authorized,
 };
+use nuomi_core::integrations::OutboundSink;
 use nuomi_core::orchestrator::OrchestratorError;
 use nuomi_core::plugins::approval_gate;
 use nuomi_core::services::parse_schedule;
@@ -1686,6 +1689,352 @@ pub struct TeamRunResultDto {
     pub rounds: usize,
 }
 
+// ---------- integrations (SPEC bots-telemetry-m1 B4) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationKindDto {
+    FeishuBot,
+    QqWebhook,
+    Telemetry,
+}
+
+fn kind_to_dto(kind: IntegrationKind) -> IntegrationKindDto {
+    match kind {
+        IntegrationKind::FeishuBot => IntegrationKindDto::FeishuBot,
+        IntegrationKind::QqWebhook => IntegrationKindDto::QqWebhook,
+        IntegrationKind::Telemetry => IntegrationKindDto::Telemetry,
+    }
+}
+
+fn kind_from_dto(kind: IntegrationKindDto) -> IntegrationKind {
+    match kind {
+        IntegrationKindDto::FeishuBot => IntegrationKind::FeishuBot,
+        IntegrationKindDto::QqWebhook => IntegrationKind::QqWebhook,
+        IntegrationKindDto::Telemetry => IntegrationKind::Telemetry,
+    }
+}
+
+/// IPC-safe integration view. The webhook URL crosses the boundary masked
+/// only (write-only field: stored raw in SQLite per SPEC D5, never read
+/// back); the secret never leaves the process at all.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationDto {
+    pub id: String,
+    pub name: String,
+    pub kind: IntegrationKindDto,
+    pub webhook_url_masked: String,
+    pub events: Vec<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl IntegrationDto {
+    fn from_entity(integration: Integration) -> Self {
+        let raw = webhook_url_of(&integration);
+        Self {
+            id: integration.id,
+            name: integration.name,
+            kind: kind_to_dto(integration.kind),
+            webhook_url_masked: mask_webhook_url(&raw),
+            events: integration.events,
+            enabled: integration.enabled,
+            created_at: integration.created_at,
+            updated_at: integration.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationInput {
+    pub name: String,
+    pub kind: IntegrationKindDto,
+    pub webhook_url: String,
+    /// Feishu signing secret; persisted into `config.secret` for
+    /// `feishu_bot` rows only.
+    pub secret: Option<String>,
+    /// Optional extra headers for generic webhook/telemetry endpoints.
+    pub headers: Option<BTreeMap<String, String>>,
+    /// Trigger-topic whitelist (empty = all domain topics on dispatch).
+    pub events: Vec<String>,
+    pub enabled: bool,
+}
+
+impl IntegrationInput {
+    fn validate(&self) -> Result<(), IpcError> {
+        if self.name.trim().is_empty() {
+            return Err(IpcError::with_details(
+                "integration.invalid",
+                "integration name must not be empty",
+                serde_json::json!({ "reason": "name" }),
+            ));
+        }
+        if !(self.webhook_url.starts_with("http://") || self.webhook_url.starts_with("https://")) {
+            return Err(IpcError::with_details(
+                "integration.invalid",
+                "webhook url must start with http:// or https://",
+                serde_json::json!({ "reason": "webhook_url" }),
+            ));
+        }
+        Ok(())
+    }
+
+    fn build_config(&self) -> serde_json::Value {
+        let mut config = serde_json::json!({ "webhook_url": self.webhook_url });
+        if matches!(self.kind, IntegrationKindDto::FeishuBot) {
+            if let Some(secret) = &self.secret {
+                config["secret"] = serde_json::json!(secret);
+            }
+        }
+        if let Some(headers) = &self.headers {
+            config["headers"] = serde_json::json!(headers);
+        }
+        config
+    }
+}
+
+/// `name` is the idempotency key: an existing integration with the same
+/// name is updated in place (keeping its `id`/`created_at`), otherwise
+/// inserted fresh with a uuid v7 id. The response masks the URL like every
+/// other outbound surface (SPEC D5).
+pub async fn impl_upsert_integration(
+    state: &AppState,
+    input: IntegrationInput,
+) -> Result<IntegrationDto, IpcError> {
+    input.validate()?;
+    let path = state.db_path.clone();
+    let entity = tokio::task::spawn_blocking(move || -> Result<Integration, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        let existing = repos::integrations::list(&db.0)?
+            .into_iter()
+            .find(|i| i.name == input.name);
+        let config = input.build_config();
+        match existing {
+            Some(mut prev) => {
+                prev.kind = kind_from_dto(input.kind);
+                prev.config = config;
+                prev.events = input.events;
+                prev.enabled = input.enabled;
+                prev.updated_at = now;
+                repos::integrations::update(&db.0, &prev)?;
+                Ok(prev)
+            }
+            None => {
+                let fresh = Integration {
+                    id: nuomi_core::domain::new_id(),
+                    name: input.name,
+                    kind: kind_from_dto(input.kind),
+                    config,
+                    events: input.events,
+                    enabled: input.enabled,
+                    created_at: now,
+                    updated_at: now,
+                };
+                repos::integrations::insert(&db.0, &fresh)?;
+                Ok(fresh)
+            }
+        }
+    })
+    .await??;
+    Ok(IntegrationDto::from_entity(entity))
+}
+
+pub async fn impl_list_integrations(state: &AppState) -> Result<Vec<IntegrationDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<Integration>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::integrations::list(&db.0)?)
+    })
+    .await??;
+    Ok(rows.into_iter().map(IntegrationDto::from_entity).collect())
+}
+
+pub async fn impl_delete_integration(
+    state: &AppState,
+    integration_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if !repos::integrations::delete(&db.0, &integration_id)? {
+            return Err(IpcError::new(
+                "integration.not_found",
+                format!("integration#{integration_id} not found"),
+            ));
+        }
+        Ok(())
+    })
+    .await?
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestIntegrationDto {
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+/// Budget for the `test_integration` probe; mirrors the sink-level HTTP
+/// timeout so a wedged endpoint surfaces as `ok:false`, never a hang.
+const INTEGRATION_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Sends ("nuomi test", "integration check") through the row's sink inside
+/// the timeout budget. Failures come back as `ok:false` results — the only
+/// IPC error is an unknown id — and the error text is scrubbed of the full
+/// webhook URL (masked form only, SPEC D5).
+pub async fn impl_test_integration(
+    state: &AppState,
+    integration_id: String,
+) -> Result<TestIntegrationDto, IpcError> {
+    let path = state.db_path.clone();
+    let row = tokio::task::spawn_blocking(move || -> Result<Integration, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        match repos::integrations::get(&db.0, &integration_id) {
+            Ok(row) => Ok(row),
+            Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                "integration.not_found",
+                format!("integration#{integration_id} not found"),
+            )),
+            Err(e) => Err(e.into()),
+        }
+    })
+    .await??;
+
+    let sink = build_shell_sink(&row)?;
+    let raw_url = webhook_url_of(&row);
+    let outcome = tokio::time::timeout(
+        INTEGRATION_TEST_TIMEOUT,
+        sink.send("nuomi test", "integration check"),
+    )
+    .await;
+    match outcome {
+        Ok(Ok(())) => Ok(TestIntegrationDto {
+            ok: true,
+            error: None,
+        }),
+        Ok(Err(e)) => Ok(TestIntegrationDto {
+            ok: false,
+            error: Some(redact_url(&e.to_string(), &raw_url)),
+        }),
+        Err(_elapsed) => Ok(TestIntegrationDto {
+            ok: false,
+            error: Some(format!(
+                "timed out after {}s",
+                INTEGRATION_TEST_TIMEOUT.as_secs()
+            )),
+        }),
+    }
+}
+
+/// Shell-side reconstruction of the core sink dispatch (the core builder is
+/// private): feishu rows carry the optional signing secret from
+/// `config.secret`; generic rows carry optional extra headers.
+fn build_shell_sink(row: &Integration) -> Result<Arc<dyn OutboundSink>, IpcError> {
+    use nuomi_core::integrations::feishu::FeishuSink;
+    use nuomi_core::integrations::webhook::GenericWebhookSink;
+
+    let url = row
+        .config
+        .get("webhook_url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            IpcError::with_details(
+                "integration.invalid",
+                "integration has no webhook_url configured",
+                serde_json::json!({ "reason": "webhook_url" }),
+            )
+        })?;
+    Ok(match row.kind {
+        IntegrationKind::FeishuBot => Arc::new(FeishuSink::new(
+            url,
+            row.config
+                .get("secret")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        )),
+        IntegrationKind::QqWebhook | IntegrationKind::Telemetry => {
+            let mut headers = BTreeMap::new();
+            if let Some(obj) = row
+                .config
+                .get("headers")
+                .and_then(serde_json::Value::as_object)
+            {
+                for (key, value) in obj {
+                    if let Some(s) = value.as_str() {
+                        headers.insert(key.clone(), s.to_string());
+                    }
+                }
+            }
+            Arc::new(GenericWebhookSink::new(row.kind, url, headers))
+        }
+    })
+}
+
+fn webhook_url_of(integration: &Integration) -> String {
+    integration
+        .config
+        .get("webhook_url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Keeps the full webhook URL out of IPC-boundary error text (SPEC D5).
+fn redact_url(message: &str, raw_url: &str) -> String {
+    if raw_url.is_empty() {
+        return message.to_string();
+    }
+    message.replace(raw_url, &mask_webhook_url(raw_url))
+}
+
+/// Masks a webhook URL across the IPC boundary (SPEC D5): `scheme://host`
+/// is kept verbatim, every path segment collapses to its first character
+/// plus `…`, and the last segment additionally keeps its final four
+/// characters — e.g. `https://open.feishu.cn/open-apis/bot/v2/hook/a1b2c3d4x9z8`
+/// → `https://open.feishu.cn/o…/b…/v…/h…/a…x9z8`.
+fn mask_webhook_url(raw: &str) -> String {
+    let Some((scheme, rest)) = raw.split_once("://") else {
+        return String::new();
+    };
+    let (host, path) = match rest.split_once('/') {
+        Some((host, path)) => (host, Some(path)),
+        None => (rest, None),
+    };
+    let base = format!("{scheme}://{host}");
+    let Some(path) = path else {
+        return base;
+    };
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return base;
+    }
+    let last = segments.len() - 1;
+    let mut masked = base;
+    for (idx, segment) in segments.iter().enumerate() {
+        masked.push('/');
+        let chars: Vec<char> = segment.chars().collect();
+        let Some(first) = chars.first() else {
+            continue;
+        };
+        masked.push(*first);
+        masked.push('…');
+        // Keep the tail-4 only when it cannot overlap the leading char.
+        if idx == last && chars.len() > 6 {
+            let tail: String = chars[chars.len() - 4..].iter().collect();
+            masked.push_str(&tail);
+        }
+    }
+    masked
+}
+
 // ---------- DTOs ----------
 
 fn now_ms() -> i64 {
@@ -1843,4 +2192,40 @@ pub async fn impl_set_workspace(state: &AppState, path: String) -> Result<String
         nuomi_core::domain::now_ms(),
     )?;
     Ok(previous.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mask_webhook_url;
+
+    /// SPEC D5 shape: scheme+host kept, per-segment first char, tail-4 of
+    /// the last segment; the raw URL is never recoverable from the result.
+    #[test]
+    fn webhook_url_masking_keeps_host_and_truncates_segments() {
+        let raw = "https://open.feishu.cn/open-apis/bot/v2/hook/a1b2c3d4e5f6x9z8";
+        let masked = mask_webhook_url(raw);
+        assert_eq!(masked, "https://open.feishu.cn/o…/b…/v…/h…/a…x9z8");
+        assert!(!masked.contains("open-apis"));
+        assert!(!masked.contains("a1b2c3d4e5f6"));
+
+        // Short last segment: no overlapping tail duplication.
+        assert_eq!(
+            mask_webhook_url("https://qq.test/gateway/hook"),
+            "https://qq.test/g…/h…"
+        );
+        // No path: host only.
+        assert_eq!(
+            mask_webhook_url("http://localhost:9000"),
+            "http://localhost:9000"
+        );
+        // Trailing slash only: still just the base.
+        assert_eq!(mask_webhook_url("https://x.test/"), "https://x.test");
+        // Non-http scheme (pre-validation) still masks deterministically.
+        assert_eq!(
+            mask_webhook_url("ftp://f.test/a1b2c3d4"),
+            "ftp://f.test/a…c3d4"
+        );
+        // Missing scheme: nothing sensible to reveal.
+        assert_eq!(mask_webhook_url("not-a-url"), "");
+    }
 }

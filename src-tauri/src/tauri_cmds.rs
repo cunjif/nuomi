@@ -424,3 +424,40 @@ pub async fn run_team_session(
 ) -> Result<commands::TeamRunResultDto, IpcError> {
     commands::impl_run_team_session(&state, session_id, team_id, task).await
 }
+
+// ---------- integrations (SPEC bots-telemetry-m1 B4) ----------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_integrations(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::IntegrationDto>, IpcError> {
+    commands::impl_list_integrations(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_integration(
+    state: tauri::State<'_, AppState>,
+    input: commands::IntegrationInput,
+) -> Result<commands::IntegrationDto, IpcError> {
+    commands::impl_upsert_integration(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_integration(
+    state: tauri::State<'_, AppState>,
+    integration_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_integration(&state, integration_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn test_integration(
+    state: tauri::State<'_, AppState>,
+    integration_id: String,
+) -> Result<commands::TestIntegrationDto, IpcError> {
+    commands::impl_test_integration(&state, integration_id).await
+}

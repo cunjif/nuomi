@@ -381,6 +381,38 @@ async runTeamSession(sessionId: string, teamId: string, task: string) : Promise<
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async listIntegrations() : Promise<Result<IntegrationDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_integrations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertIntegration(input: IntegrationInput) : Promise<Result<IntegrationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_integration", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteIntegration(integrationId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_integration", { integrationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async testIntegration(integrationId: string) : Promise<Result<TestIntegrationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("test_integration", { integrationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -404,6 +436,27 @@ export type FileEntryDto = { name: string; isDir: boolean; size: number }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
 export type GitWorktreeDto = { path: string; head: string | null; branch: string | null; isCurrent: boolean }
+/**
+ * IPC-safe integration view. The webhook URL crosses the boundary masked
+ * only (write-only field: stored raw in SQLite per SPEC D5, never read
+ * back); the secret never leaves the process at all.
+ */
+export type IntegrationDto = { id: string; name: string; kind: IntegrationKindDto; webhookUrlMasked: string; events: string[]; enabled: boolean; createdAt: number; updatedAt: number }
+export type IntegrationInput = { name: string; kind: IntegrationKindDto; webhookUrl: string; 
+/**
+ * Feishu signing secret; persisted into `config.secret` for
+ * `feishu_bot` rows only.
+ */
+secret: string | null; 
+/**
+ * Optional extra headers for generic webhook/telemetry endpoints.
+ */
+headers: Partial<{ [key in string]: string }> | null; 
+/**
+ * Trigger-topic whitelist (empty = all domain topics on dispatch).
+ */
+events: string[]; enabled: boolean }
+export type IntegrationKindDto = "feishu_bot" | "qq_webhook" | "telemetry"
 /**
  * Outward-facing error for every command.
  */
@@ -437,6 +490,7 @@ export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds
 config: JsonValue }
 export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
 export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
+export type TestIntegrationDto = { ok: boolean; error: string | null }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
 
 /** tauri-specta globals **/

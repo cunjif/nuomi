@@ -9,6 +9,7 @@
 pub mod commands;
 mod events;
 mod ipc_error;
+pub mod notifier;
 pub mod state;
 mod tauri_cmds;
 
@@ -71,6 +72,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::form_team,
         tauri_cmds::run_team_on_task,
         tauri_cmds::run_team_session,
+        tauri_cmds::list_integrations,
+        tauri_cmds::upsert_integration,
+        tauri_cmds::delete_integration,
+        tauri_cmds::test_integration,
     ])
 }
 
@@ -153,6 +158,10 @@ pub fn run() {
             )
             .spawn();
             app.manage(runner);
+
+            // Notification dispatcher: second broadcast subscriber (next to
+            // the event bridge above) plus telemetry exporters.
+            notifier::spawn(&state);
 
             app.manage(state);
             Ok(())
