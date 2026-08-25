@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { ipc } from "../../lib/ipc/client";
+import { CliAgentsSection } from "./CliAgentsSection";
 import { OnlineAuthToggle } from "./OnlineAuthToggle";
 import { ProviderForm } from "./ProviderForm";
 import { SensitiveToolsEditor } from "./SensitiveToolsEditor";
@@ -58,6 +59,7 @@ export function SettingsView(): ReactNode {
         </AsyncBoundary>
       </div>
       <SensitiveToolsEditor />
+      <CliAgentsSection />
       <OnlineAuthToggle />
     </div>
   );

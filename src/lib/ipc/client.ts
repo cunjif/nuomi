@@ -83,6 +83,12 @@ export const ipc = {
   setOnlineAuthorized: (authorized: boolean) =>
     unwrap(current.setOnlineAuthorized(authorized)),
   getOnlineAuthorized: () => unwrap(current.getOnlineAuthorized()),
+  listAgentProfiles: () => unwrap(current.listAgentProfiles()),
+  upsertAgentProfile: (profile: Parameters<Commands["upsertAgentProfile"]>[0]) =>
+    unwrap(current.upsertAgentProfile(profile)),
+  deleteAgentProfile: (profileId: string) =>
+    unwrap(current.deleteAgentProfile(profileId)),
+  checkCliAgent: (profileId: string) => unwrap(current.checkCliAgent(profileId)),
 };
 
 export type Ipc = typeof ipc;

@@ -4,6 +4,7 @@
  * imported from the generated bindings so drift fails typecheck.
  */
 import type {
+  AgentProfileInput,
   ProviderInput,
   Result,
   ScheduleDto,
@@ -190,6 +191,48 @@ export function testDoubleCommands(): CommandSet {
     },
     async getOnlineAuthorized() {
       return ok(tdState.onlineAuthorized);
+    },
+    async listAgentProfiles() {
+      return ok([...tdState.agentProfiles]);
+    },
+    async upsertAgentProfile(profile: AgentProfileInput) {
+      const now = Date.now();
+      // `name` is the idempotency key: an existing profile is updated in place.
+      const existing = tdState.agentProfiles.find((p) => p.name === profile.name);
+      if (existing) {
+        existing.flavor = profile.flavor;
+        existing.command = profile.command;
+        existing.args = [...profile.args];
+        existing.env = { ...profile.env };
+        existing.workingDir = profile.workingDir;
+        existing.enabled = profile.enabled;
+        existing.updatedAt = now;
+        return ok({ ...existing });
+      }
+      const created = {
+        id: nextId("agent"),
+        name: profile.name,
+        adapter: "cli",
+        flavor: profile.flavor,
+        command: profile.command,
+        args: [...profile.args],
+        env: { ...profile.env },
+        workingDir: profile.workingDir,
+        enabled: profile.enabled,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.agentProfiles.push(created);
+      return ok({ ...created });
+    },
+    async deleteAgentProfile(profileId) {
+      const idx = tdState.agentProfiles.findIndex((p) => p.id === profileId);
+      if (idx < 0) return err("store.not_found", `agentProfile#${profileId} not found`);
+      tdState.agentProfiles.splice(idx, 1);
+      return ok(null);
+    },
+    async checkCliAgent(_profileId) {
+      return ok({ ok: true, versionLine: "fake-cli 1.0.0", error: null });
     },
   };
   return cmds;

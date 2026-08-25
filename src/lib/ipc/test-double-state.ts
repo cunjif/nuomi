@@ -4,6 +4,7 @@
  * drift fails typecheck.
  */
 import type {
+  AgentProfileDto,
   ApprovalDto,
   EventDto,
   FileEntryDto,
@@ -21,6 +22,7 @@ interface DoubleState {
   approvals: ApprovalDto[];
   schedules: ScheduleDto[];
   providers: ProviderDto[];
+  agentProfiles: AgentProfileDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
   /** path → entry; dirs have content === null */
@@ -35,6 +37,7 @@ export const tdState: DoubleState = {
   approvals: [],
   schedules: [],
   providers: [],
+  agentProfiles: [],
   sensitiveTools: null,
   onlineAuthorized: false,
   files: new Map(),
@@ -69,6 +72,7 @@ export function tdReset(): void {
   tdState.approvals.length = 0;
   tdState.schedules.length = 0;
   tdState.providers.length = 0;
+  tdState.agentProfiles.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
   tdState.files.clear();
