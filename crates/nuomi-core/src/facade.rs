@@ -5,6 +5,7 @@
 //! keys are never persisted or logged.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::json;
@@ -72,6 +73,13 @@ struct SessionState {
     /// Rebuilt transcript prefix (populated by `resume`, extended after
     /// every successful run).
     history: Vec<ChatMessage>,
+    /// Live-stream delta ordinal for the active session (1-based, in-memory
+    /// only, reset whenever the session switches). NON-PERSISTENT by design:
+    /// it exists purely so consumers can dedupe replays and restore order
+    /// within one live `session.delta` stream. The authoritative ordering seq
+    /// for durable rows stays the per-aggregate `seq` assigned by the
+    /// `events` table (`repos::events::append`) — the two never mix.
+    delta_seq: Arc<AtomicU64>,
 }
 
 /// A booted kernel bound to one database and one provider.
@@ -146,6 +154,7 @@ impl NuomiKernel {
             state: Mutex::new(SessionState {
                 session_id,
                 history: Vec::new(),
+                delta_seq: Arc::new(AtomicU64::new(0)),
             }),
         })
     }
@@ -170,17 +179,24 @@ impl NuomiKernel {
     pub async fn run_task(&self, task: &str) -> CoreResult<LoopRunResult> {
         let mut state = self.state.lock().await;
         let session_id_for_delta = state.session_id.clone();
+        let delta_counter = state.delta_seq.clone();
         // Bridge streaming deltas onto the kernel bus so the shell's event
         // bridge can forward them on `event://session/{id}` (ADR-0002).
+        //
+        // The injected `seq` is a NON-PERSISTENT live-stream ordinal (1-based,
+        // in-memory counter reset per session). It lets the frontend dedupe
+        // replayed deltas and restore ordering within one live stream; it has
+        // no relationship to the durable `seq` of rows in the `events` table.
         let user_cb = self.delta_cb.clone();
         let ctx = self.ctx.clone();
         let delta_bridge: Option<DeltaCallback> = Some(Arc::new(move |delta: String| {
+            let seq = delta_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(cb) = &user_cb {
                 cb(delta.clone());
             }
             ctx.publish(crate::harness::Event::new(
                 "session.delta",
-                serde_json::json!({ "sessionId": session_id_for_delta, "text": delta }),
+                serde_json::json!({ "sessionId": session_id_for_delta, "text": delta, "seq": seq }),
             ));
         }));
         let engine = LoopEngine::new(
@@ -207,9 +223,34 @@ impl NuomiKernel {
 
         // Persist only the new messages — replayed history is already in
         // the append-only log.
-        self.persist_transcript(&state.session_id, &result.transcript[history_len..])
+        let appended = self
+            .persist_transcript(&state.session_id, &result.transcript[history_len..])
             .await?;
         state.history = result.transcript.clone();
+
+        // Publish what was just persisted (iron rule: persist first, then
+        // emit). Each record rides the session channel carrying its
+        // AUTHORITATIVE `seq` — the per-aggregate `events`-table seq used for
+        // gap recovery via `listEvents(afterSeq)` — which is a different,
+        // unrelated number from the live delta ordinal above. Assistant
+        // messages additionally carry `deltaTo`: the live-delta high-water
+        // mark this answer covers, so the UI can swap buffer→full text and
+        // retire exactly that delta range in one step.
+        let total_deltas = state.delta_seq.load(Ordering::Relaxed);
+        for rec in &appended {
+            let mut body = rec.payload.clone();
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("sessionId".into(), json!(state.session_id));
+                obj.insert("seq".into(), json!(rec.seq));
+                let is_assistant_message = rec.kind == "message"
+                    && rec.payload.get("role").and_then(|r| r.as_str()) == Some("assistant");
+                if is_assistant_message {
+                    obj.insert("deltaTo".into(), json!(total_deltas));
+                }
+            }
+            self.ctx
+                .publish(crate::harness::Event::new("session.message", body));
+        }
         Ok(result)
     }
 
@@ -231,6 +272,8 @@ impl NuomiKernel {
         let mut state = self.state.lock().await;
         state.session_id = session_id.to_string();
         state.history = history;
+        // Different live stream ⇒ restart the non-persistent delta ordinal.
+        state.delta_seq = Arc::new(AtomicU64::new(0));
         Ok(())
     }
 
@@ -256,6 +299,8 @@ impl NuomiKernel {
         let mut state = self.state.lock().await;
         state.session_id = id.clone();
         state.history = Vec::new();
+        // Fresh session ⇒ the live delta ordinal restarts at 1.
+        state.delta_seq = Arc::new(AtomicU64::new(0));
         Ok(id)
     }
 
@@ -274,48 +319,49 @@ impl NuomiKernel {
         &self,
         session_id: &str,
         transcript: &[ChatMessage],
-    ) -> CoreResult<()> {
+    ) -> CoreResult<Vec<EventRecord>> {
         let path = self.db_path.clone();
         let sid = session_id.to_string();
         let messages = transcript.to_vec();
-        tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
+        tokio::task::spawn_blocking(move || -> Result<Vec<EventRecord>, CoreError> {
             let db = Db::open(&path)?;
             let conn = &db.0;
             let now = now_ms();
+            let mut appended = Vec::new();
             for m in &messages {
                 match m.role {
                     MessageRole::User => {
-                        repos::events::append(
+                        appended.push(repos::events::append(
                             conn,
                             "session",
                             &sid,
                             "message",
                             &json!({ "role": "user", "content": m.content }),
                             now,
-                        )?;
+                        )?);
                     }
                     MessageRole::Assistant => {
                         for call in &m.tool_calls {
-                            repos::events::append(
+                            appended.push(repos::events::append(
                                 conn,
                                 "session",
                                 &sid,
                                 "tool_call",
                                 &json!({ "tool": call.name, "arguments": call.arguments }),
                                 now,
-                            )?;
+                            )?);
                         }
-                        repos::events::append(
+                        appended.push(repos::events::append(
                             conn,
                             "session",
                             &sid,
                             "message",
                             &json!({ "role": "assistant", "content": m.content }),
                             now,
-                        )?;
+                        )?);
                     }
                     MessageRole::Tool => {
-                        repos::events::append(
+                        appended.push(repos::events::append(
                             conn,
                             "session",
                             &sid,
@@ -325,17 +371,16 @@ impl NuomiKernel {
                                 "content": m.content,
                             }),
                             now,
-                        )?;
+                        )?);
                     }
                     MessageRole::System => {}
                 }
             }
             repos::sessions::touch(conn, &sid, now)?;
-            Ok(())
+            Ok(appended)
         })
         .await
-        .map_err(join_err)??;
-        Ok(())
+        .map_err(join_err)?
     }
 }
 
@@ -481,5 +526,110 @@ mod tests {
         // History was reset with the fresh session.
         let result = kernel.run_task("fresh start").await.unwrap();
         assert_eq!(result.transcript.len(), 2);
+    }
+
+    /// Drains `session.delta` payload seqs observed on the kernel bus.
+    async fn delta_seqs(
+        rx: &mut tokio::sync::broadcast::Receiver<crate::harness::Event>,
+    ) -> Vec<u64> {
+        let mut seqs = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if ev.topic == "session.delta" {
+                seqs.push(
+                    ev.payload
+                        .get("seq")
+                        .and_then(|s| s.as_u64())
+                        .unwrap_or_else(|| panic!("delta without seq: {:?}", ev.payload)),
+                );
+            }
+        }
+        seqs
+    }
+
+    #[tokio::test]
+    async fn live_delta_seq_is_strictly_increasing_within_a_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let kernel = NuomiKernel::boot(fake_config(dir.path().join("k.db")))
+            .await
+            .unwrap();
+        let mut rx = kernel.context().subscribe();
+
+        // Two runs in the SAME session: the counter continues across runs.
+        kernel.run_task("one").await.unwrap();
+        kernel.run_task("two").await.unwrap();
+        assert_eq!(delta_seqs(&mut rx).await, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn new_session_resets_live_delta_counter() {
+        let dir = tempfile::tempdir().unwrap();
+        let kernel = NuomiKernel::boot(NuomiConfig::with_fake_provider(
+            dir.path().join("k.db"),
+            vec![
+                FakeLlm::response("first answer"),
+                FakeLlm::response("second answer"),
+            ],
+        ))
+        .await
+        .unwrap();
+        let mut rx = kernel.context().subscribe();
+
+        kernel.run_task("one").await.unwrap();
+        assert_eq!(delta_seqs(&mut rx).await, vec![1]);
+
+        kernel.new_session().await.unwrap();
+        kernel.run_task("two").await.unwrap();
+        // Counter restarted with the fresh session (non-persistent ordinal).
+        assert_eq!(delta_seqs(&mut rx).await, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn persisted_message_events_carry_authoritative_seq_distinct_from_delta_ordinal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("k.db");
+        let kernel = NuomiKernel::boot(fake_config(db_path.clone()))
+            .await
+            .unwrap();
+        let sid = kernel.session_id().await;
+        let mut rx = kernel.context().subscribe();
+
+        kernel.run_task("hello").await.unwrap();
+
+        // The fake provider streams exactly one TextDelta per response, so the
+        // live ordinal is 1 while the assistant row's persisted seq is 2 —
+        // proving the two numbering spaces are independent by construction.
+        let mut messages = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if ev.topic == "session.message" {
+                messages.push(ev.payload);
+            }
+        }
+        let user = messages
+            .iter()
+            .find(|p| p["role"] == "user")
+            .expect("user message published");
+        let assistant = messages
+            .iter()
+            .find(|p| p["role"] == "assistant")
+            .expect("assistant message published");
+        assert_eq!(user["sessionId"], json!(sid));
+        assert_eq!(user["seq"], 1); // authoritative events-table seq
+        assert_eq!(user.get("deltaTo"), None); // only assistant answers cover deltas
+
+        assert_eq!(assistant["seq"], 2);
+        assert_eq!(
+            assistant["deltaTo"], 1,
+            "deltaTo is the live-delta high-water mark, not the persisted seq"
+        );
+
+        // Cross-check the published seqs against the durable rows.
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let rows = repos::events::list_by_aggregate(&conn, "session", &sid, None).unwrap();
+        assert_eq!(rows[0].seq, user["seq"].as_i64().unwrap());
+        assert_eq!(rows[1].seq, assistant["seq"].as_i64().unwrap());
+        assert_ne!(
+            rows[1].seq as u64, 1,
+            "persisted seq must not be confused with the live delta ordinal"
+        );
     }
 }
