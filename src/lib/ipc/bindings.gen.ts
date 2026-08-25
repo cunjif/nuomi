@@ -269,6 +269,38 @@ async setWorkspace(path: string) : Promise<Result<string, IpcError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async listAgentProfiles() : Promise<Result<AgentProfileDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_agent_profiles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertAgentProfile(profile: AgentProfileInput) : Promise<Result<AgentProfileDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_agent_profile", { profile }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteAgentProfile(profileId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_agent_profile", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async checkCliAgent(profileId: string) : Promise<Result<CliAgentCheckDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_cli_agent", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -282,7 +314,11 @@ async setWorkspace(path: string) : Promise<Result<string, IpcError>> {
 
 /** user-defined types **/
 
+export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; createdAt: number; updatedAt: number }
+export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
+export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
+export type CliFlavorDto = "claude_code" | "codex" | "plain"
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
 export type GitCommitDto = { hash: string; subject: string; author: string }

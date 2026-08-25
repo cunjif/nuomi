@@ -297,3 +297,38 @@ pub async fn set_workspace(
 ) -> Result<String, IpcError> {
     commands::impl_set_workspace(&state, path).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_agent_profiles(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::AgentProfileDto>, IpcError> {
+    commands::impl_list_agent_profiles(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_agent_profile(
+    state: tauri::State<'_, AppState>,
+    profile: commands::AgentProfileInput,
+) -> Result<commands::AgentProfileDto, IpcError> {
+    commands::impl_upsert_agent_profile(&state, profile).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_agent_profile(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_agent_profile(&state, profile_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn check_cli_agent(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<commands::CliAgentCheckDto, IpcError> {
+    commands::impl_check_cli_agent(&state, profile_id).await
+}

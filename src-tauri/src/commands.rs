@@ -6,18 +6,23 @@
 //! `impl_*` free functions are testable without a Tauri runtime.
 
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::process::Stdio;
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
-    EventRecord, ProviderConfig, ProviderProtocol, RunState, Schedule, Task, TaskStatus,
+    AgentProfile, CliFlavor, EventRecord, ProviderConfig, ProviderProtocol, RunState, Schedule,
+    Task, TaskStatus,
 };
 use nuomi_core::evolution::research::{
     online_authorized as core_online_authorized, set_online_authorized,
 };
 use nuomi_core::plugins::approval_gate;
 use nuomi_core::services::parse_schedule;
-use nuomi_core::store::{migrations, repos, Db};
+use nuomi_core::store::{migrations, repos, Db, StoreError};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::{ChildStderr, ChildStdout};
 
 use crate::ipc_error::IpcError;
 use crate::state::AppState;
@@ -700,6 +705,345 @@ pub async fn impl_set_online_authorized(
 pub async fn impl_get_online_authorized(state: &AppState) -> Result<bool, IpcError> {
     let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
     Ok(core_online_authorized(&mem).await)
+}
+
+// ---------- cli agents (SPEC cli-agents-m1 C4) ----------
+
+/// Probe budget for `check_cli_agent` (`--version` run).
+const CLI_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Upper bound for stderr excerpts embedded in check results.
+const CHECK_STDERR_MAX_CHARS: usize = 300;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CliFlavorDto {
+    ClaudeCode,
+    Codex,
+    Plain,
+}
+
+fn flavor_to_dto(f: CliFlavor) -> CliFlavorDto {
+    match f {
+        CliFlavor::ClaudeCode => CliFlavorDto::ClaudeCode,
+        CliFlavor::Codex => CliFlavorDto::Codex,
+        CliFlavor::Plain => CliFlavorDto::Plain,
+    }
+}
+
+fn flavor_from_dto(f: CliFlavorDto) -> CliFlavor {
+    match f {
+        CliFlavorDto::ClaudeCode => CliFlavor::ClaudeCode,
+        CliFlavorDto::Codex => CliFlavor::Codex,
+        CliFlavorDto::Plain => CliFlavor::Plain,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileDto {
+    pub id: String,
+    pub name: String,
+    pub adapter: String,
+    pub flavor: CliFlavorDto,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub working_dir: Option<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl TryFrom<AgentProfile> for AgentProfileDto {
+    type Error = IpcError;
+
+    fn try_from(p: AgentProfile) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: p.id,
+            name: p.name,
+            adapter: p.adapter,
+            flavor: flavor_to_dto(p.flavor),
+            command: p.command,
+            args: decode_string_array(p.args)?,
+            env: decode_string_map(p.env)?,
+            working_dir: p.working_dir,
+            enabled: p.enabled,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+        })
+    }
+}
+
+fn decode_string_array(value: serde_json::Value) -> Result<Vec<String>, IpcError> {
+    serde_json::from_value(value).map_err(|e| {
+        IpcError::new(
+            "agent_profile.invalid",
+            format!("args must be a JSON array of strings: {e}"),
+        )
+    })
+}
+
+fn decode_string_map(value: serde_json::Value) -> Result<BTreeMap<String, String>, IpcError> {
+    serde_json::from_value(value).map_err(|e| {
+        IpcError::new(
+            "agent_profile.invalid",
+            format!("env must be a JSON object of strings: {e}"),
+        )
+    })
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileInput {
+    pub name: String,
+    pub flavor: CliFlavorDto,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub working_dir: Option<String>,
+    pub enabled: bool,
+}
+
+impl AgentProfileInput {
+    fn validate(&self) -> Result<(), IpcError> {
+        if self.name.trim().is_empty() {
+            return Err(IpcError::new(
+                "agent_profile.invalid",
+                "agent profile name must not be empty",
+            ));
+        }
+        if self.command.trim().is_empty() {
+            return Err(IpcError::new(
+                "agent_profile.invalid",
+                "agent profile command must not be empty",
+            ));
+        }
+        Ok(())
+    }
+
+    fn into_entity(self, id: String, created_at: i64, updated_at: i64) -> AgentProfile {
+        AgentProfile {
+            id,
+            name: self.name,
+            adapter: "cli".into(),
+            flavor: flavor_from_dto(self.flavor),
+            command: self.command,
+            args: serde_json::json!(self.args),
+            env: serde_json::json!(self.env),
+            working_dir: self.working_dir,
+            enabled: self.enabled,
+            created_at,
+            updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CliAgentCheckDto {
+    pub ok: bool,
+    pub version_line: Option<String>,
+    pub error: Option<String>,
+}
+
+fn failed_check(message: String) -> CliAgentCheckDto {
+    CliAgentCheckDto {
+        ok: false,
+        version_line: None,
+        error: Some(message),
+    }
+}
+
+fn truncate_chars(raw: &str, max_chars: usize) -> String {
+    if raw.chars().count() <= max_chars {
+        raw.to_string()
+    } else {
+        raw.chars().take(max_chars).collect()
+    }
+}
+
+/// Drains probe pipes so a chatty `--version` cannot deadlock `wait()`;
+/// returns the first non-empty stdout line plus the truncated stderr.
+async fn collect_probe_output(
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+) -> (Option<String>, String) {
+    let mut first_line = None;
+    if let Some(out) = stdout {
+        let mut reader = BufReader::new(out);
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            match reader.read_line(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let trimmed = buf.trim();
+                    if !trimmed.is_empty() {
+                        first_line = Some(trimmed.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let mut err_text = String::new();
+    if let Some(mut err) = stderr {
+        // Errors while draining are irrelevant — the exit status decides.
+        let _ = err.read_to_string(&mut err_text).await;
+    }
+    (
+        first_line,
+        truncate_chars(&err_text, CHECK_STDERR_MAX_CHARS),
+    )
+}
+
+pub async fn impl_list_agent_profiles(state: &AppState) -> Result<Vec<AgentProfileDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<AgentProfile>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::agent_profiles::list(&db.0)?)
+    })
+    .await??;
+    rows.into_iter().map(AgentProfileDto::try_from).collect()
+}
+
+/// `name` is the idempotency key: an existing profile with the same name is
+/// updated in place (keeping its `id`/`created_at`), otherwise inserted fresh.
+pub async fn impl_upsert_agent_profile(
+    state: &AppState,
+    profile: AgentProfileInput,
+) -> Result<AgentProfileDto, IpcError> {
+    profile.validate()?;
+    let path = state.db_path.clone();
+    let entity = tokio::task::spawn_blocking(move || -> Result<AgentProfile, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        let existing = repos::agent_profiles::list(&db.0)?
+            .into_iter()
+            .find(|p| p.name == profile.name);
+        match existing {
+            Some(mut prev) => {
+                prev.flavor = flavor_from_dto(profile.flavor);
+                prev.command = profile.command;
+                prev.args = serde_json::json!(profile.args);
+                prev.env = serde_json::json!(profile.env);
+                prev.working_dir = profile.working_dir;
+                prev.enabled = profile.enabled;
+                prev.updated_at = now;
+                repos::agent_profiles::update(&db.0, &prev)?;
+                Ok(prev)
+            }
+            None => {
+                let fresh = profile.into_entity(nuomi_core::domain::new_id(), now, now);
+                repos::agent_profiles::insert(&db.0, &fresh)?;
+                Ok(fresh)
+            }
+        }
+    })
+    .await??;
+    AgentProfileDto::try_from(entity)
+}
+
+pub async fn impl_delete_agent_profile(
+    state: &AppState,
+    profile_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if !repos::agent_profiles::delete(&db.0, &profile_id)? {
+            return Err(IpcError::new(
+                "agent_profile.not_found",
+                format!("agent_profile#{profile_id} not found"),
+            ));
+        }
+        Ok(())
+    })
+    .await?
+}
+
+/// Availability probe: runs the stored command with `--version` (argv array,
+/// no allowlist — the check exists precisely to confirm executability).
+/// The child is `kill_on_drop(true)` with stdin nulled and the whole run is
+/// capped at [`CLI_PROBE_TIMEOUT`]; failures surface as `ok:false` results,
+/// never as IPC errors (except unknown profile ids).
+pub async fn impl_check_cli_agent(
+    state: &AppState,
+    profile_id: String,
+) -> Result<CliAgentCheckDto, IpcError> {
+    let path = state.db_path.clone();
+    let profile = tokio::task::spawn_blocking(move || -> Result<AgentProfile, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        match repos::agent_profiles::get(&db.0, &profile_id) {
+            Ok(p) => Ok(p),
+            Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                "agent_profile.not_found",
+                format!("agent_profile#{profile_id} not found"),
+            )),
+            Err(e) => Err(e.into()),
+        }
+    })
+    .await??;
+
+    let mut cmd = tokio::process::Command::new(&profile.command);
+    cmd.arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            return Ok(failed_check(format!(
+                "failed to spawn {}: {e}",
+                profile.command
+            )))
+        }
+    };
+    // Drain pipes concurrently so a chatty process cannot deadlock `wait()`.
+    let reader = tokio::spawn(collect_probe_output(
+        child.stdout.take(),
+        child.stderr.take(),
+    ));
+
+    match tokio::time::timeout(CLI_PROBE_TIMEOUT, child.wait()).await {
+        Err(_elapsed) => {
+            let _ = child.kill().await;
+            reader.abort();
+            Ok(failed_check(format!(
+                "timeout after {}s",
+                CLI_PROBE_TIMEOUT.as_secs()
+            )))
+        }
+        Ok(Err(e)) => {
+            reader.abort();
+            Ok(failed_check(format!("wait failed: {e}")))
+        }
+        Ok(Ok(status)) => {
+            let (version_line, stderr_text) = reader.await.unwrap_or((None, String::new()));
+            if !status.success() {
+                return Ok(failed_check(format!(
+                    "{} exited with {status}; stderr: {stderr_text}",
+                    profile.command
+                )));
+            }
+            match version_line {
+                Some(line) => Ok(CliAgentCheckDto {
+                    ok: true,
+                    version_line: Some(line),
+                    error: None,
+                }),
+                None => Ok(failed_check(format!(
+                    "no version output on stdout; stderr: {stderr_text}"
+                ))),
+            }
+        }
+    }
 }
 
 // ---------- DTOs ----------

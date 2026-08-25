@@ -57,6 +57,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::get_online_authorized,
         tauri_cmds::get_workspace,
         tauri_cmds::set_workspace,
+        tauri_cmds::list_agent_profiles,
+        tauri_cmds::upsert_agent_profile,
+        tauri_cmds::delete_agent_profile,
+        tauri_cmds::check_cli_agent,
     ])
 }
 
