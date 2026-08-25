@@ -156,6 +156,11 @@ impl NuomiKernel {
         self
     }
 
+    /// Kernel event-bus access (used by the Tauri shell event bridge).
+    pub fn context(&self) -> &Context {
+        &self.ctx
+    }
+
     pub async fn session_id(&self) -> String {
         self.state.lock().await.session_id.clone()
     }
@@ -164,6 +169,20 @@ impl NuomiKernel {
     /// as append-only session events, and extends the in-memory history.
     pub async fn run_task(&self, task: &str) -> CoreResult<LoopRunResult> {
         let mut state = self.state.lock().await;
+        let session_id_for_delta = state.session_id.clone();
+        // Bridge streaming deltas onto the kernel bus so the shell's event
+        // bridge can forward them on `event://session/{id}` (ADR-0002).
+        let user_cb = self.delta_cb.clone();
+        let ctx = self.ctx.clone();
+        let delta_bridge: Option<DeltaCallback> = Some(Arc::new(move |delta: String| {
+            if let Some(cb) = &user_cb {
+                cb(delta.clone());
+            }
+            ctx.publish(crate::harness::Event::new(
+                "session.delta",
+                serde_json::json!({ "sessionId": session_id_for_delta, "text": delta }),
+            ));
+        }));
         let engine = LoopEngine::new(
             self.provider.clone(),
             LoopConfig {
@@ -171,7 +190,7 @@ impl NuomiKernel {
                 ..LoopConfig::default()
             },
         )
-        .with_delta_callback(self.delta_cb.clone());
+        .with_delta_callback(delta_bridge);
 
         let history = std::mem::take(&mut state.history);
         let history_len = history.len();
