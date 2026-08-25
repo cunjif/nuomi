@@ -308,3 +308,46 @@ pub struct AgentProfile {
     pub created_at: i64,
     pub updated_at: i64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationKind {
+    FeishuBot,
+    QqWebhook,
+    Telemetry,
+}
+
+impl IntegrationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IntegrationKind::FeishuBot => "feishu_bot",
+            IntegrationKind::QqWebhook => "qq_webhook",
+            IntegrationKind::Telemetry => "telemetry",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<IntegrationKind> {
+        match s {
+            "feishu_bot" => Some(IntegrationKind::FeishuBot),
+            "qq_webhook" => Some(IntegrationKind::QqWebhook),
+            "telemetry" => Some(IntegrationKind::Telemetry),
+            _ => None,
+        }
+    }
+}
+
+/// An outbound integration endpoint: bot webhook or telemetry receiver
+/// (`integrations` table, migration 0004). `config` carries endpoint fields
+/// such as `webhook_url`, `secret` (feishu) and `headers`; `events` lists the
+/// bus topics the integration subscribes to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Integration {
+    pub id: String,
+    pub name: String,
+    pub kind: IntegrationKind,
+    pub config: serde_json::Value,
+    pub events: Vec<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}

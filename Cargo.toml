@@ -37,6 +37,11 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 bytes = "1"
 
+# outbound webhook signing (bots-telemetry-m1)
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
 # misc
 keyring = "3"
 

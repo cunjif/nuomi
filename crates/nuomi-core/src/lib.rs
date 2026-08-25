@@ -7,6 +7,7 @@
 //! - `providers`: provider clients + master-slave orchestration
 //! - `orchestrator`: role/team executors (pipeline, router, group chat, whiteboard)
 //! - `services`: UI-M1 domain services (workspace sandbox, git, scheduler)
+//! - `integrations`: outbound bots + telemetry sinks (bots-telemetry-m1)
 //! - `store`: SQLite repositories + migrations runner
 //! - `evolution`: self-evolution (trajectory aggregation, prompt versioning, research)
 
@@ -16,6 +17,7 @@ pub mod error;
 pub mod evolution;
 pub mod facade;
 pub mod harness;
+pub mod integrations;
 pub mod orchestrator;
 pub mod plugins;
 pub mod providers;

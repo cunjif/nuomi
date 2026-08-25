@@ -2,6 +2,7 @@
 
 pub mod agent_profiles;
 pub mod events;
+pub mod integrations;
 pub mod memory;
 pub mod prompts;
 pub mod providers;
