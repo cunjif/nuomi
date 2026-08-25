@@ -21,7 +21,7 @@ USAGE:
   nuomi resume <session-id> \"<new input>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
   nuomi repl   [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
 
-REPL commands: /new  /sessions  /exit
+REPL commands: /new  /sessions  /resume <session-id>  /exit
 API key is read from the NUOMI_API_KEY environment variable.";
 
 /// Shared connection options for all subcommands.
@@ -222,8 +222,28 @@ pub async fn handle_repl_line(
             }
             Ok(ReplAction::Continue)
         }
+        other if other.starts_with("/resume") => {
+            let id = other.split_whitespace().nth(1).unwrap_or_default();
+            if id.is_empty() {
+                writeln!(out, "usage: /resume <session-id>")?;
+                return Ok(ReplAction::Continue);
+            }
+            match kernel.resume(id).await {
+                Ok(()) => {
+                    writeln!(out, "resumed {id}")?;
+                    Ok(ReplAction::Continue)
+                }
+                Err(e) => {
+                    writeln!(out, "error: {e}")?;
+                    Ok(ReplAction::Continue)
+                }
+            }
+        }
         other if other.starts_with('/') => {
-            writeln!(out, "unknown command: {other} (try /new /sessions /exit)")?;
+            writeln!(
+                out,
+                "unknown command: {other} (try /new /sessions /resume <id> /exit)"
+            )?;
             Ok(ReplAction::Continue)
         }
         task => match kernel.run_task(task).await {
@@ -247,7 +267,7 @@ pub async fn handle_repl_line(
 /// point prints `[cancelled]`; a Ctrl+C during a running task aborts it and
 /// drops its resources (AC18).
 async fn repl_interactive(kernel: NuomiKernel) -> anyhow::Result<i32> {
-    println!("nuomi REPL — commands: /new /sessions /exit");
+    println!("nuomi REPL — commands: /new /sessions /resume <id> /exit");
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     tokio::task::spawn_blocking(move || {
         let stdin = std::io::stdin();
@@ -381,6 +401,69 @@ mod tests {
         assert_eq!(
             parse_protocol(Some("anthropic")),
             ProviderProtocol::AnthropicCompatible
+        );
+    }
+
+    #[tokio::test]
+    async fn repl_resume_switches_session_and_continues_transcript() {
+        use nuomi_core::facade::NuomiConfig;
+        use nuomi_core::providers::{ChatResponse, FakeLlm};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("r.db");
+        let kernel = NuomiKernel::boot(NuomiConfig::with_fake_provider(
+            db,
+            vec![
+                FakeLlm::response("first answer"),
+                ChatResponse {
+                    content: "continued answer".into(),
+                    ..ChatResponse::default()
+                },
+            ],
+        ))
+        .await
+        .unwrap();
+        let original = kernel.session_id().await;
+        kernel.run_task("hello").await.unwrap();
+
+        // Start a fresh session, then resume the original via the REPL command.
+        let mut out: Vec<u8> = Vec::new();
+        handle_repl_line(&kernel, "/new", &mut out).await.unwrap();
+        let action = handle_repl_line(&kernel, &format!("/resume {original}"), &mut out)
+            .await
+            .unwrap();
+        assert_eq!(action, ReplAction::Continue);
+        let echoed = String::from_utf8_lossy(&out).to_string();
+        assert!(echoed.contains(&format!("resumed {original}")), "{echoed}");
+
+        // The next task continues on top of the resumed history.
+        let result = kernel.run_task("more").await.unwrap();
+        assert_eq!(result.transcript.len(), 4); // u/a from turn 1 + new u/a
+    }
+
+    #[tokio::test]
+    async fn repl_resume_without_id_prints_usage_and_unknown_commands_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let kernel = NuomiKernel::boot(nuomi_core::facade::NuomiConfig::with_fake_provider(
+            dir.path().join("x.db"),
+            vec![],
+        ))
+        .await
+        .unwrap();
+        let mut out: Vec<u8> = Vec::new();
+        handle_repl_line(&kernel, "/resume", &mut out)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&out).contains("usage: /resume"));
+
+        let mut out2: Vec<u8> = Vec::new();
+        handle_repl_line(&kernel, "/frobnicate", &mut out2)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&out2).contains("/resume <id>"),
+            "{}",
+            String::from_utf8_lossy(&out2)
         );
     }
 }
