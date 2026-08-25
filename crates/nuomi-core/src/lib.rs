@@ -5,6 +5,7 @@
 //! - `harness`: plugin kernel (plugin registry, context, event bus)
 //! - `providers`: provider clients + master-slave orchestration
 //! - `orchestrator`: role/team executors (pipeline, router, group chat, whiteboard)
+//! - `services`: UI-M1 domain services (workspace sandbox, git, scheduler)
 //! - `store`: SQLite repositories + migrations runner
 //! - `evolution`: self-evolution (trajectory aggregation, prompt versioning, research)
 
@@ -16,6 +17,7 @@ pub mod harness;
 pub mod orchestrator;
 pub mod plugins;
 pub mod providers;
+pub mod services;
 pub mod store;
 
 pub use error::{CoreError, CoreResult};

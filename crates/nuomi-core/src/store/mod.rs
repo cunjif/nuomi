@@ -25,6 +25,13 @@ pub enum StoreError {
 
     #[error("not found: {entity}#{id}")]
     NotFound { entity: &'static str, id: String },
+
+    #[error("conflict on {entity}#{id}: expected status '{expected}'")]
+    Conflict {
+        entity: &'static str,
+        id: String,
+        expected: String,
+    },
 }
 
 /// A handle to a SQLite connection guarded for blocking use inside

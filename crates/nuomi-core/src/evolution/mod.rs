@@ -3,6 +3,7 @@
 
 pub mod reflection;
 pub mod research;
+pub mod scheduler;
 pub mod trajectory;
 pub mod versioning;
 
@@ -11,6 +12,7 @@ pub use research::{
     online_authorized, set_online_authorized, ResearchAllowlist, ResearchFetcher,
     ResearchReportEntry, ResearchScheduler,
 };
+pub use scheduler::PeriodicResearch;
 pub use trajectory::{TrajectoryAggregator, TrajectorySummary};
 pub use versioning::PromptVersionManager;
 

@@ -15,13 +15,24 @@ use crate::store::StoreError;
 #[derive(Clone)]
 pub struct WhiteBoardService {
     db_path: Arc<str>,
+    /// Optional kernel bus: when set, every note is mirrored as a
+    /// `session.whiteboard` event (ADR-0002 session channel) so live UI
+    /// views update without polling.
+    bus: Option<crate::harness::EventBus>,
 }
 
 impl WhiteBoardService {
     pub fn new(db_path: impl Into<Arc<str>>) -> Self {
         Self {
             db_path: db_path.into(),
+            bus: None,
         }
+    }
+
+    /// Attaches the kernel event bus for live mirroring.
+    pub fn with_bus(mut self, bus: crate::harness::EventBus) -> Self {
+        self.bus = Some(bus);
+        self
     }
 
     /// Runs `f` with a fresh blocking connection to the shared database.
@@ -60,9 +71,39 @@ impl WhiteBoardService {
         };
         self.with_db({
             let note = note.clone();
-            move |c| repos::whiteboard::append(c, &note)
+            move |c| {
+                repos::whiteboard::append(c, &note)?;
+                // Mirror into the append-only session log so history replay
+                // (listEvents) sees whiteboard notes alongside messages.
+                repos::events::append(
+                    c,
+                    "session",
+                    &note.session_id,
+                    "whiteboard",
+                    &serde_json::json!({
+                        "sessionId": note.session_id,
+                        "noteId": note.id,
+                        "authorRoleId": note.author_role_id,
+                        "noteType": note.note_type,
+                        "body": note.body,
+                    }),
+                    note.created_at,
+                )?;
+                Ok(())
+            }
         })
         .await?;
+        if let Some(bus) = &self.bus {
+            bus.publish(crate::harness::Event::new(
+                "session.whiteboard",
+                serde_json::json!({
+                    "sessionId": note.session_id,
+                    "noteType": note.note_type,
+                    "body": note.body,
+                    "seq": note.seq,
+                }),
+            ));
+        }
         Ok(note)
     }
 
@@ -211,5 +252,56 @@ mod tests {
 
         assert_eq!(wb.read_all(SESSION).await.unwrap().len(), 1);
         assert_eq!(wb.read_all("wb-s2").await.unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn post_mirrors_to_events_log_and_bus() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wb.db").to_string_lossy().to_string();
+        let bus = crate::harness::EventBus::default();
+        let mut rx = bus.subscribe();
+        let wb = WhiteBoardService::new(path.as_str()).with_bus(bus.clone());
+
+        // session row first (FK)
+        let conn = crate::store::Db::open(&path).unwrap();
+        crate::store::migrations::run(&conn.0).unwrap();
+        repos::sessions::insert(
+            &conn.0,
+            &crate::domain::Session {
+                id: SESSION.into(),
+                title: String::new(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let note = wb
+            .post(
+                SESSION,
+                None,
+                "finding",
+                "the answer is 42".into(),
+                json!({}),
+            )
+            .await
+            .unwrap();
+
+        // live mirror on the bus
+        let ev = rx.recv().await.unwrap();
+        assert_eq!(ev.topic, "session.whiteboard");
+        assert_eq!(ev.payload["body"], "the answer is 42");
+
+        // history mirror in the events table (kind=whiteboard)
+        let events = crate::store::repos::events::list_by_aggregate(
+            &crate::store::Db::open(&path).unwrap().0,
+            "session",
+            SESSION,
+            None,
+        )
+        .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| e.kind == "whiteboard" && e.payload["noteId"] == note.id));
     }
 }

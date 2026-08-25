@@ -1,11 +1,14 @@
 //! Domain entities and the run/session state machines (single source of truth).
 
 pub mod entities;
+pub mod run_state;
 
 pub use entities::{
-    EventRecord, MemoryEntry, PromptStatus, PromptVersion, ProviderConfig, ProviderProtocol, Role,
-    Session, Team, TeamTopology, WhiteBoardNote,
+    Approval, ApprovalDecision, EventRecord, MemoryEntry, PromptStatus, PromptVersion,
+    ProviderConfig, ProviderProtocol, Role, Run, Schedule, Session, Task, TaskStatus, Team,
+    TeamTopology, WhiteBoardNote,
 };
+pub use run_state::{ApprovalOutcome, RunEvent, RunState, TransitionError};
 
 use thiserror::Error;
 

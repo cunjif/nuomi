@@ -135,11 +135,18 @@ impl SpeakerSelector for RoundRobinSelector {
     }
 }
 
+/// Default LLM-judge prompt. Placeholders: `{transcript}`, `{roster}`,
+/// `{converge_index}`.
+pub const DEFAULT_SELECTOR_PROMPT: &str = "Discussion transcript:\n{transcript}\n\nParticipants:\n{roster}\n\nReply with JSON {{\"index\": <number>}} picking the next speaker. Use index {converge_index} to end the discussion.";
+
 /// LLM-as-judge selector: asks a provider for `{"index": n}` JSON and falls
-/// back to round-robin on malformed output.
+/// back to round-robin on malformed output. The prompt is a customizable
+/// template (i18n / tuning) with `{transcript}`, `{roster}` and
+/// `{converge_index}` placeholders.
 pub struct LlmSelector {
     provider: Arc<dyn LlmProvider>,
     model: String,
+    prompt_template: String,
 }
 
 impl LlmSelector {
@@ -147,7 +154,14 @@ impl LlmSelector {
         Self {
             provider,
             model: model.into(),
+            prompt_template: DEFAULT_SELECTOR_PROMPT.to_string(),
         }
+    }
+
+    /// Overrides the judge prompt template.
+    pub fn with_prompt_template(mut self, template: impl Into<String>) -> Self {
+        self.prompt_template = template.into();
+        self
     }
 }
 
@@ -165,12 +179,11 @@ impl SpeakerSelector for LlmSelector {
             .map(|(i, m)| format!("{i}: {}", m.name))
             .collect::<Vec<_>>()
             .join("\n");
-        let prompt = format!(
-            "Discussion transcript:\n{}\n\nParticipants:\n{roster}\n\n\
-             Reply with JSON {{\"index\": <number>}} picking the next speaker. \
-             Use index {n} to end the discussion.",
-            state.topic_text()
-        );
+        let prompt = self
+            .prompt_template
+            .replace("{transcript}", &state.topic_text())
+            .replace("{roster}", &roster)
+            .replace("{converge_index}", &n.to_string());
         let request = ChatRequest {
             model: self.model.clone(),
             system_prompt: Some("You are a discussion moderator.".into()),
@@ -277,5 +290,24 @@ mod tests {
         let selector = LlmSelector::new(provider, "m");
         let state = GroupState::new(members()); // len == 2 ⇒ index 2 means converge
         assert_eq!(selector.select(&state).await, 2);
+    }
+
+    #[tokio::test]
+    async fn custom_prompt_template_is_used_verbatim_with_placeholders_filled() {
+        let provider = Arc::new(FakeLlm::new(
+            "judge",
+            vec![FakeLlm::response(r#"{"index": 1}"#)],
+        ));
+        let selector = LlmSelector::new(provider.clone(), "m")
+            .with_prompt_template("PICK|{roster}|END={converge_index}|T={transcript}");
+        let mut state = GroupState::new(members());
+        state.push_turn(0, "hello".into());
+        assert_eq!(selector.select(&state).await, 1);
+        let reqs = provider.requests.lock().unwrap();
+        let sent = &reqs[0].messages[0].content;
+        assert!(
+            sent.starts_with("PICK|0: rust coder\n1: docs writer|END=2|T=hello"),
+            "{sent}"
+        );
     }
 }

@@ -22,6 +22,15 @@ pub enum CoreError {
 
     #[error("evolution error: {0}")]
     Evolution(#[from] crate::evolution::EvolutionError),
+
+    #[error("workspace error: {0}")]
+    Workspace(#[from] crate::services::WorkspaceError),
+
+    #[error("git error: {0}")]
+    Git(#[from] crate::services::GitError),
+
+    #[error("scheduler error: {0}")]
+    Scheduler(#[from] crate::services::SchedulerError),
 }
 
 /// Convenience result alias used across the crate.

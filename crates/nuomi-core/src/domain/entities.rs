@@ -123,6 +123,122 @@ pub struct WhiteBoardNote {
     pub created_at: i64,
 }
 
+/// Board-level task status (kanban column). Distinct from [`RunState`]:
+/// a Session spawns Tasks, each Task is executed by one or more Runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Backlog,
+    Queued,
+    Running,
+    Done,
+    Cancelled,
+}
+
+impl TaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Backlog => "backlog",
+            TaskStatus::Queued => "queued",
+            TaskStatus::Running => "running",
+            TaskStatus::Done => "done",
+            TaskStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<TaskStatus> {
+        match s {
+            "backlog" => Some(TaskStatus::Backlog),
+            "queued" => Some(TaskStatus::Queued),
+            "running" => Some(TaskStatus::Running),
+            "done" => Some(TaskStatus::Done),
+            "cancelled" => Some(TaskStatus::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// A unit of work created by a session (or the scheduler); executed by runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub title: String,
+    pub description: String,
+    pub status: TaskStatus,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One execution attempt of a task; lifecycle governed by
+/// [`crate::domain::run_state::RunState`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Run {
+    pub id: String,
+    pub task_id: String,
+    pub session_id: String,
+    pub status: crate::domain::run_state::RunState,
+    /// Unix-ms of the last heartbeat (orphan detection compares against it).
+    pub heartbeat_at: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    Pending,
+    Approved,
+    Denied,
+}
+
+impl ApprovalDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ApprovalDecision::Pending => "pending",
+            ApprovalDecision::Approved => "approved",
+            ApprovalDecision::Denied => "denied",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ApprovalDecision> {
+        match s {
+            "pending" => Some(ApprovalDecision::Pending),
+            "approved" => Some(ApprovalDecision::Approved),
+            "denied" => Some(ApprovalDecision::Denied),
+            _ => None,
+        }
+    }
+}
+
+/// A sensitive-tool call awaiting a human decision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Approval {
+    pub id: String,
+    pub run_id: String,
+    pub tool_name: String,
+    pub arguments_json: String,
+    pub decision: ApprovalDecision,
+    pub decided_at: Option<i64>,
+    pub created_at: i64,
+}
+
+/// A cron/interval trigger that generates queued tasks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Schedule {
+    pub id: String,
+    pub name: String,
+    /// 5-field cron subset or `@every <seconds>` (see scheduler_service).
+    pub cron_expr: String,
+    pub task_title: String,
+    pub task_description: String,
+    pub enabled: bool,
+    pub last_triggered_at: Option<i64>,
+    pub next_trigger_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptStatus {

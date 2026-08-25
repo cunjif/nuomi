@@ -8,14 +8,24 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-const MIGRATIONS: &[(i64, &str, &str)] = &[(
-    1,
-    "0001_init",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../migrations/0001_init.sql"
-    )),
-)];
+const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (
+        1,
+        "0001_init",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0001_init.sql"
+        )),
+    ),
+    (
+        2,
+        "0002_tasks_runs",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0002_tasks_runs.sql"
+        )),
+    ),
+];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
 pub fn run(conn: &Connection) -> Result<(), StoreError> {
@@ -81,6 +91,10 @@ mod tests {
             "whiteboard_notes",
             "prompt_versions",
             "artifacts",
+            "tasks",
+            "runs",
+            "approvals",
+            "schedules",
         ] {
             let n: i64 = conn
                 .query_row(
