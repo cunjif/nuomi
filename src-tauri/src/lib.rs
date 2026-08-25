@@ -61,6 +61,16 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::upsert_agent_profile,
         tauri_cmds::delete_agent_profile,
         tauri_cmds::check_cli_agent,
+        tauri_cmds::list_roles,
+        tauri_cmds::upsert_role,
+        tauri_cmds::delete_role,
+        tauri_cmds::list_teams,
+        tauri_cmds::upsert_team,
+        tauri_cmds::delete_team,
+        tauri_cmds::list_whiteboard_notes,
+        tauri_cmds::form_team,
+        tauri_cmds::run_team_on_task,
+        tauri_cmds::run_team_session,
     ])
 }
 

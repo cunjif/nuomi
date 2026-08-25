@@ -301,6 +301,86 @@ async checkCliAgent(profileId: string) : Promise<Result<CliAgentCheckDto, IpcErr
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async listRoles() : Promise<Result<RoleDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_roles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertRole(role: RoleInput) : Promise<Result<RoleDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_role", { role }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteRole(roleId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_role", { roleId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listTeams() : Promise<Result<TeamDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_teams") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertTeam(team: TeamInput) : Promise<Result<TeamDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_team", { team }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteTeam(teamId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_team", { teamId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listWhiteboardNotes(sessionId: string) : Promise<Result<WhiteBoardNoteDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_whiteboard_notes", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async formTeam(task: string, sessionId: string | null) : Promise<Result<TeamDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("form_team", { task, sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async runTeamOnTask(taskId: string, teamId: string) : Promise<Result<RunDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_team_on_task", { taskId, teamId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async runTeamSession(sessionId: string, teamId: string, task: string) : Promise<Result<TeamRunResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_team_session", { sessionId, teamId, task }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -337,11 +417,27 @@ export type ProviderInput = { name: string; protocol: ProviderProtocolDto; baseU
  */
 apiKey: string | null }
 export type ProviderProtocolDto = "open_ai_compatible" | "anthropic_compatible"
+export type RoleDto = { id: string; name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; params: JsonValue; createdAt: number; updatedAt: number }
+export type RoleInput = { name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; 
+/**
+ * Free-form extras; the `agent_profile_id` key binds a CLI agent
+ * profile (SPEC team-shell-m1 D2b).
+ */
+params: JsonValue }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
 export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; enabled: boolean; nextTriggerAt: number | null }
 export type SessionDto = { id: string; title: string; createdAt: number; updatedAt: number }
 export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number }
+export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
+export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 
+/**
+ * Topology-specific config (`max_rounds`, selector settings, ...).
+ */
+config: JsonValue }
+export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
+export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
+export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
 
 /** tauri-specta globals **/
 

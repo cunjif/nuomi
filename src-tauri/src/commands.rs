@@ -12,17 +12,20 @@ use std::process::Stdio;
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
-    AgentProfile, CliFlavor, EventRecord, ProviderConfig, ProviderProtocol, RunState, Schedule,
-    Task, TaskStatus,
+    AgentProfile, CliFlavor, EventRecord, ProviderConfig, ProviderProtocol, Role, RunState,
+    Schedule, Task, TaskStatus, Team, TeamTopology, WhiteBoardNote,
 };
 use nuomi_core::evolution::research::{
     online_authorized as core_online_authorized, set_online_authorized,
 };
+use nuomi_core::orchestrator::OrchestratorError;
 use nuomi_core::plugins::approval_gate;
 use nuomi_core::services::parse_schedule;
+use nuomi_core::services::{run_team as core_run_team, TeamRunOutcome};
 use nuomi_core::store::{migrations, repos, Db, StoreError};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
+use tokio_util::sync::CancellationToken;
 
 use crate::ipc_error::IpcError;
 use crate::state::AppState;
@@ -254,7 +257,11 @@ pub async fn impl_update_task_status(
     .await??;
 
     if next == TaskStatus::Running {
-        dispatch_run(state, task_id).await?;
+        dispatch_run(state, task_id.clone()).await?;
+    }
+    if next == TaskStatus::Cancelled {
+        // Board-level cancel stops any in-flight background team runs.
+        state.run_cancels.cancel_by_task(&task_id);
     }
     Ok(())
 }
@@ -329,18 +336,27 @@ pub(crate) fn transition_run(
     expected: RunState,
     ev: RunEvent,
 ) -> Result<RunState, IpcError> {
+    transition_run_with_detail(conn, run_id, expected, ev, None)
+}
+
+/// [`transition_run`] optionally embedding an error message into the
+/// `state_changed` payload (failed terminal states carry why they failed).
+pub(crate) fn transition_run_with_detail(
+    conn: &rusqlite::Connection,
+    run_id: &str,
+    expected: RunState,
+    ev: RunEvent,
+    error_message: Option<&str>,
+) -> Result<RunState, IpcError> {
     let next = expected
         .transition(ev)
         .map_err(|e| IpcError::new("domain.invalid", e.to_string()))?;
     let now = now_ms();
-    repos::events::append(
-        conn,
-        "run",
-        run_id,
-        "state_changed",
-        &serde_json::json!({ "from": expected.as_str(), "to": next.as_str() }),
-        now,
-    )?;
+    let mut payload = serde_json::json!({ "from": expected.as_str(), "to": next.as_str() });
+    if let Some(message) = error_message {
+        payload["error"] = serde_json::Value::String(message.to_string());
+    }
+    repos::events::append(conn, "run", run_id, "state_changed", &payload, now)?;
     repos::tasks_runs::update_run_status(conn, run_id, expected, next, now)?;
     Ok(next)
 }
@@ -1044,6 +1060,630 @@ pub async fn impl_check_cli_agent(
             }
         }
     }
+}
+
+// ---------- roles / teams / whiteboard (SPEC team-shell-m1 T4) ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleDto {
+    pub id: String,
+    pub name: String,
+    pub provider_id: Option<String>,
+    pub system_prompt_override: Option<String>,
+    pub tool_allowlist: Vec<String>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    pub params: serde_json::Value,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<Role> for RoleDto {
+    fn from(r: Role) -> Self {
+        Self {
+            id: r.id,
+            name: r.name,
+            provider_id: r.provider_id,
+            system_prompt_override: r.system_prompt_override,
+            tool_allowlist: r.tool_allowlist,
+            temperature: r.temperature,
+            max_tokens: r.max_tokens,
+            params: r.params,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleInput {
+    pub name: String,
+    pub provider_id: Option<String>,
+    pub system_prompt_override: Option<String>,
+    pub tool_allowlist: Vec<String>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    /// Free-form extras; the `agent_profile_id` key binds a CLI agent
+    /// profile (SPEC team-shell-m1 D2b).
+    pub params: serde_json::Value,
+}
+
+impl RoleInput {
+    fn validate(&self) -> Result<(), IpcError> {
+        if self.name.trim().is_empty() {
+            return Err(IpcError::new("role.invalid", "role name must not be empty"));
+        }
+        Ok(())
+    }
+}
+
+pub async fn impl_list_roles(state: &AppState) -> Result<Vec<RoleDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<Role>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::roles::list(&db.0)?)
+    })
+    .await??;
+    Ok(rows.into_iter().map(RoleDto::from).collect())
+}
+
+/// `name` is the idempotency key: an existing role with the same name is
+/// updated in place (keeping its `id`/`created_at`), otherwise inserted.
+pub async fn impl_upsert_role(state: &AppState, role: RoleInput) -> Result<RoleDto, IpcError> {
+    role.validate()?;
+    let path = state.db_path.clone();
+    let entity = tokio::task::spawn_blocking(move || -> Result<Role, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        let existing = repos::roles::list(&db.0)?
+            .into_iter()
+            .find(|r| r.name == role.name);
+        match existing {
+            Some(mut prev) => {
+                prev.provider_id = role.provider_id;
+                prev.system_prompt_override = role.system_prompt_override;
+                prev.tool_allowlist = role.tool_allowlist;
+                prev.temperature = role.temperature;
+                prev.max_tokens = role.max_tokens;
+                prev.params = role.params;
+                prev.updated_at = now;
+                repos::roles::update(&db.0, &prev)?;
+                Ok(prev)
+            }
+            None => {
+                let fresh = Role {
+                    id: nuomi_core::domain::new_id(),
+                    name: role.name,
+                    provider_id: role.provider_id,
+                    system_prompt_override: role.system_prompt_override,
+                    tool_allowlist: role.tool_allowlist,
+                    temperature: role.temperature,
+                    max_tokens: role.max_tokens,
+                    params: role.params,
+                    created_at: now,
+                    updated_at: now,
+                };
+                repos::roles::insert(&db.0, &fresh)?;
+                Ok(fresh)
+            }
+        }
+    })
+    .await??;
+    Ok(RoleDto::from(entity))
+}
+
+pub async fn impl_delete_role(state: &AppState, role_id: String) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if !repos::roles::delete(&db.0, &role_id)? {
+            return Err(IpcError::new(
+                "role.not_found",
+                format!("role#{role_id} not found"),
+            ));
+        }
+        Ok(())
+    })
+    .await?
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamTopologyDto {
+    Pipeline,
+    Router,
+    GroupChat,
+}
+
+fn topology_to_dto(t: TeamTopology) -> TeamTopologyDto {
+    match t {
+        TeamTopology::Pipeline => TeamTopologyDto::Pipeline,
+        TeamTopology::Router => TeamTopologyDto::Router,
+        TeamTopology::GroupChat => TeamTopologyDto::GroupChat,
+    }
+}
+
+fn topology_from_dto(t: TeamTopologyDto) -> TeamTopology {
+    match t {
+        TeamTopologyDto::Pipeline => TeamTopology::Pipeline,
+        TeamTopologyDto::Router => TeamTopology::Router,
+        TeamTopologyDto::GroupChat => TeamTopology::GroupChat,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamDto {
+    pub id: String,
+    pub name: String,
+    pub topology: TeamTopologyDto,
+    pub member_role_ids: Vec<String>,
+    pub config: serde_json::Value,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<Team> for TeamDto {
+    fn from(t: Team) -> Self {
+        Self {
+            id: t.id,
+            name: t.name,
+            topology: topology_to_dto(t.topology),
+            member_role_ids: t.member_role_ids,
+            config: t.config,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamInput {
+    pub name: String,
+    pub topology: TeamTopologyDto,
+    pub member_role_ids: Vec<String>,
+    /// Topology-specific config (`max_rounds`, selector settings, ...).
+    pub config: serde_json::Value,
+}
+
+impl TeamInput {
+    fn validate(&self) -> Result<(), IpcError> {
+        if self.name.trim().is_empty() {
+            return Err(IpcError::new("team.invalid", "team name must not be empty"));
+        }
+        if self.member_role_ids.is_empty() {
+            return Err(IpcError::new(
+                "team.member_missing",
+                "team needs at least one member role",
+            ));
+        }
+        Ok(())
+    }
+
+    fn into_entity(self, id: String, created_at: i64, updated_at: i64) -> Team {
+        Team {
+            id,
+            name: self.name,
+            topology: topology_from_dto(self.topology),
+            member_role_ids: self.member_role_ids,
+            config: self.config,
+            created_at,
+            updated_at,
+        }
+    }
+}
+
+pub async fn impl_list_teams(state: &AppState) -> Result<Vec<TeamDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<Team>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::teams::list(&db.0)?)
+    })
+    .await??;
+    Ok(rows.into_iter().map(TeamDto::from).collect())
+}
+
+/// `name` is the idempotency key; every `memberRoleIds` entry must exist in
+/// `roles` or the whole upsert fails with `"team.member_missing"`.
+pub async fn impl_upsert_team(state: &AppState, team: TeamInput) -> Result<TeamDto, IpcError> {
+    team.validate()?;
+    let path = state.db_path.clone();
+    let entity = tokio::task::spawn_blocking(move || -> Result<Team, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let missing: Vec<String> = team
+            .member_role_ids
+            .iter()
+            .filter(|rid| repos::roles::get(&db.0, rid).is_err())
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            return Err(IpcError::with_details(
+                "team.member_missing",
+                format!("unknown member roles: {}", missing.join(", ")),
+                serde_json::json!({ "missing": missing }),
+            ));
+        }
+        let now = now_ms();
+        let existing = repos::teams::list(&db.0)?
+            .into_iter()
+            .find(|t| t.name == team.name);
+        match existing {
+            Some(mut prev) => {
+                prev.topology = topology_from_dto(team.topology);
+                prev.member_role_ids = team.member_role_ids;
+                prev.config = team.config;
+                prev.updated_at = now;
+                repos::teams::update(&db.0, &prev)?;
+                Ok(prev)
+            }
+            None => {
+                let fresh = team.into_entity(nuomi_core::domain::new_id(), now, now);
+                repos::teams::insert(&db.0, &fresh)?;
+                Ok(fresh)
+            }
+        }
+    })
+    .await??;
+    Ok(TeamDto::from(entity))
+}
+
+pub async fn impl_delete_team(state: &AppState, team_id: String) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if !repos::teams::delete(&db.0, &team_id)? {
+            return Err(IpcError::new(
+                "team.not_found",
+                format!("team#{team_id} not found"),
+            ));
+        }
+        Ok(())
+    })
+    .await?
+}
+
+// ---------- team formation (SPEC auto-team-m1 F3) ----------
+
+/// Member ceiling handed to the planner (SPEC auto-team-m1 §5: parameterized,
+/// default 5; the UI entry point uses the default).
+const FORM_TEAM_MAX_MEMBERS: usize = 5;
+
+/// Maps [`services::team_former`] failures onto stable IPC codes.
+///
+/// Deliberately separate from [`map_orchestrator_error`]: that one must keep
+/// mapping every `InvalidTeam` of `run_team` onto `"team.invalid_config"`,
+/// while formation refines the same error type into planner-specific codes
+/// (SPEC auto-team-m1 D6/§5).
+fn map_form_error(e: OrchestratorError) -> IpcError {
+    match e {
+        OrchestratorError::InvalidTeam(msg) => {
+            if msg.contains("no planner") {
+                IpcError::new("team.no_planner", msg)
+            } else if msg.contains("plan invalid")
+                || msg.contains("unknown members")
+                || msg.contains("member(s)")
+            {
+                IpcError::with_details(
+                    "team.plan_invalid",
+                    msg.clone(),
+                    serde_json::json!({ "reason": msg }),
+                )
+            } else {
+                IpcError::new("team.invalid_config", msg)
+            }
+        }
+        other => IpcError::new("team.form_failed", other.to_string()),
+    }
+}
+
+/// LLM-planned team formation for a raw task text: asks the default provider
+/// (master first) to compose a plan from the live catalog, validates it
+/// before any write, then persists new member roles + the team row and
+/// returns the persisted [`TeamDto`]; its `id` feeds `run_team_on_task`
+/// directly (two-step UI flow, SPEC auto-team-m1 D7).
+pub async fn impl_form_team(
+    state: &AppState,
+    task: String,
+    session_id: Option<String>,
+) -> Result<TeamDto, IpcError> {
+    if task.trim().is_empty() {
+        return Err(IpcError::new("task.invalid", "task must not be empty"));
+    }
+    let formed = nuomi_core::services::form_team(
+        state.db_path.clone(),
+        Some(state.kernel.context().bus()),
+        state.secrets.clone(),
+        Some(state.current_workspace()),
+        session_id.as_deref(),
+        &task,
+        FORM_TEAM_MAX_MEMBERS,
+    )
+    .await
+    .map_err(map_form_error)?;
+
+    // Read back through the repository so the DTO mirrors the persisted row.
+    let path = state.db_path.clone();
+    let team_id = formed.team.id;
+    let team = tokio::task::spawn_blocking(move || -> Result<Team, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::teams::get(&db.0, &team_id)?)
+    })
+    .await??;
+    Ok(TeamDto::from(team))
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteBoardNoteDto {
+    pub id: String,
+    pub session_id: String,
+    pub author_role_id: Option<String>,
+    pub note_type: String,
+    pub body: String,
+    pub refs: serde_json::Value,
+    pub seq: i64,
+    pub created_at: i64,
+}
+
+impl From<WhiteBoardNote> for WhiteBoardNoteDto {
+    fn from(n: WhiteBoardNote) -> Self {
+        Self {
+            id: n.id,
+            session_id: n.session_id,
+            author_role_id: n.author_role_id,
+            note_type: n.note_type,
+            body: n.body,
+            refs: n.refs,
+            seq: n.seq,
+            created_at: n.created_at,
+        }
+    }
+}
+
+pub async fn impl_list_whiteboard_notes(
+    state: &AppState,
+    session_id: String,
+) -> Result<Vec<WhiteBoardNoteDto>, IpcError> {
+    let path = state.db_path.clone();
+    let notes = tokio::task::spawn_blocking(move || -> Result<Vec<WhiteBoardNote>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::whiteboard::list_by_session(&db.0, &session_id)?)
+    })
+    .await??;
+    Ok(notes.into_iter().map(WhiteBoardNoteDto::from).collect())
+}
+
+/// Starts a supervised background team run for a board task:
+/// validates task + team, creates the Run row and drives queued→running
+/// (persisting each `state_changed` first — iron rule), then spawns the
+/// executor. Terminal state settles asynchronously via `event://domain`.
+pub async fn impl_run_team_on_task(
+    state: &AppState,
+    task_id: String,
+    team_id: String,
+) -> Result<RunDto, IpcError> {
+    #[derive(Debug)]
+    struct PreparedTeamRun {
+        run: nuomi_core::domain::Run,
+        task_text: String,
+    }
+
+    let fallback_session = state.kernel.session_id().await;
+    let path = state.db_path.clone();
+    let tid = task_id;
+    let team = team_id.clone();
+    let prepared = tokio::task::spawn_blocking(move || -> Result<PreparedTeamRun, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let task = match repos::tasks_runs::get_task(&db.0, &tid) {
+            Ok(task) => task,
+            Err(StoreError::NotFound { .. }) => {
+                return Err(IpcError::new(
+                    "task.not_found",
+                    format!("task#{tid} not found"),
+                ))
+            }
+            Err(e) => return Err(e.into()),
+        };
+        if !matches!(task.status, TaskStatus::Backlog | TaskStatus::Queued) {
+            return Err(IpcError::new(
+                "task.invalid_status",
+                format!(
+                    "task {} is '{}'; only backlog/queued tasks can start a team run",
+                    task.id,
+                    task.status.as_str()
+                ),
+            ));
+        }
+        if let Err(StoreError::NotFound { .. }) = repos::teams::get(&db.0, &team) {
+            return Err(IpcError::new(
+                "team.not_found",
+                format!("team#{team} not found"),
+            ));
+        }
+        let task_text = if task.description.is_empty() {
+            task.title.clone()
+        } else {
+            format!("{}\n{}", task.title, task.description)
+        };
+        let now = now_ms();
+        let run = nuomi_core::domain::Run {
+            id: nuomi_core::domain::new_id(),
+            task_id: tid,
+            session_id: task.session_id.unwrap_or(fallback_session),
+            status: RunState::Queued,
+            heartbeat_at: now,
+            created_at: now,
+            updated_at: now,
+        };
+        repos::tasks_runs::insert_run(&db.0, &run)?;
+        // Iron rule: persist queued→running BEFORE spawning any executor.
+        transition_run(&db.0, &run.id, RunState::Queued, RunEvent::Start)?;
+        Ok(PreparedTeamRun { run, task_text })
+    })
+    .await??;
+
+    spawn_team_run(
+        state,
+        prepared.run.id.clone(),
+        prepared.run.task_id.clone(),
+        prepared.run.session_id.clone(),
+        team_id,
+        prepared.task_text,
+    );
+    Ok(prepared.run.into())
+}
+
+enum TeamSettlement {
+    Succeeded(TeamRunOutcome),
+    Failed(String),
+    Cancelled,
+}
+
+/// Supervised background execution of one team run: races the executor
+/// against the run's cancellation token and settles the terminal state with
+/// the persisted-event-first iron rule. Panics/join failures inside the
+/// executor degrade to `failed` instead of leaving the run stuck running.
+fn spawn_team_run(
+    state: &AppState,
+    run_id: String,
+    task_id: String,
+    session_id: String,
+    team_id: String,
+    task_text: String,
+) {
+    let token = CancellationToken::new();
+    state.run_cancels.register(&run_id, &task_id, token.clone());
+
+    let db_path = state.db_path.clone();
+    let secrets = state.secrets.clone();
+    let cwd = Some(state.current_workspace());
+    let bus = state.kernel.context().bus();
+    let registry = state.run_cancels.clone();
+
+    tokio::spawn(async move {
+        let mut exec = tokio::spawn({
+            let db_path = db_path.clone();
+            async move {
+                core_run_team(
+                    db_path,
+                    Some(bus),
+                    &team_id,
+                    &session_id,
+                    &task_text,
+                    secrets,
+                    cwd,
+                )
+                .await
+            }
+        });
+
+        // Finished executors win over a simultaneous cancellation.
+        let settlement: TeamSettlement = tokio::select! {
+            biased;
+            joined = &mut exec => match joined {
+                Ok(Ok(outcome)) => TeamSettlement::Succeeded(outcome),
+                Ok(Err(e)) => TeamSettlement::Failed(e.to_string()),
+                Err(join_err) => {
+                    TeamSettlement::Failed(format!("team run executor join failed: {join_err}"))
+                }
+            },
+            _ = token.cancelled() => {
+                exec.abort();
+                TeamSettlement::Cancelled
+            }
+        };
+
+        let rid = run_id.clone();
+        if let TeamSettlement::Succeeded(outcome) = &settlement {
+            tracing::info!(
+                run = %run_id,
+                rounds = outcome.rounds,
+                converged = outcome.converged,
+                "team run finished"
+            );
+        }
+        let settled = tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+            let db = Db::open(&db_path)?;
+            migrations::run(&db.0)?;
+            let current = repos::tasks_runs::get_run(&db.0, &rid)?.status;
+            match settlement {
+                TeamSettlement::Succeeded(_) => {
+                    transition_run(&db.0, &rid, current, RunEvent::Succeed).map(|_| ())
+                }
+                TeamSettlement::Failed(message) => {
+                    transition_run_with_detail(&db.0, &rid, current, RunEvent::Fail, Some(&message))
+                        .map(|_| ())
+                }
+                TeamSettlement::Cancelled => {
+                    transition_run(&db.0, &rid, current, RunEvent::Cancel).map(|_| ())
+                }
+            }
+        })
+        .await;
+        match settled {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!(error = %e, run = %run_id, "failed to settle team run"),
+            Err(e) => tracing::warn!(error = %e, run = %run_id, "team run settle join failed"),
+        }
+        registry.remove(&run_id);
+    });
+}
+
+/// Session-level team execution entry (REPL / no-task scenario): runs
+/// synchronously and returns the outcome directly; no `tasks_runs` row is
+/// created (SPEC D5).
+pub async fn impl_run_team_session(
+    state: &AppState,
+    session_id: String,
+    team_id: String,
+    task: String,
+) -> Result<TeamRunResultDto, IpcError> {
+    let outcome = core_run_team(
+        state.db_path.clone(),
+        Some(state.kernel.context().bus()),
+        &team_id,
+        &session_id,
+        &task,
+        state.secrets.clone(),
+        Some(state.current_workspace()),
+    )
+    .await
+    .map_err(map_orchestrator_error)?;
+    Ok(TeamRunResultDto {
+        final_output: outcome.final_output,
+        converged: outcome.converged,
+        rounds: outcome.rounds,
+    })
+}
+
+fn map_orchestrator_error(e: OrchestratorError) -> IpcError {
+    match e {
+        OrchestratorError::MemberNotFound { .. } => {
+            IpcError::new("team.member_missing", e.to_string())
+        }
+        OrchestratorError::InvalidTeam(_) => IpcError::new("team.invalid_config", e.to_string()),
+        other => IpcError::new("team.run_failed", other.to_string()),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamRunResultDto {
+    pub final_output: String,
+    pub converged: bool,
+    pub rounds: usize,
 }
 
 // ---------- DTOs ----------

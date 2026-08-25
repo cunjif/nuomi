@@ -3,12 +3,57 @@
 //! Commands stay thin: they validate arguments and call into nuomi-core
 //! services/facade. This struct bundles what they need.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nuomi_core::facade::{NuomiConfig, NuomiKernel, ProviderSource};
+use nuomi_core::providers::{OsKeyring, SecretStore};
 use nuomi_core::services::{GitService, WorkspaceService};
 use nuomi_core::{CoreError, CoreResult};
+use tokio_util::sync::CancellationToken;
+
+/// Tracks in-flight background team runs so a board transition to
+/// `cancelled` can stop their executors. `run_id → (task_id, token)`.
+#[derive(Clone, Default)]
+pub struct RunCancelRegistry {
+    entries: Arc<Mutex<HashMap<String, CancelEntry>>>,
+}
+
+type CancelEntry = (String, Arc<CancellationToken>);
+
+impl RunCancelRegistry {
+    pub(crate) fn register(&self, run_id: &str, task_id: &str, token: CancellationToken) {
+        self.entries
+            .lock()
+            .expect("cancel registry poisoned")
+            .insert(run_id.to_string(), (task_id.to_string(), Arc::new(token)));
+    }
+
+    pub(crate) fn remove(&self, run_id: &str) {
+        self.entries
+            .lock()
+            .expect("cancel registry poisoned")
+            .remove(run_id);
+    }
+
+    /// Cancels every active run of `task_id`; returns the affected run ids.
+    pub(crate) fn cancel_by_task(&self, task_id: &str) -> Vec<String> {
+        let mut map = self.entries.lock().expect("cancel registry poisoned");
+        let hits: Vec<String> = map
+            .iter()
+            .filter(|(_, (tid, _))| tid == task_id)
+            .map(|(rid, _)| rid.clone())
+            .collect();
+        for rid in &hits {
+            if let Some((_, token)) = map.get(rid) {
+                token.cancel();
+            }
+            map.remove(rid);
+        }
+        hits
+    }
+}
 
 /// Everything a command handler needs, testable without a Tauri runtime.
 pub struct AppState {
@@ -20,13 +65,28 @@ pub struct AppState {
     /// Sandboxed filesystem root exposed to the UI. Swappable at runtime
     /// (worktree switch): services re-point without a kernel restart.
     pub workspace_root: std::sync::RwLock<PathBuf>,
+    /// Secret store backing provider keyring references. OS keyring in prod;
+    /// tests/demo inject an in-memory store.
+    pub secrets: Arc<dyn SecretStore>,
+    /// Cancellation tokens for supervised background team runs.
+    pub run_cancels: RunCancelRegistry,
 }
 
 impl AppState {
-    /// Boots the kernel with an explicit provider source (endpoint in prod,
-    /// fake in tests/demo) and resolves the workspace root from `NUOMI_WORKSPACE_ROOT`
-    /// or falls back to the current directory.
+    /// Boots with the OS keyring as secret store (production default).
     pub async fn boot(db_path: PathBuf, provider: ProviderSource) -> CoreResult<Self> {
+        Self::boot_with_secrets(db_path, provider, Arc::new(OsKeyring)).await
+    }
+
+    /// Boots the kernel with an explicit provider source and secret store
+    /// (tests/demo pass a [`nuomi_core::providers::MemorySecretStore`]) and
+    /// resolves the workspace root from `NUOMI_WORKSPACE_ROOT` or falls back
+    /// to the current directory.
+    pub async fn boot_with_secrets(
+        db_path: PathBuf,
+        provider: ProviderSource,
+        secrets: Arc<dyn SecretStore>,
+    ) -> CoreResult<Self> {
         let kernel = NuomiKernel::boot(NuomiConfig {
             db_path: db_path.clone(),
             provider,
@@ -40,6 +100,8 @@ impl AppState {
             kernel: Arc::new(kernel),
             db_path,
             workspace_root: std::sync::RwLock::new(workspace_root),
+            secrets,
+            run_cancels: RunCancelRegistry::default(),
         })
     }
 

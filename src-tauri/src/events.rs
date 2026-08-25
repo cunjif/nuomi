@@ -36,6 +36,7 @@ fn is_domain_topic(topic: &str) -> bool {
         || topic.starts_with("run.")
         || topic.starts_with("approval.")
         || topic.starts_with("schedule.")
+        || topic.starts_with("team.")
 }
 
 fn extract(event: &Event) -> (Option<String>, Option<String>, Option<String>, Option<i64>) {
@@ -88,6 +89,7 @@ mod tests {
             ("run.state_changed", None, "event://domain"),
             ("approval.requested", None, "event://domain"),
             ("schedule.triggered", None, "event://domain"),
+            ("team.formed", None, "event://domain"),
         ];
         for (topic, session, expected_channel) in cases {
             let payload = match session {

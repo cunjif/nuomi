@@ -332,3 +332,95 @@ pub async fn check_cli_agent(
 ) -> Result<commands::CliAgentCheckDto, IpcError> {
     commands::impl_check_cli_agent(&state, profile_id).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_roles(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::RoleDto>, IpcError> {
+    commands::impl_list_roles(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_role(
+    state: tauri::State<'_, AppState>,
+    role: commands::RoleInput,
+) -> Result<commands::RoleDto, IpcError> {
+    commands::impl_upsert_role(&state, role).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_role(
+    state: tauri::State<'_, AppState>,
+    role_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_role(&state, role_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_teams(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::TeamDto>, IpcError> {
+    commands::impl_list_teams(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_team(
+    state: tauri::State<'_, AppState>,
+    team: commands::TeamInput,
+) -> Result<commands::TeamDto, IpcError> {
+    commands::impl_upsert_team(&state, team).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_team(
+    state: tauri::State<'_, AppState>,
+    team_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_team(&state, team_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_whiteboard_notes(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<commands::WhiteBoardNoteDto>, IpcError> {
+    commands::impl_list_whiteboard_notes(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn form_team(
+    state: tauri::State<'_, AppState>,
+    task: String,
+    session_id: Option<String>,
+) -> Result<commands::TeamDto, IpcError> {
+    commands::impl_form_team(&state, task, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn run_team_on_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    team_id: String,
+) -> Result<commands::RunDto, IpcError> {
+    commands::impl_run_team_on_task(&state, task_id, team_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn run_team_session(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    team_id: String,
+    task: String,
+) -> Result<commands::TeamRunResultDto, IpcError> {
+    commands::impl_run_team_session(&state, session_id, team_id, task).await
+}
