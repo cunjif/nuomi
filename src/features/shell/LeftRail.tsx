@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type View } from "../../lib/store/uiStore";
 import { SessionsList } from "./SessionsList";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS: Array<{ view: View; labelKey: string }> = [
   { view: "chat", labelKey: "shell.navChat" },
@@ -37,6 +38,9 @@ export function LeftRail(): ReactNode {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-ink-muted/30">
         <SessionsList />
+      </div>
+      <div className="shrink-0 border-t border-ink-muted/30 p-1">
+        <ThemeToggle />
       </div>
     </nav>
   );

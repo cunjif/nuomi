@@ -5,7 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Spinner } from "../../components/ui/Spinner";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
+import { useTheme } from "../../lib/store/useTheme";
 import { toast } from "../../lib/store/toastStore";
+import { useUiStore } from "../../lib/store/uiStore";
+import { NUOMI_MONACO_DARK, NUOMI_MONACO_LIGHT, defineNuomiThemes } from "./monacoThemes";
+import { languageForPath } from "./editorLanguage";
 
 // Self-hosted Monaco: bundle the editor locally instead of the default CDN
 // loader so the desktop app works fully offline. The setup module is pulled
@@ -22,7 +26,9 @@ interface MonacoTabProps {
 /** One open file: lazy Monaco editor + Ctrl/Cmd+S save with toast feedback. */
 export function MonacoTab({ path }: MonacoTabProps): ReactNode {
   const { t } = useTranslation();
+  const { theme } = useTheme();
   const qc = useQueryClient();
+  const markDirty = useUiStore((s) => s.markDirty);
   const fileQuery = useQuery({ queryKey: ["file", path], queryFn: () => ipc.readFile(path) });
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? fileQuery.data ?? "";
@@ -31,6 +37,7 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
     mutationFn: () => ipc.writeFile(path, value),
     onSuccess: () => {
       setDraft(null);
+      markDirty(path, false);
       void qc.invalidateQueries({ queryKey: ["file", path] });
       toast.success(t("files.saved"));
     },
@@ -80,15 +87,33 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
           >
             <MonacoEditor
               height="100%"
-              defaultLanguage="plaintext"
-              theme="vs-dark"
+              defaultLanguage={languageForPath(path)}
+              beforeMount={defineNuomiThemes}
+              theme={theme === "dark" ? NUOMI_MONACO_DARK : NUOMI_MONACO_LIGHT}
               value={value}
               path={path}
-              onChange={(v) => setDraft(v ?? "")}
-              options={{ minimap: { enabled: false }, fontSize: 13 }}
+              onChange={(v) => {
+                const next = v ?? "";
+                setDraft(next);
+                markDirty(path, next !== (fileQuery.data ?? ""));
+              }}
+              options={{
+                fontSize: 13,
+                minimap: { enabled: false },
+                tabSize: 2,
+                renderWhitespace: "selection",
+                smoothScrolling: true,
+                scrollBeyondLastLine: false,
+              }}
             />
           </Suspense>
         )}
+      </div>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-ink-muted/30 px-2 py-0.5 text-[10px] text-ink-muted">
+        <span>
+          {t("editor.languageLabel")}: <span className="font-mono">{languageForPath(path)}</span>
+        </span>
+        <span>{t("editor.saveHint")}</span>
       </div>
     </section>
   );

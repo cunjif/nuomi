@@ -10,6 +10,7 @@ module.exports = {
           DEFAULT: "var(--nuomi-surface, #1e2229)",
           raised: "var(--nuomi-surface-raised, #262b33)",
           overlay: "var(--nuomi-surface-overlay, #2f3540)",
+          scrim: "var(--nuomi-scrim, rgba(0, 0, 0, 0.5))",
         },
         ink: {
           DEFAULT: "var(--nuomi-ink, #e6e6e6)",

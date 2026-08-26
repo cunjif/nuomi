@@ -1,9 +1,26 @@
 <!doctype html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>nuomi · 糯米</title>
+    <script>
+      // FOUC defense: resolve the theme before first paint. Priority must stay
+      // in lockstep with resolveInitialTheme() in src/lib/store/uiStore.ts:
+      // localStorage("nuomi.theme") -> prefers-color-scheme -> dark.
+      (function () {
+        try {
+          var stored = localStorage.getItem("nuomi.theme");
+          var prefersLight =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: light)").matches;
+          var theme = stored === "light" || stored === "dark" ? stored : prefersLight ? "light" : "dark";
+          if (theme === "dark") document.documentElement.classList.add("dark");
+        } catch (e) {
+          // Storage unavailable — keep UA default (light vars on :root).
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
