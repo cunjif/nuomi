@@ -26,6 +26,13 @@ use crate::{CoreError, CoreResult};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are nuomi, a helpful agent.";
 
+/// Title for brand-new sessions until the first user task derives a real
+/// one (shell and CLI share this via the sessions repo).
+const DEFAULT_SESSION_TITLE: &str = "nuomi session";
+
+/// Auto-derived titles never exceed this many characters.
+const TITLE_MAX_CHARS: usize = 40;
+
 /// A concrete model endpoint (CLI v1: key comes from `NUOMI_API_KEY`).
 #[derive(Debug, Clone)]
 pub struct ProviderEndpoint {
@@ -107,7 +114,7 @@ impl NuomiKernel {
                 migrations::run(&db.0)?;
                 let session = Session {
                     id: new_id(),
-                    title: "nuomi session".into(),
+                    title: DEFAULT_SESSION_TITLE.into(),
                     created_at: now_ms(),
                     updated_at: now_ms(),
                 };
@@ -222,9 +229,16 @@ impl NuomiKernel {
             .await?;
 
         // Persist only the new messages — replayed history is already in
-        // the append-only log.
+        // the append-only log. The auto-title rides the same persistence
+        // phase: one spawn_blocking round-trip, check-then-update so the
+        // derived name is written exactly once and never overwritten.
+        let auto_title = derive_title(task);
         let appended = self
-            .persist_transcript(&state.session_id, &result.transcript[history_len..])
+            .persist_transcript(
+                &state.session_id,
+                &result.transcript[history_len..],
+                &auto_title,
+            )
             .await?;
         state.history = result.transcript.clone();
 
@@ -282,7 +296,7 @@ impl NuomiKernel {
         let path = self.db_path.clone();
         let session = Session {
             id: new_id(),
-            title: "nuomi session".into(),
+            title: DEFAULT_SESSION_TITLE.into(),
             created_at: now_ms(),
             updated_at: now_ms(),
         };
@@ -319,10 +333,12 @@ impl NuomiKernel {
         &self,
         session_id: &str,
         transcript: &[ChatMessage],
+        auto_title: &str,
     ) -> CoreResult<Vec<EventRecord>> {
         let path = self.db_path.clone();
         let sid = session_id.to_string();
         let messages = transcript.to_vec();
+        let auto_title = auto_title.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<EventRecord>, CoreError> {
             let db = Db::open(&path)?;
             let conn = &db.0;
@@ -376,12 +392,32 @@ impl NuomiKernel {
                     MessageRole::System => {}
                 }
             }
+            // Name a still-default session once from its first task
+            // (check-then-update: later tasks must not overwrite).
+            if !auto_title.is_empty()
+                && repos::sessions::get(conn, &sid)?.title == DEFAULT_SESSION_TITLE
+            {
+                repos::sessions::update_title(conn, &sid, &auto_title)?;
+            }
             repos::sessions::touch(conn, &sid, now)?;
             Ok(appended)
         })
         .await
         .map_err(join_err)?
     }
+}
+
+/// Derives a session auto-title from the first task input: the trimmed
+/// first line, capped at [`TITLE_MAX_CHARS`] characters with a trailing
+/// ellipsis only when truncation happened. Whitespace-only input maps to
+/// `""` (meaning "keep the default title").
+fn derive_title(input: &str) -> String {
+    let first_line = input.trim().lines().next().unwrap_or("").trim_end();
+    let mut title: String = first_line.chars().take(TITLE_MAX_CHARS).collect();
+    if first_line.chars().count() > TITLE_MAX_CHARS {
+        title.push('…');
+    }
+    title
 }
 
 /// Rebuilds a `ChatMessage` sequence from persisted session events
@@ -526,6 +562,69 @@ mod tests {
         // History was reset with the fresh session.
         let result = kernel.run_task("fresh start").await.unwrap();
         assert_eq!(result.transcript.len(), 2);
+    }
+
+    #[test]
+    fn derive_title_table() {
+        let exact = "x".repeat(TITLE_MAX_CHARS);
+        let overlong_ascii = "x".repeat(TITLE_MAX_CHARS + 5);
+        let truncated_ascii = format!("{}…", "x".repeat(TITLE_MAX_CHARS));
+        let overlong_cjk = "糯".repeat(TITLE_MAX_CHARS + 1);
+        let truncated_cjk = format!("{}…", "糯".repeat(TITLE_MAX_CHARS));
+        let cases: Vec<(&str, &str)> = vec![
+            // Empty / whitespace-only → keep default (empty marker).
+            ("", ""),
+            ("   \n\t ", ""),
+            // Single line, short.
+            ("hello", "hello"),
+            ("  padded  ", "padded"),
+            // Multi-line → first line only, trailing spaces dropped.
+            ("first line\nsecond line", "first line"),
+            ("trailing spaces   \nnext", "trailing spaces"),
+            ("第一行\n第二行", "第一行"),
+            // Exactly 40 chars → no ellipsis.
+            (exact.as_str(), exact.as_str()),
+            // Overlong single line → truncated with ellipsis.
+            (overlong_ascii.as_str(), truncated_ascii.as_str()),
+            // Multi-byte chars count per character, not per byte.
+            (overlong_cjk.as_str(), truncated_cjk.as_str()),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(derive_title(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn first_task_titles_default_session_and_later_tasks_keep_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("k.db");
+        let kernel = NuomiKernel::boot(NuomiConfig::with_fake_provider(
+            db_path.clone(),
+            vec![FakeLlm::response("a"), FakeLlm::response("b")],
+        ))
+        .await
+        .unwrap();
+        let sid = kernel.session_id().await;
+
+        kernel
+            .run_task("fix the login bug\nrepro steps inside")
+            .await
+            .unwrap();
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            assert_eq!(
+                repos::sessions::get(&conn, &sid).unwrap().title,
+                "fix the login bug"
+            );
+        }
+
+        // A second task in the same session must NOT overwrite the title.
+        kernel.run_task("now a different task").await.unwrap();
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        assert_eq!(
+            repos::sessions::get(&conn, &sid).unwrap().title,
+            "fix the login bug"
+        );
     }
 
     /// Drains `session.delta` payload seqs observed on the kernel bus.

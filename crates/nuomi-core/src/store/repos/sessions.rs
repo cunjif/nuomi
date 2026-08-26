@@ -45,6 +45,20 @@ pub fn touch(conn: &Connection, id: &str, at: i64) -> Result<(), StoreError> {
     Ok(())
 }
 
+pub fn update_title(conn: &Connection, id: &str, title: &str) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE sessions SET title = ?2 WHERE id = ?1",
+        params![id, title],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "session",
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Lists sessions, most recently updated first.
 pub fn list(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
@@ -118,5 +132,20 @@ mod tests {
         let conn = db();
         insert(&conn, &session("dup")).unwrap();
         assert!(insert(&conn, &session("dup")).is_err());
+    }
+
+    #[test]
+    fn update_title_sets_title_and_missing_id_is_not_found() {
+        let conn = db();
+        insert(&conn, &session("s1")).unwrap();
+        update_title(&conn, "s1", "renamed").unwrap();
+        assert_eq!(get(&conn, "s1").unwrap().title, "renamed");
+        assert!(matches!(
+            update_title(&conn, "nope", "x"),
+            Err(StoreError::NotFound {
+                entity: "session",
+                ..
+            })
+        ));
     }
 }
