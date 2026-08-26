@@ -80,6 +80,15 @@ pub async fn update_task_status(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn delete_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_task(&state, task_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn get_run(
     state: tauri::State<'_, AppState>,
     run_id: String,

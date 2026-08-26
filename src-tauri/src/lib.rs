@@ -33,6 +33,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::create_task,
         tauri_cmds::list_tasks,
         tauri_cmds::update_task_status,
+        tauri_cmds::delete_task,
         tauri_cmds::get_run,
         tauri_cmds::list_runs_by_task,
         tauri_cmds::list_pending_approvals,

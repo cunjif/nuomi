@@ -70,6 +70,14 @@ async updateTaskStatus(taskId: string, status: string) : Promise<Result<null, Ip
     else return { status: "error", error: e  as any };
 }
 },
+async deleteTask(taskId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_task", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getRun(runId: string) : Promise<Result<RunDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_run", { runId }) };

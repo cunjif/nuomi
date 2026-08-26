@@ -332,6 +332,45 @@ async fn dispatch_run(state: &AppState, task_id: String) -> Result<String, IpcEr
     Ok(run_id)
 }
 
+/// Deletes a board task with its children: approvals → runs → task in ONE
+/// SQLite transaction (the 0002 FKs have no CASCADE, so order matters and
+/// atomicity keeps observers from seeing half states). Running tasks are
+/// refused — cancel first. The append-only `events` log is intentionally
+/// left untouched: dangling aggregates are acceptable history.
+pub async fn impl_delete_task(state: &AppState, task_id: String) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let tid = task_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let task = match repos::tasks_runs::get_task(&db.0, &tid) {
+            Ok(task) => task,
+            Err(StoreError::NotFound { .. }) => {
+                return Err(IpcError::new(
+                    "task.not_found",
+                    format!("task#{tid} not found"),
+                ))
+            }
+            Err(e) => return Err(e.into()),
+        };
+        if matches!(task.status, TaskStatus::Running) {
+            return Err(IpcError::new(
+                "task.invalid_status",
+                format!("task {} is running; cancel it before deleting", task.id),
+            ));
+        }
+        if !repos::tasks_runs::delete_cascade(&db.0, &tid)? {
+            return Err(IpcError::new(
+                "task.not_found",
+                format!("task#{tid} not found"),
+            ));
+        }
+        append_domain_event(&db.0, "task.deleted", task_id_payload(&tid), now_ms())?;
+        Ok(())
+    })
+    .await?
+}
+
 /// Applies one state-machine step with the persisted-event-first iron rule.
 pub(crate) fn transition_run(
     conn: &rusqlite::Connection,
@@ -1857,6 +1896,16 @@ impl IntegrationInput {
     }
 }
 
+/// Bumps the notifier's integration generation so the dispatcher
+/// re-materializes its sinks without an app restart. The send result is
+/// deliberately ignored: it fails only when the notifier already dropped its
+/// receiver (dispatcher exited / process shutting down) — there is nothing
+/// left to reload, and the DB write itself has already succeeded.
+fn notify_integrations_changed(state: &AppState) {
+    let next = state.integrations_reload_tx.borrow().wrapping_add(1);
+    let _ = state.integrations_reload_tx.send(next);
+}
+
 /// `name` is the idempotency key: an existing integration with the same
 /// name is updated in place (keeping its `id`/`created_at`), otherwise
 /// inserted fresh with a uuid v7 id. The response masks the URL like every
@@ -1902,6 +1951,7 @@ pub async fn impl_upsert_integration(
         }
     })
     .await??;
+    notify_integrations_changed(state);
     Ok(IntegrationDto::from_entity(entity))
 }
 
@@ -1932,7 +1982,9 @@ pub async fn impl_delete_integration(
         }
         Ok(())
     })
-    .await?
+    .await??;
+    notify_integrations_changed(state);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
