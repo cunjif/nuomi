@@ -8,13 +8,14 @@ import { DOMAIN_CHANNEL } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { describeError } from "../../i18n";
 import type { TaskDto, TeamPlanDto } from "../../lib/ipc/bindings.gen";
-import { ipc } from "../../lib/ipc/client";
+import { IpcCommandError, ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
 import { AutoFormConfirmDialog } from "./AutoFormConfirmDialog";
 import { BoardColumn } from "./BoardColumn";
 import { NewTaskForm } from "./NewTaskForm";
 import { RunDrawer } from "./RunDrawer";
+import { useRunAllQueued } from "./useRunAllQueued";
 import { isTaskStatus, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
 
 /** U11 kanban: five status columns, drag or menu to move, run drawer. */
@@ -34,6 +35,26 @@ export function BoardView(): ReactNode {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
     onError: (e) => toast.error(`${t("board.moveFailed")}: ${describeError(e)}`),
   });
+
+  const deleteMut = useMutation({
+    mutationFn: (taskId: string) => ipc.deleteTask(taskId),
+    onSuccess: (_data, taskId) => {
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["runs", taskId] });
+      toast.success(t("board.deleted"));
+    },
+    onError: (e) => {
+      if (e instanceof IpcCommandError && e.code === "task.invalid_status") {
+        toast.error(t("board.taskRunningDeleteHint"));
+        return;
+      }
+      toast.error(`${t("board.deletedFailed")}: ${describeError(e)}`);
+    },
+  });
+
+  /** 批次二② run-all: dispatch every queued task one by one; a single
+   * failure never stops the rest and the summary toast reports both. */
+  const { runAllPending, runAllQueued } = useRunAllQueued(qc);
 
   const runWithTeamMut = useMutation({
     mutationFn: ({ taskId, teamId }: { taskId: string; teamId: string }) =>
@@ -95,6 +116,8 @@ export function BoardView(): ReactNode {
     return map;
   }, [tasksQuery.data]);
 
+  const queuedIds = (grouped.get("queued") ?? []).map((task) => task.id);
+
   const onDragEnd = (event: DragEndEvent): void => {
     const taskId = String(event.active.id);
     const overId = event.over?.id;
@@ -134,6 +157,9 @@ export function BoardView(): ReactNode {
                   tasks={grouped.get(status) ?? []}
                   onOpenRuns={setRunDrawerTask}
                   onMove={(taskId, next) => moveMut.mutate({ taskId, status: next })}
+                  onDelete={(taskId) => deleteMut.mutate(taskId)}
+                  onRunAll={status === "queued" ? () => runAllQueued(queuedIds) : undefined}
+                  runAllPending={runAllPending}
                   onRunWithTeam={(taskId, teamId) => runWithTeamMut.mutate({ taskId, teamId })}
                   onAutoFormRun={(taskId) => previewTeamMut.mutate({ taskId })}
                 />

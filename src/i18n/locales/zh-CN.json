@@ -96,6 +96,15 @@
     "topologyLabel": "拓扑",
     "rationaleHeading": "规划理由",
     "confirmRun": "组建并运行",
+    "delete": "删除",
+    "deleteConfirm": "确认删除",
+    "deleted": "任务已删除",
+    "deletedFailed": "删除任务失败",
+    "taskRunningDeleteHint": "任务正在运行，请先取消再删除",
+    "runAll": "运行全部",
+    "runAllConfirm": "确认派发 {{count}} 个排队任务？",
+    "runAllStarted": "已派发 {{ok}}/{{total}} 个排队任务",
+    "runAllFailed": "{{failed}} 个任务派发失败（已派发 {{ok}}/{{total}}）",
     "status_backlog": "待办",
     "status_queued": "排队中",
     "status_running": "运行中",
@@ -259,7 +268,6 @@
       "saving": "保存中…",
       "saved": "集成已保存",
       "saveFailed": "保存集成失败",
-      "restartHint": "集成清单在应用启动时加载，修改后需重启生效",
       "empty": "还没有集成，填写上方表单添加一个。"
     }
   },

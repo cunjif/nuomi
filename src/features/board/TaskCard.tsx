@@ -12,6 +12,7 @@ interface TaskCardProps {
   task: TaskDto;
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
+  onDelete: (taskId: string) => void;
   onRunWithTeam: (taskId: string, teamId: string) => void;
   onAutoFormRun: (taskId: string) => void;
 }
@@ -20,16 +21,19 @@ const menuButton =
   "block w-full px-3 py-1 text-left text-xs text-ink hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent";
 
 /** Draggable card with an equivalent keyboard menu (a11y rule for drag). */
-export function TaskCard({ task, onOpenRuns, onMove, onRunWithTeam, onAutoFormRun }: TaskCardProps): ReactNode {
+export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, onAutoFormRun }: TaskCardProps): ReactNode {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [teamListOpen, setTeamListOpen] = useState(false);
+  /** two-step delete (IntegrationsSection pattern): armed by the first click */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const teamsQuery = useQuery({ queryKey: ["teams"], queryFn: ipc.listTeams });
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
 
   const closeMenu = (): void => {
     setMenuOpen(false);
     setTeamListOpen(false);
+    setConfirmingDelete(false);
   };
 
   return (
@@ -132,6 +136,34 @@ export function TaskCard({ task, onOpenRuns, onMove, onRunWithTeam, onAutoFormRu
               {t("board.autoFormRun")}
             </button>
           </li>
+          {task.status !== "running" && (
+            <li>
+              {confirmingDelete ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeMenu();
+                    onDelete(task.id);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label={`${t("board.deleteConfirm")} ${task.title}`}
+                  className={`${menuButton} text-state-danger`}
+                >
+                  {t("board.deleteConfirm")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label={`${t("board.delete")} ${task.title}`}
+                  className={menuButton}
+                >
+                  {t("board.delete")}
+                </button>
+              )}
+            </li>
+          )}
         </ul>
       )}
     </div>

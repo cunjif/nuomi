@@ -52,6 +52,7 @@ export const ipc = {
   listTasks: (status: string | null) => unwrap(current.listTasks(status)),
   updateTaskStatus: (taskId: string, status: string) =>
     unwrap(current.updateTaskStatus(taskId, status)),
+  deleteTask: (taskId: string) => unwrap(current.deleteTask(taskId)),
   getRun: (runId: string) => unwrap(current.getRun(runId)),
   listRunsByTask: (taskId: string) => unwrap(current.listRunsByTask(taskId)),
   listPendingApprovals: () => unwrap(current.listPendingApprovals()),

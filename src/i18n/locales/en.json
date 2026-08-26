@@ -96,6 +96,15 @@
     "topologyLabel": "Topology",
     "rationaleHeading": "Rationale",
     "confirmRun": "Form & run",
+    "delete": "Delete",
+    "deleteConfirm": "Confirm delete",
+    "deleted": "Task deleted",
+    "deletedFailed": "Failed to delete task",
+    "taskRunningDeleteHint": "Task is running — cancel it before deleting",
+    "runAll": "Run all",
+    "runAllConfirm": "Dispatch {{count}} queued tasks?",
+    "runAllStarted": "Dispatched {{ok}}/{{total}} queued tasks",
+    "runAllFailed": "{{failed}} dispatches failed ({{ok}}/{{total}} dispatched)",
     "status_backlog": "Backlog",
     "status_queued": "Queued",
     "status_running": "Running",
@@ -259,7 +268,6 @@
       "saving": "Saving…",
       "saved": "Integration saved",
       "saveFailed": "Failed to save integration",
-      "restartHint": "The integration list loads at app startup — restart to apply changes.",
       "empty": "No integrations yet — fill in the form above to add one."
     }
   },

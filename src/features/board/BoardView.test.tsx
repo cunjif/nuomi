@@ -220,3 +220,111 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
     expect(runTeamOnTask).not.toHaveBeenCalled();
   });
 });
+
+describe("BoardView — batch operations (批次二②)", () => {
+  const seedTask = (id: string, title: string, status: string): void => {
+    tdState.tasks.push({
+      id,
+      sessionId: null,
+      title,
+      description: "",
+      status,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+  };
+
+  it("deletes a task after the two-step confirm and refreshes the board", async () => {
+    seedTask("t-del", "待删任务", "backlog");
+    tdState.runs.push({ id: "r-del", taskId: "t-del", sessionId: "s1", status: "failed", heartbeatAt: 1 });
+    const base = testDoubleCommands();
+    const deleteTask = vi.fn(base.deleteTask);
+    injectIpcCommands({ ...base, deleteTask });
+
+    renderWithProviders(<BoardView />);
+    fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
+
+    // Step one only arms the confirm — no IPC call yet.
+    fireEvent.click(screen.getByRole("button", { name: "删除 待删任务" }));
+    expect(deleteTask).not.toHaveBeenCalled();
+
+    // Step two deletes, toasts, and drops the card (runs cache invalidated too).
+    fireEvent.click(await screen.findByRole("button", { name: "确认删除 待删任务" }));
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("t-del"));
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((toast) => toast.kind === "success" && toast.message.includes("任务已删除")),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(screen.queryByText("待删任务")).not.toBeInTheDocument());
+    expect(tdState.tasks.some((task) => task.id === "t-del")).toBe(false);
+    expect(tdState.runs.some((run) => run.id === "r-del")).toBe(false);
+  });
+
+  it("hides the delete item while a card is running", async () => {
+    seedTask("t-run", "运行中任务", "running");
+    injectIpcCommands(testDoubleCommands());
+
+    renderWithProviders(<BoardView />);
+    fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
+
+    expect(screen.queryByRole("button", { name: /^删除/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^确认删除/ })).not.toBeInTheDocument();
+  });
+
+  it("dispatches every queued task sequentially after confirmation and toasts the summary", async () => {
+    seedTask("t1", "排队一", "queued");
+    seedTask("t2", "排队二", "queued");
+    seedTask("t3", "排队三", "queued");
+    const base = testDoubleCommands();
+    const updateTaskStatus = vi.fn(base.updateTaskStatus);
+    injectIpcCommands({ ...base, updateTaskStatus });
+
+    renderWithProviders(<BoardView />);
+    fireEvent.click(await screen.findByRole("button", { name: "运行全部" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认派发 3 个排队任务？" }));
+
+    await waitFor(() => expect(updateTaskStatus).toHaveBeenCalledTimes(3));
+    expect(updateTaskStatus.mock.calls).toEqual([
+      ["t1", "running"],
+      ["t2", "running"],
+      ["t3", "running"],
+    ]);
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((toast) => toast.kind === "success" && toast.message.includes("已派发 3/3")),
+      ).toBe(true),
+    );
+    expect(tdState.tasks.every((task) => task.status === "running")).toBe(true);
+  });
+
+  it("dispatches nothing when the run-all confirm is cancelled", async () => {
+    seedTask("t1", "排队一", "queued");
+    const base = testDoubleCommands();
+    const updateTaskStatus = vi.fn(base.updateTaskStatus);
+    injectIpcCommands({ ...base, updateTaskStatus });
+
+    renderWithProviders(<BoardView />);
+    fireEvent.click(await screen.findByRole("button", { name: "运行全部" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+    expect(updateTaskStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /确认派发/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps run all disabled on an empty queued column", async () => {
+    // A non-queued card keeps the board out of its empty state while the
+    // queued column stays at N=0.
+    seedTask("t-bl", "待办任务", "backlog");
+    injectIpcCommands(testDoubleCommands());
+
+    renderWithProviders(<BoardView />);
+
+    const button = await screen.findByRole("button", { name: "运行全部" });
+    expect(button).toBeDisabled();
+  });
+});

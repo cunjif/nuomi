@@ -118,6 +118,20 @@ export function testDoubleCommands(): CommandSet {
       t.updatedAt = Date.now();
       return ok(null);
     },
+    async deleteTask(taskId) {
+      const idx = tdState.tasks.findIndex((t) => t.id === taskId);
+      if (idx < 0) return err("task.not_found", `task#${taskId} not found`);
+      const removed = tdState.tasks[idx];
+      if (removed && removed.status === "running") {
+        return err("task.invalid_status", `task#${taskId} is running; cancel it before deleting`);
+      }
+      tdState.tasks.splice(idx, 1);
+      // Mirror the backend cascade: approvals → runs → task.
+      const runIds = new Set(tdState.runs.filter((r) => r.taskId === taskId).map((r) => r.id));
+      tdState.runs = tdState.runs.filter((r) => r.taskId !== taskId);
+      tdState.approvals = tdState.approvals.filter((a) => !runIds.has(a.runId));
+      return ok(null);
+    },
     async getRun(runId) {
       const r = tdState.runs.find((x) => x.id === runId);
       return r ? ok(r) : err("store.not_found", `run#${runId} not found`);
