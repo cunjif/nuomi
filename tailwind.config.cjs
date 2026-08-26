@@ -15,7 +15,7 @@ module.exports = {
         ink: {
           DEFAULT: "var(--nuomi-ink, #e6e6e6)",
           muted: "var(--nuomi-ink-muted, #9aa3ad)",
-          accent: "var(--nuomi-accent, #7aa2f7)",
+          accent: "var(--nuomi-accent, #98bcfc)",
         },
         state: {
           ok: "var(--nuomi-ok, #9ece6a)",

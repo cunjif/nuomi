@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Contrast ratios for every semantic pairing below are guarded by
+   src/styles/themeContrast.test.ts — run `pnpm test` after tuning tokens. */
+
 :root {
   /* Light theme (default per html:not(.dark)) */
   --nuomi-surface: #f5f6f8;
@@ -10,9 +13,9 @@
   --nuomi-scrim: rgba(15, 23, 42, 0.35);
   --nuomi-ink: #1f2430;
   --nuomi-ink-muted: #5b6572;
-  --nuomi-accent: #3b5bdb;
-  --nuomi-ok: #2f9e44;
-  --nuomi-warn: #b8860b;
+  --nuomi-accent: #3150cb;
+  --nuomi-ok: #166a2a;
+  --nuomi-warn: #8a6508;
   --nuomi-danger: #c92a2a;
 }
 
@@ -23,7 +26,7 @@
   --nuomi-scrim: rgba(0, 0, 0, 0.5);
   --nuomi-ink: #e6e6e6;
   --nuomi-ink-muted: #9aa3ad;
-  --nuomi-accent: #7aa2f7;
+  --nuomi-accent: #98bcfc;
   --nuomi-ok: #9ece6a;
   --nuomi-warn: #e0af68;
   --nuomi-danger: #f7768e;
