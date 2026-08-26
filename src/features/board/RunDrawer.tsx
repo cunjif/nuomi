@@ -18,7 +18,7 @@ export function RunDrawer(): ReactNode {
   if (taskId === null) return null;
   const close = (): void => setRunDrawerTask(null);
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={close}>
+    <div className="fixed inset-0 z-40 flex justify-end bg-surface-scrim" onClick={close}>
       <aside
         role="dialog"
         aria-label={t("board.runsFor", { title: taskId })}

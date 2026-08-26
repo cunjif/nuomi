@@ -49,6 +49,11 @@
     "disconnected": "Disconnected",
     "checking": "Connecting…"
   },
+  "theme": {
+    "toggle": "Toggle theme",
+    "dark": "Dark",
+    "light": "Light"
+  },
   "sessions": {
     "heading": "Sessions",
     "newSession": "New session",
@@ -85,6 +90,12 @@
     "autoFormRun": "Auto-form & run",
     "autoFormStarted": "Auto-team ready: {{team}} ({{members}} members) — run started: {{run}}",
     "autoFormFailed": "Failed to auto-form and run",
+    "autoFormDialogTitle": "Auto-team preview: {{title}}",
+    "autoFormMemberHeading": "Members",
+    "willCreateRoleBadge": "Will create role",
+    "topologyLabel": "Topology",
+    "rationaleHeading": "Rationale",
+    "confirmRun": "Form & run",
     "status_backlog": "Backlog",
     "status_queued": "Queued",
     "status_running": "Running",
@@ -251,6 +262,14 @@
       "restartHint": "The integration list loads at app startup — restart to apply changes.",
       "empty": "No integrations yet — fill in the form above to add one."
     }
+  },
+  "editor": {
+    "languageLabel": "Language",
+    "saveHint": "Ctrl+S to save"
+  },
+  "tab": {
+    "unsavedTitle": "Unsaved changes",
+    "closeConfirm": "Confirm close"
   },
   "files": {
     "treeLabel": "Workspace files",

@@ -97,6 +97,7 @@ export const ipc = {
   deleteTeam: (teamId: string) => unwrap(current.deleteTeam(teamId)),
   listWhiteboardNotes: (sessionId: string) => unwrap(current.listWhiteboardNotes(sessionId)),
   formTeam: (task: string, sessionId: string | null) => unwrap(current.formTeam(task, sessionId)),
+  previewTeam: (task: string) => unwrap(current.previewTeam(task)),
   runTeamOnTask: (taskId: string, teamId: string) => unwrap(current.runTeamOnTask(taskId, teamId)),
   runTeamSession: (sessionId: string, teamId: string, task: string) =>
     unwrap(current.runTeamSession(sessionId, teamId, task)),

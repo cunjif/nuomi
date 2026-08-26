@@ -109,8 +109,8 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
   });
 });
 
-describe("BoardView — auto-form & run (M-FORM1 F4)", () => {
-  it("forms a team from the task text, then runs it and toasts team + run id", async () => {
+describe("BoardView — auto-form dry-run (打磨③b)", () => {
+  const seedTask = (): void => {
     tdState.tasks.push({
       id: "t9",
       sessionId: null,
@@ -120,24 +120,41 @@ describe("BoardView — auto-form & run (M-FORM1 F4)", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+  };
+
+  it("previews the plan first, then forms and runs only after confirming", async () => {
+    seedTask();
     const base = testDoubleCommands();
+    const previewTeam = vi.fn(base.previewTeam);
     const formTeam = vi.fn(base.formTeam);
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
-    injectIpcCommands({ ...base, formTeam, runTeamOnTask });
+    injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
 
     renderWithProviders(<BoardView />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
 
+    // Step 1: dry-run preview is issued before any dialog or side effect.
+    await waitFor(() =>
+      expect(previewTeam).toHaveBeenCalledWith("群聊任务\n覆盖三个角色"),
+    );
+    expect(formTeam).not.toHaveBeenCalled();
+
+    // The confirmation dialog shows member rows with kind + will-create badges.
+    const dialog = await screen.findByRole("dialog", { name: /自发组队预览/ });
+    expect(dialog).toHaveTextContent("auto-planner");
+    expect(dialog).toHaveTextContent("cli_profile");
+    expect(dialog).toHaveTextContent("将新建 Role");
+    expect(dialog).toHaveTextContent("auto-worker");
+    expect(dialog).toHaveTextContent("群聊 Group Chat");
+    expect(dialog).toHaveTextContent("规划理由");
+
+    // Step 2: only confirming triggers the existing form → run chain.
+    fireEvent.click(await screen.findByRole("button", { name: "组建并运行" }));
     await waitFor(() => expect(formTeam).toHaveBeenCalledWith("群聊任务\n覆盖三个角色", null));
     await waitFor(() => expect(runTeamOnTask).toHaveBeenCalledWith("t9", "auto-team-1"));
-    // The formed team landed in state as a runnable group_chat team.
-    const formedName = tdState.teams.find((t) => t.id === "auto-team-1")?.name;
-    expect(formedName).toBeDefined();
-    expect(tdState.teams.some((t) => t.id === "auto-team-1" && t.topology === "group_chat")).toBe(
-      true,
-    );
-    const runId = tdState.runs.find((r) => r.taskId === "t9")?.id;
+    const formedName = tdState.teams.find((team) => team.id === "auto-team-1")?.name;
+    const runId = tdState.runs.find((run) => run.taskId === "t9")?.id;
     expect(runId).toBeDefined();
     await waitFor(() =>
       expect(
@@ -148,35 +165,49 @@ describe("BoardView — auto-form & run (M-FORM1 F4)", () => {
               toast.kind === "success" &&
               toast.message.includes("自发组队完成") &&
               toast.message.includes(formedName ?? "") &&
-              toast.message.includes("2 名成员") &&
               toast.message.includes(runId ?? ""),
           ),
       ).toBe(true),
     );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("does not start a run when formTeam fails with team.plan_invalid", async () => {
-    tdState.tasks.push({
-      id: "t11",
-      sessionId: null,
-      title: "坏计划任务",
-      description: "",
-      status: "backlog",
-      createdAt: 1,
-      updatedAt: 1,
-    });
+  it("never calls formTeam when the user cancels the preview dialog", async () => {
+    seedTask();
     const base = testDoubleCommands();
-    const formTeam = vi.fn(async () => {
-      throw new IpcCommandError("team.plan_invalid", "plan invalid");
-    });
+    const previewTeam = vi.fn(base.previewTeam);
+    const formTeam = vi.fn(base.formTeam);
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
-    injectIpcCommands({ ...base, formTeam, runTeamOnTask });
+    injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
 
     renderWithProviders(<BoardView />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
 
-    await waitFor(() => expect(formTeam).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(formTeam).not.toHaveBeenCalled();
+    expect(runTeamOnTask).not.toHaveBeenCalled();
+    expect(tdState.teams.some((team) => team.id.startsWith("auto-team-"))).toBe(false);
+  });
+
+  it("toasts by code and skips the dialog when previewTeam fails with team.plan_invalid", async () => {
+    seedTask();
+    const base = testDoubleCommands();
+    const previewTeam = vi.fn(async () => {
+      throw new IpcCommandError("team.plan_invalid", "plan invalid");
+    });
+    const formTeam = vi.fn(base.formTeam);
+    const runTeamOnTask = vi.fn(base.runTeamOnTask);
+    injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
+
+    renderWithProviders(<BoardView />);
+    fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
+    fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
+
+    await waitFor(() => expect(previewTeam).toHaveBeenCalledOnce());
     await waitFor(() =>
       expect(
         useToastStore
@@ -184,8 +215,8 @@ describe("BoardView — auto-form & run (M-FORM1 F4)", () => {
           .toasts.some((toast) => toast.kind === "error" && toast.message.includes("组队计划无效")),
       ).toBe(true),
     );
-    // Step two never fired on a failed form.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(formTeam).not.toHaveBeenCalled();
     expect(runTeamOnTask).not.toHaveBeenCalled();
-    expect(tdState.teams.some((t) => t.id.startsWith("auto-team-"))).toBe(false);
   });
 });

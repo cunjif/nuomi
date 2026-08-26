@@ -7,10 +7,11 @@ import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { DOMAIN_CHANNEL } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { describeError } from "../../i18n";
-import type { TaskDto } from "../../lib/ipc/bindings.gen";
+import type { TaskDto, TeamPlanDto } from "../../lib/ipc/bindings.gen";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
+import { AutoFormConfirmDialog } from "./AutoFormConfirmDialog";
 import { BoardColumn } from "./BoardColumn";
 import { NewTaskForm } from "./NewTaskForm";
 import { RunDrawer } from "./RunDrawer";
@@ -21,6 +22,9 @@ export function BoardView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
+  const [planConfirm, setPlanConfirm] = useState<
+    { taskId: string; taskTitle: string; plan: TeamPlanDto } | null
+  >(null);
   const setRunDrawerTask = useUiStore((s) => s.setRunDrawerTask);
   const tasksQuery = useQuery({ queryKey: ["tasks", null], queryFn: () => ipc.listTasks(null) });
 
@@ -42,11 +46,26 @@ export function BoardView(): ReactNode {
     onError: (e) => toast.error(`${t("board.runWithTeamFailed")}: ${describeError(e)}`),
   });
 
-  const autoFormRunMut = useMutation({
+  const taskText = (taskId: string): string => {
+    const task = (tasksQuery.data ?? []).find((x) => x.id === taskId);
+    return [task?.title ?? "", task?.description ?? ""].filter(Boolean).join("\n");
+  };
+
+  // Step 1 of 自发组队: dry-run preview only — no roles/teams are touched yet.
+  const previewTeamMut = useMutation({
     mutationFn: async ({ taskId }: { taskId: string }) => {
       const task = (tasksQuery.data ?? []).find((x) => x.id === taskId);
-      const text = [task?.title ?? "", task?.description ?? ""].filter(Boolean).join("\n");
-      const team = await ipc.formTeam(text, null);
+      const plan = await ipc.previewTeam(taskText(taskId));
+      return { taskId, taskTitle: task?.title ?? "", plan };
+    },
+    onSuccess: ({ taskId, taskTitle, plan }) => setPlanConfirm({ taskId, taskTitle, plan }),
+    onError: (e) => toast.error(`${t("board.autoFormFailed")}: ${describeError(e)}`),
+  });
+
+  // Step 2 of 自发组队: the user confirmed — form the team and run it.
+  const autoFormRunMut = useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) => {
+      const team = await ipc.formTeam(taskText(taskId), null);
       const run = await ipc.runTeamOnTask(taskId, team.id);
       return { team, run };
     },
@@ -116,7 +135,7 @@ export function BoardView(): ReactNode {
                   onOpenRuns={setRunDrawerTask}
                   onMove={(taskId, next) => moveMut.mutate({ taskId, status: next })}
                   onRunWithTeam={(taskId, teamId) => runWithTeamMut.mutate({ taskId, teamId })}
-                  onAutoFormRun={(taskId) => autoFormRunMut.mutate({ taskId })}
+                  onAutoFormRun={(taskId) => previewTeamMut.mutate({ taskId })}
                 />
               ))}
             </div>
@@ -124,6 +143,18 @@ export function BoardView(): ReactNode {
         </AsyncBoundary>
       </div>
       <RunDrawer />
+      {planConfirm && (
+        <AutoFormConfirmDialog
+          taskTitle={planConfirm.taskTitle}
+          plan={planConfirm.plan}
+          onConfirm={() => {
+            const { taskId } = planConfirm;
+            setPlanConfirm(null);
+            autoFormRunMut.mutate({ taskId });
+          }}
+          onCancel={() => setPlanConfirm(null)}
+        />
+      )}
     </div>
   );
 }

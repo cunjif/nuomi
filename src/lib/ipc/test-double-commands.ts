@@ -18,6 +18,7 @@ import type {
   TaskDto,
   TeamDto,
   TeamInput,
+  TeamPlanDto,
 } from "./bindings.gen";
 import type { commands as Commands } from "./bindings.gen";
 import { listDir, nextId, tdState } from "./test-double-state";
@@ -36,6 +37,9 @@ const errWithDetails = (code: string, message: string, details: JsonValue): Resu
 
 /** Preset member roles every auto-formed team binds (deterministic). */
 const AUTO_FORM_ROLE_IDS = ["role-auto-planner", "role-auto-worker"] as const;
+
+/** Fixed plan copy for the preview double (打磨③b: deterministic dry-run). */
+const PREVIEW_RATIONALE = "规划器选择一个 CLI 规划成员与既有 worker Role 组成群聊团队";
 
 /** Deterministic slug: keep letters/digits (CJK included), collapse the rest to `-`. */
 const slug = (text: string): string =>
@@ -404,6 +408,25 @@ export function testDoubleCommands(): CommandSet {
       };
       tdState.teams.push(created);
       return ok({ ...created });
+    },
+    async previewTeam(task) {
+      const trimmed = task.trim();
+      if (trimmed.length === 0) {
+        return err("task.invalid", "task text must not be empty");
+      }
+      // Deterministic dry-run: same text always yields the same plan, and the
+      // members mirror what form_team will actually build (打磨③b).
+      const plan: TeamPlanDto = {
+        topology: "group_chat",
+        members: [
+          { kind: "cli_profile", refId: "agent-auto-planner", name: "auto-planner", willCreateRole: true },
+          { kind: "role", refId: AUTO_FORM_ROLE_IDS[1] ?? "role-auto-worker", name: "auto-worker", willCreateRole: false },
+        ],
+        maxRounds: 6,
+        required: ["planner"],
+        rationale: PREVIEW_RATIONALE,
+      };
+      return ok(plan);
     },
     async runTeamOnTask(taskId, teamId) {
       const task = tdState.tasks.find((t) => t.id === taskId);

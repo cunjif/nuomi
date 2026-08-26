@@ -49,6 +49,11 @@
     "disconnected": "连接断开",
     "checking": "连接中…"
   },
+  "theme": {
+    "toggle": "切换主题",
+    "dark": "暗色",
+    "light": "亮色"
+  },
   "sessions": {
     "heading": "会话",
     "newSession": "新建会话",
@@ -85,6 +90,12 @@
     "autoFormRun": "自发组队运行",
     "autoFormStarted": "自发组队完成：{{team}}（{{members}} 名成员），运行已启动：{{run}}",
     "autoFormFailed": "自发组队运行失败",
+    "autoFormDialogTitle": "自发组队预览：{{title}}",
+    "autoFormMemberHeading": "成员",
+    "willCreateRoleBadge": "将新建 Role",
+    "topologyLabel": "拓扑",
+    "rationaleHeading": "规划理由",
+    "confirmRun": "组建并运行",
     "status_backlog": "待办",
     "status_queued": "排队中",
     "status_running": "运行中",
@@ -251,6 +262,14 @@
       "restartHint": "集成清单在应用启动时加载，修改后需重启生效",
       "empty": "还没有集成，填写上方表单添加一个。"
     }
+  },
+  "editor": {
+    "languageLabel": "语言",
+    "saveHint": "Ctrl+S 保存"
+  },
+  "tab": {
+    "unsavedTitle": "未保存的更改",
+    "closeConfirm": "确认关闭"
   },
   "files": {
     "treeLabel": "工作区文件",
