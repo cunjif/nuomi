@@ -78,6 +78,28 @@ pub fn list_tasks_by_status(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Removes the task row itself; `Ok(false)` when no row matched. Children
+/// are NOT touched here — runs/approvals must be cleared first (the 0002
+/// FKs have no CASCADE); prefer [`delete_cascade`].
+pub fn delete(conn: &Connection, id: &str) -> Result<bool, StoreError> {
+    let n = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+    Ok(n > 0)
+}
+
+/// Atomic task deletion: approvals → runs → task, all inside ONE
+/// transaction so the FK chain can never observe an intermediate state.
+/// `events` is intentionally left untouched — the log is append-only and
+/// dangling aggregates are acceptable history. `Ok(false)` when the task
+/// did not exist (nothing was written).
+pub fn delete_cascade(conn: &Connection, id: &str) -> Result<bool, StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    delete_approvals_for_task(&tx, id)?;
+    delete_runs_for_task(&tx, id)?;
+    let deleted = delete(&tx, id)?;
+    tx.commit()?;
+    Ok(deleted)
+}
+
 // ---------------------------------------------------------------- runs
 
 pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), StoreError> {
@@ -159,6 +181,14 @@ pub fn list_runs_by_status(conn: &Connection, status: RunState) -> Result<Vec<Ru
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Removes every run of a task; returns how many rows went away. Approvals
+/// referencing those runs must be deleted first (see
+/// [`delete_approvals_for_task`]).
+pub fn delete_runs_for_task(conn: &Connection, task_id: &str) -> Result<usize, StoreError> {
+    let n = conn.execute("DELETE FROM runs WHERE task_id = ?1", params![task_id])?;
+    Ok(n)
+}
+
 // ---------------------------------------------------------------- approvals
 
 pub fn insert_approval(conn: &Connection, a: &Approval) -> Result<(), StoreError> {
@@ -222,6 +252,16 @@ pub fn list_approvals_by_run(conn: &Connection, run_id: &str) -> Result<Vec<Appr
     )?;
     let rows = stmt.query_map(params![run_id], row_to_approval)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Removes approvals hanging off a task's runs (children before the parent
+/// runs); returns how many rows went away.
+pub fn delete_approvals_for_task(conn: &Connection, task_id: &str) -> Result<usize, StoreError> {
+    let n = conn.execute(
+        "DELETE FROM approvals WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?1)",
+        params![task_id],
+    )?;
+    Ok(n)
 }
 
 // ---------------------------------------------------------------- schedules
@@ -572,6 +612,62 @@ mod tests {
                 [],
             )
             .is_err());
+    }
+
+    #[test]
+    fn task_delete_true_then_false_roundtrip() {
+        let conn = db();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        insert_task(&conn, &task("t1", TaskStatus::Queued)).unwrap();
+
+        assert!(delete(&conn, "t1").unwrap());
+        assert!(matches!(
+            get_task(&conn, "t1"),
+            Err(StoreError::NotFound { entity: "task", .. })
+        ));
+        assert!(!delete(&conn, "t1").unwrap());
+        assert!(list_tasks(&conn, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn task_delete_cascade_removes_children_and_reports_missing() {
+        let conn = db();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        insert_task(&conn, &task("t1", TaskStatus::Done)).unwrap();
+        insert_task(&conn, &task("t2", TaskStatus::Queued)).unwrap();
+        insert_run(&conn, &run("r1", "t1", RunState::Succeeded)).unwrap();
+        insert_run(&conn, &run("r2", "t1", RunState::Failed)).unwrap();
+        insert_run(&conn, &run("r3", "t2", RunState::Queued)).unwrap();
+        insert_approval(&conn, &approval("a1", "r1")).unwrap();
+
+        // FK enforcement: the bare parent delete cannot leapfrog children.
+        assert!(delete(&conn, "t1").is_err());
+
+        assert!(delete_cascade(&conn, "t1").unwrap());
+        assert!(matches!(
+            get_task(&conn, "t1"),
+            Err(StoreError::NotFound { entity: "task", .. })
+        ));
+        assert!(list_runs_by_task(&conn, "t1").unwrap().is_empty());
+        assert!(matches!(
+            get_approval(&conn, "a1"),
+            Err(StoreError::NotFound {
+                entity: "approval",
+                ..
+            })
+        ));
+
+        // Sibling rows survive the cascade untouched.
+        assert_eq!(get_task(&conn, "t2").unwrap().id, "t2");
+        assert_eq!(list_runs_by_task(&conn, "t2").unwrap()[0].id, "r3");
+
+        // Second pass: nothing left → false, nothing written.
+        assert!(!delete_cascade(&conn, "t1").unwrap());
+
+        // Standalone child helpers.
+        assert_eq!(delete_approvals_for_task(&conn, "t2").unwrap(), 0);
+        assert_eq!(delete_runs_for_task(&conn, "t2").unwrap(), 1);
+        assert!(list_runs_by_task(&conn, "t2").unwrap().is_empty());
     }
 
     // ---- runs
