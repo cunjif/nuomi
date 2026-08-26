@@ -101,6 +101,7 @@ queued ─▶ running ⇄ awaiting_approval ─▶ succeeded
 
 内核优先阶段（当前）：**headless CLI**（`nuomi run` / `nuomi resume` / REPL）为唯一产品表面。
 UI 里程碑回归时启用：Board 看板 · Run 详情（实时事件流）· Agents 管理 · Approvals 收件箱 · Scheduler 定时任务 · Settings（provider 密钥，OS keyring 加密存储）。
+桌面壳与 CLI 通过同一 SQLite 库共享会话——设 `NUOMI_DB_PATH` 指向同一文件（或 CLI `--db`），任一端创建的会话可在另一端 list/resume 续传。
 
 ## 6. 开发命令 / Development Commands
 

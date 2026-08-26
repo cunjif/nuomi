@@ -12,6 +12,7 @@ use nuomi_core::plugins::DeltaCallback;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
+const DEFAULT_DB_FILE: &str = "nuomi.db";
 
 pub const USAGE: &str = "\
 nuomi — headless agent harness
@@ -97,6 +98,19 @@ fn parse_protocol(raw: Option<&str>) -> ProviderProtocol {
     }
 }
 
+/// Resolves the SQLite database path with priority: `--db` flag, then the
+/// `NUOMI_DB_PATH` env value, then the default `nuomi.db` in the working
+/// directory — so CLI and desktop shell share one session library when pointed
+/// at the same file. The env value is passed in by the caller instead of read
+/// here, keeping this pure and race-free under tests.
+fn resolve_db_path(flag: Option<PathBuf>, env_value: Option<String>) -> PathBuf {
+    match (flag, env_value) {
+        (Some(db), _) => db,
+        (None, Some(env)) if !env.trim().is_empty() => PathBuf::from(env),
+        _ => PathBuf::from(DEFAULT_DB_FILE),
+    }
+}
+
 async fn boot_kernel(opts: &CliOptions) -> anyhow::Result<NuomiKernel> {
     // CLI v1: key comes from the environment; never persisted or logged.
     let api_key = std::env::var("NUOMI_API_KEY").unwrap_or_default();
@@ -112,7 +126,8 @@ async fn boot_kernel(opts: &CliOptions) -> anyhow::Result<NuomiKernel> {
             .clone()
             .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
     };
-    let db_path = opts.db.clone().unwrap_or_else(|| PathBuf::from("nuomi.db"));
+    let db_env = std::env::var("NUOMI_DB_PATH").ok();
+    let db_path = resolve_db_path(opts.db.clone(), db_env);
     Ok(NuomiKernel::boot(NuomiConfig::new(db_path, endpoint)).await?)
 }
 
@@ -402,6 +417,45 @@ mod tests {
             parse_protocol(Some("anthropic")),
             ProviderProtocol::AnthropicCompatible
         );
+    }
+
+    /// Table-driven: `--db` > `NUOMI_DB_PATH` > `./nuomi.db`. The env value is
+    /// an argument, so no process-global env mutation (no test races).
+    #[test]
+    fn resolve_db_path_priority_table() {
+        let cases: &[(&str, Option<PathBuf>, Option<String>, PathBuf)] = &[
+            (
+                "flag wins over env",
+                Some(PathBuf::from("flag.db")),
+                Some("env.db".to_string()),
+                PathBuf::from("flag.db"),
+            ),
+            (
+                "env used when flag absent",
+                None,
+                Some("env.db".to_string()),
+                PathBuf::from("env.db"),
+            ),
+            (
+                "default when flag and env absent",
+                None,
+                None,
+                PathBuf::from(DEFAULT_DB_FILE),
+            ),
+            (
+                "empty env treated as unset",
+                None,
+                Some(String::new()),
+                PathBuf::from(DEFAULT_DB_FILE),
+            ),
+        ];
+        for (name, flag, env, expected) in cases {
+            assert_eq!(
+                resolve_db_path(flag.clone(), env.clone()),
+                *expected,
+                "{name}"
+            );
+        }
     }
 
     #[tokio::test]
