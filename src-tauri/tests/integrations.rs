@@ -2,8 +2,8 @@
 //! integration CRUD over the IPC impl layer with URL masking across the
 //! boundary, `test_integration` probe (valid Feishu payload / failing
 //! endpoint), delete misses, and the notification-dispatcher smoke path
-//! (bus event → whitelisted sink → wiremock). Loopback only, zero real
-//! network.
+//! (bus event → whitelisted sink → wiremock) including hot reload of the
+//! sink set on upsert/delete. Loopback only, zero real network.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -248,5 +248,171 @@ async fn dispatcher_routes_published_bus_event_to_whitelisted_sink() {
     assert!(
         text.contains("succeeded"),
         "payload missing from body: {text}"
+    );
+}
+
+// ---------------------------------------------------------------- hot reload
+
+/// Polls `cond` every 20ms until it holds or the deadline lapses; the only
+/// waiting primitive used here (no other timing tricks).
+async fn wait_until(cond: impl FnMut() -> bool, label: &str, secs: u64) {
+    let mut cond = cond;
+    let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+    while !cond() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{label}: condition not met within {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn publish_run_state_changed(state: &nuomi_shell_lib::state::AppState, marker: &str) {
+    state.kernel.context().publish(Event::new(
+        "run.state_changed",
+        json!({ "runId": format!("r-{marker}"), "to": "running" }),
+    ));
+}
+
+/// Hot reload without an app restart: upserting the same integration name
+/// onto a new endpoint retargets delivery (A falls silent, B takes over),
+/// deleting it stops delivery entirely. A never-changing sentinel row on
+/// server C proves each probe event was dispatched under the newest
+/// generation — turning the zero-growth assertions into deterministic
+/// checks instead of sleep guesswork. Probe events racing a reload may
+/// land on the outgoing generation; that is why probes repeat until the
+/// expected endpoint answers.
+#[tokio::test]
+async fn hot_reload_applies_upsert_and_delete_without_restart() {
+    let (state, _dir) = boot_with_memory_secrets().await;
+    let (server_a, captured_a) = capturing_feishu_server().await;
+    let (server_b, captured_b) = capturing_feishu_server().await;
+    let (server_c, captured_c) = capturing_feishu_server().await;
+
+    commands::impl_upsert_integration(
+        &state,
+        feishu_input(
+            "roam-bot",
+            server_a.uri().as_str(),
+            vec!["run.state_changed".into()],
+        ),
+    )
+    .await
+    .unwrap();
+    commands::impl_upsert_integration(
+        &state,
+        feishu_input(
+            "sentinel-bot",
+            server_c.uri().as_str(),
+            vec!["run.state_changed".into()],
+        ),
+    )
+    .await
+    .unwrap();
+
+    notifier::spawn(&state);
+
+    // Baseline: the boot generation routes to A and to the sentinel.
+    publish_run_state_changed(&state, "baseline");
+    wait_until(
+        || !captured_a.lock().unwrap().is_empty(),
+        "baseline delivery to A",
+        10,
+    )
+    .await;
+    wait_until(
+        || !captured_c.lock().unwrap().is_empty(),
+        "baseline delivery to C",
+        10,
+    )
+    .await;
+    assert_eq!(captured_b.lock().unwrap().len(), 0);
+
+    // Upsert same name pointing at B: the running dispatcher must pick up
+    // the change. Probes racing the swap land on A harmlessly; the first
+    // one after the reload reaches B.
+    commands::impl_upsert_integration(
+        &state,
+        feishu_input(
+            "roam-bot",
+            server_b.uri().as_str(),
+            vec!["run.state_changed".into()],
+        ),
+    )
+    .await
+    .unwrap();
+    wait_until(
+        || {
+            publish_run_state_changed(&state, "retarget-probe");
+            !captured_b.lock().unwrap().is_empty()
+        },
+        "retargeted sink B receives",
+        10,
+    )
+    .await;
+
+    // The B-generation is provably live now: pin exact counts, push one
+    // more event through B, then require A stayed flat across it.
+    let before_a = captured_a.lock().unwrap().len();
+    let before_b = captured_b.lock().unwrap().len();
+    wait_until(
+        || {
+            publish_run_state_changed(&state, "post-reload");
+            captured_b.lock().unwrap().len() > before_b
+        },
+        "post-reload event reaches B",
+        5,
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        captured_a.lock().unwrap().len(),
+        before_a,
+        "A must see no traffic after the retarget"
+    );
+
+    // Delete roam-bot: neither endpoint may ever receive again. Probes
+    // racing the delete-reload legitimately land on the outgoing
+    // generation (B), so publish one event at a time and stop at the first
+    // one that reached C alone — sequential dispatch means that event
+    // provably ran under the post-delete generation. If the deleted row
+    // were still materialized, every probe would also hit A or B and the
+    // loop would exhaust into the assertion below.
+    let doomed = commands::impl_list_integrations(&state)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.name == "roam-bot")
+        .expect("roam-bot still listed");
+    commands::impl_delete_integration(&state, doomed.id)
+        .await
+        .unwrap();
+
+    let mut settled = false;
+    for _ in 0..100 {
+        let (before_a, before_b, before_c) = (
+            captured_a.lock().unwrap().len(),
+            captured_b.lock().unwrap().len(),
+            captured_c.lock().unwrap().len(),
+        );
+        publish_run_state_changed(&state, "delete-probe");
+        wait_until(
+            || captured_c.lock().unwrap().len() > before_c,
+            "sentinel C receives the probe",
+            10,
+        )
+        .await;
+        // Settle so stragglers of the same dispatch pass cannot hide.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if captured_a.lock().unwrap().len() == before_a
+            && captured_b.lock().unwrap().len() == before_b
+        {
+            settled = true;
+            break;
+        }
+    }
+    assert!(
+        settled,
+        "deleted integration still received probes (no C-only event appeared)"
     );
 }

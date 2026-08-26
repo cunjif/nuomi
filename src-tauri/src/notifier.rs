@@ -10,10 +10,20 @@
 //! never retried, never blocking, never panicking; broadcast Lagged warns
 //! and keeps streaming, mirroring the event bridge.
 //!
-//! `kind = telemetry` rows are skipped on this path: each ships through its
-//! own batched NDJSON [`TelemetryExporter`] started alongside the loop.
+//! Hot reload: the dispatcher watches [`AppState::integrations_reload`]
+//! (bumped by every integration upsert/delete) and rebuilds its entire sink
+//! set as a new generation — notification sinks swap wholesale between
+//! events, while the previous generation's telemetry exporters are cancelled
+//! (triggering a final flush of their residual batch) and force-aborted by a
+//! watchdog once a grace budget elapses. Events surfacing during the reload
+//! window may be dropped (the bus buffers what fits; overflow warns as
+//! Lagged) — reloading never blocks on dispatch.
+//!
+//! `kind = telemetry` rows skip that dispatch path: each ships through its
+//! own batched NDJSON [`TelemetryExporter`].
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use nuomi_core::domain::{Integration, IntegrationKind};
 use nuomi_core::harness::{Event, EventBus};
@@ -29,7 +39,15 @@ const BODY_MAX_CHARS: usize = 800;
 
 /// Telemetry batch shape defaults (SPEC D4).
 const TELEMETRY_BATCH_SIZE: usize = 10;
-const TELEMETRY_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+const TELEMETRY_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Grace granted to superseded telemetry exporters for their final flush
+/// before the backstop abort fires. Bounded so a wedged endpoint can delay
+/// cleanup, never the reload itself (which proceeds immediately).
+const TELEMETRY_FLUSH_GRACE: Duration = Duration::from_secs(3);
+
+/// One exporter task plus the token that triggers its final flush.
+type ExporterGuard = (tokio::task::JoinHandle<u64>, CancellationToken);
 
 // ------------------------------------------------------------------ public
 
@@ -40,51 +58,125 @@ const TELEMETRY_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_
 /// no event published afterwards can slip through; the slow SQLite
 /// materialization runs inside the spawned task while early events buffer
 /// in the broadcast channel.
+///
+/// The dispatcher runs forever: an empty integration list yields an empty
+/// generation (not an exit), so later CRUD takes effect on the next reload
+/// signal instead of requiring an app restart.
 pub fn spawn(state: &AppState) {
-    let rx = state.kernel.context().subscribe();
+    let mut rx = state.kernel.context().subscribe();
     let db_path = state.db_path.clone();
     let bus = state.kernel.context().bus();
+    let mut reload = state.integrations_reload.clone();
     tokio::spawn(async move {
-        let (sinks, warnings) = match materialize(db_path).await {
-            Ok(pairs) => pairs,
+        // Initial materialization; a failure here starts from an empty
+        // generation and the first reload signal repairs it.
+        let mut current = match Generation::load(db_path.clone(), bus.clone()).await {
+            Ok(gen) => gen,
             Err(e) => {
                 tracing::warn!(error = %e, "notification dispatcher could not load integrations");
-                return;
+                Generation::empty()
             }
         };
-        for warning in &warnings {
-            tracing::warn!(warning = %warning, "integration skipped");
-        }
-
-        let mut notify_sinks: Vec<(Integration, Arc<dyn OutboundSink>)> = Vec::new();
-        for (integration, sink) in sinks {
-            if integration.kind == IntegrationKind::Telemetry {
-                start_telemetry_exporter(&integration, bus.clone());
-            } else {
-                notify_sinks.push((integration, sink));
+        loop {
+            tokio::select! {
+                changed = reload.changed() => {
+                    // The sender lives in AppState: losing it means teardown,
+                    // so stop instead of spinning on the closed channel.
+                    if changed.is_err() {
+                        tracing::warn!("integration reload signal closed; dispatcher stops");
+                        break;
+                    }
+                    let gen = *reload.borrow_and_update();
+                    tracing::info!(generation = gen, "reloading notification integrations");
+                    match Generation::load(db_path.clone(), bus.clone()).await {
+                        Ok(next) => {
+                            current.shutdown();
+                            current = next;
+                        }
+                        // Transient store failure: keep serving the old
+                        // generation untouched until the next signal retries
+                        // the swap.
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "integration reload failed; keeping previous sinks"
+                            );
+                        }
+                    }
+                }
+                delivered = rx.recv() => match delivered {
+                    Ok(event) => dispatch_one(&current.sinks, &event).await,
+                    Err(RecvError::Lagged(n)) => {
+                        tracing::warn!(
+                            skipped = n,
+                            "notification dispatcher lagged behind the bus"
+                        );
+                    }
+                    Err(RecvError::Closed) => break,
+                }
             }
         }
-        if notify_sinks.is_empty() {
-            tracing::info!("no notification integrations configured; dispatcher exits");
-            return;
-        }
-        dispatch_loop(rx, notify_sinks).await;
+        current.shutdown();
     });
 }
 
-// ------------------------------------------------------------------- loop
+// -------------------------------------------------------------- generation
 
-async fn dispatch_loop(
-    mut rx: tokio::sync::broadcast::Receiver<Event>,
+/// One materialized snapshot of the `integrations` table: notification
+/// sinks plus the telemetry exporters started alongside them. Replaced
+/// wholesale on every reload signal.
+struct Generation {
     sinks: Vec<(Integration, Arc<dyn OutboundSink>)>,
-) {
-    loop {
-        match rx.recv().await {
-            Ok(event) => dispatch_one(&sinks, &event).await,
-            Err(RecvError::Lagged(n)) => {
-                tracing::warn!(skipped = n, "notification dispatcher lagged behind the bus");
+    exporters: Vec<ExporterGuard>,
+}
+
+impl Generation {
+    fn empty() -> Self {
+        Self {
+            sinks: Vec::new(),
+            exporters: Vec::new(),
+        }
+    }
+
+    /// Reads enabled rows from SQLite (blocking pool) and builds sinks;
+    /// telemetry rows become running exporters owned by this generation.
+    async fn load(db_path: Arc<str>, bus: EventBus) -> Result<Self, nuomi_core::store::StoreError> {
+        let (rows, warnings) = materialize(db_path).await?;
+        for warning in &warnings {
+            tracing::warn!(warning = %warning, "integration skipped");
+        }
+        let mut sinks = Vec::new();
+        let mut exporters = Vec::new();
+        for (integration, sink) in rows {
+            if integration.kind == IntegrationKind::Telemetry {
+                if let Some(guard) = start_telemetry_exporter(&integration, bus.clone()) {
+                    exporters.push(guard);
+                }
+            } else {
+                sinks.push((integration, sink));
             }
-            Err(RecvError::Closed) => break,
+        }
+        Ok(Self { sinks, exporters })
+    }
+
+    /// Cancels every exporter of this generation (their tokens trigger one
+    /// final flush of buffered events) and detaches a per-exporter
+    /// watchdog: it waits up to [`TELEMETRY_FLUSH_GRACE`] for the flush to
+    /// finish naturally, then force-aborts the task so nothing outlives its
+    /// generation. Returns immediately — cleanup never delays the swap.
+    fn shutdown(&mut self) {
+        for (mut handle, token) in self.exporters.drain(..) {
+            token.cancel();
+            tokio::spawn(async move {
+                let grace = tokio::time::sleep(TELEMETRY_FLUSH_GRACE);
+                tokio::pin!(grace);
+                tokio::select! {
+                    // Flushed and exited within the grace budget.
+                    _ = &mut handle => {}
+                    // Wedged past the budget: abort as backstop.
+                    _ = &mut grace => handle.abort(),
+                }
+            });
         }
     }
 }
@@ -115,15 +207,11 @@ async fn dispatch_one(sinks: &[(Integration, Arc<dyn OutboundSink>)], event: &Ev
     }
 }
 
-/// Starts one NDJSON exporter for an enabled `telemetry` row.
-///
-/// Token trade-off (deliberate): the shell has no graceful-shutdown hook
-/// yet, so the cancellation token is handed straight to the exporter and
-/// never cancelled — the detached task lives for the whole process lifetime
-/// and dies with it. Keeping the token in AppState only pays off once a
-/// shutdown-flush path exists; the exporter already flushes its buffer when
-/// the bus closes.
-fn start_telemetry_exporter(integration: &Integration, bus: EventBus) {
+/// Starts one NDJSON exporter for an enabled `telemetry` row and returns
+/// its lifecycle guard (JoinHandle + cancellation token) so the owning
+/// [`Generation`] can flush-and-abort it on reload. `None` = malformed row
+/// (missing `webhook_url`), reported as a warning and skipped.
+fn start_telemetry_exporter(integration: &Integration, bus: EventBus) -> Option<ExporterGuard> {
     let Some(url) = integration
         .config
         .get("webhook_url")
@@ -133,11 +221,12 @@ fn start_telemetry_exporter(integration: &Integration, bus: EventBus) {
             name = %integration.name,
             "telemetry integration has no webhook_url; exporter not started"
         );
-        return;
+        return None;
     };
     let cancel = CancellationToken::new();
-    let _exporter = TelemetryExporter::new(url, TELEMETRY_BATCH_SIZE, TELEMETRY_FLUSH_INTERVAL)
-        .start(bus, cancel);
+    let handle = TelemetryExporter::new(url, TELEMETRY_BATCH_SIZE, TELEMETRY_FLUSH_INTERVAL)
+        .start(bus, cancel.clone());
+    Some((handle, cancel))
 }
 
 // ----------------------------------------------------------------- helpers

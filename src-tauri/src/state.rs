@@ -11,6 +11,7 @@ use nuomi_core::facade::{NuomiConfig, NuomiKernel, ProviderSource};
 use nuomi_core::providers::{OsKeyring, SecretStore};
 use nuomi_core::services::{GitService, WorkspaceService};
 use nuomi_core::{CoreError, CoreResult};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 /// Tracks in-flight background team runs so a board transition to
@@ -70,6 +71,13 @@ pub struct AppState {
     pub secrets: Arc<dyn SecretStore>,
     /// Cancellation tokens for supervised background team runs.
     pub run_cancels: RunCancelRegistry,
+    /// Generation counter bumped by every integration upsert/delete; the
+    /// notifier dispatcher watches this to hot-reload its sinks without an
+    /// app restart.
+    pub integrations_reload_tx: watch::Sender<u64>,
+    /// Receiver half of [`AppState::integrations_reload_tx`], cloned into
+    /// the notifier loop at spawn time.
+    pub integrations_reload: watch::Receiver<u64>,
 }
 
 impl AppState {
@@ -96,12 +104,15 @@ impl AppState {
         let workspace_root = std::env::var_os("NUOMI_WORKSPACE_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let (integrations_reload_tx, integrations_reload) = watch::channel(0u64);
         Ok(Self {
             kernel: Arc::new(kernel),
             db_path,
             workspace_root: std::sync::RwLock::new(workspace_root),
             secrets,
             run_cancels: RunCancelRegistry::default(),
+            integrations_reload_tx,
+            integrations_reload,
         })
     }
 

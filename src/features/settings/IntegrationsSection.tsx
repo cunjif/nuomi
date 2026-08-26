@@ -15,7 +15,7 @@ const KIND_LABEL_KEYS: Record<IntegrationKindDto, string> = {
   telemetry: "settings.integrations.kindTelemetry",
 };
 
-/** Settings section listing integrations with test/delete actions and a restart hint. */
+/** Settings section listing integrations with test/delete actions; edits hot-reload the notifier. */
 export function IntegrationsSection(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -48,12 +48,6 @@ export function IntegrationsSection(): ReactNode {
   return (
     <section aria-label={t("settings.integrations.heading")} className="mb-3">
       <h3 className="mb-2 text-sm font-semibold text-ink">{t("settings.integrations.heading")}</h3>
-      <p
-        role="note"
-        className="mb-2 rounded border border-state-warn/40 bg-surface-raised px-2 py-1 text-xs text-state-warn"
-      >
-        {t("settings.integrations.restartHint")}
-      </p>
       <IntegrationForm />
       <AsyncBoundary
         isLoading={query.isLoading}
