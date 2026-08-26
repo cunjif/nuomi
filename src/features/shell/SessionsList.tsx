@@ -6,14 +6,22 @@ import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
+import { formatRelativeTime, type RelativeTimeLocale } from "../../lib/format/relativeTime";
 
 /** Session list with create + resume (select) actions. */
 export function SessionsList(): ReactNode {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const selectedSessionId = useUiStore((s) => s.selectedSessionId);
   const selectSession = useUiStore((s) => s.selectSession);
-  const sessionsQuery = useQuery({ queryKey: ["sessions"], queryFn: ipc.listSessions });
+  // Polling keeps sessions created by the other surface (CLI shares the
+  // same SQLite db) visible without a manual refresh.
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions"],
+    queryFn: ipc.listSessions,
+    refetchInterval: 15_000,
+  });
+  const locale: RelativeTimeLocale = i18n.language === "en" ? "en" : "zh-CN";
 
   const createMut = useMutation({
     mutationFn: ipc.createSession,
@@ -58,13 +66,16 @@ export function SessionsList(): ReactNode {
                 }}
                 aria-current={selectedSessionId === session.id ? "true" : undefined}
                 title={session.title}
-                className={`w-full truncate rounded px-2 py-1 text-left text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
+                className={`flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
                   selectedSessionId === session.id
                     ? "bg-surface-overlay text-ink"
                     : "text-ink-muted hover:bg-surface-overlay"
                 }`}
               >
-                {session.title}
+                <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                <span className="shrink-0 text-xs tabular-nums">
+                  {formatRelativeTime(session.createdAt, Date.now(), locale)}
+                </span>
               </button>
             </li>
           ))}
