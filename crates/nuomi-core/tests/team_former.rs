@@ -14,7 +14,7 @@ use nuomi_core::domain::{
 use nuomi_core::harness::EventBus;
 use nuomi_core::orchestrator::OrchestratorError;
 use nuomi_core::providers::{MemorySecretStore, SecretStore};
-use nuomi_core::services::{form_team, run_team};
+use nuomi_core::services::{form_team, preview_team, run_team, TeamPlan};
 use nuomi_core::store::{migrations, repos};
 use serde_json::{json, Value};
 use tokio::time::timeout;
@@ -671,4 +671,196 @@ async fn empty_catalog_fails_with_no_planner_error() {
         OrchestratorError::InvalidTeam(message) => assert!(message.contains("no planner")),
         other => panic!("expected InvalidTeam, got {other}"),
     }
+}
+
+// ------------------------------------------------- preview (dry-run 打磨③a)
+
+/// `(roles, teams, events)` row counts — the zero-write proof triple.
+fn counts(store: &Store) -> (i64, i64, i64) {
+    let conn = connect(store);
+    let roles = repos::roles::count(&conn).unwrap();
+    let teams = repos::teams::count(&conn).unwrap();
+    let events: i64 = conn
+        .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    (roles, teams, events)
+}
+
+#[tokio::test]
+async fn preview_team_reports_members_without_writes() {
+    let session_id = "sess-preview";
+    let store = seed_store(session_id);
+    // The provider member's roleName collides with the existing writer role:
+    // the preview must show the uniquified `writer-2` without touching it.
+    let plan_server = canned_server(
+        r#"{"topology":"pipeline","members":[{"kind":"role","id":"r-writer","roleName":"writer"},{"kind":"provider","id":"p-a","roleName":"writer"},{"kind":"cli_profile","id":"cli-fix","roleName":"executor"}],"config":{"maxRounds":4,"required":["code"]},"rationale":"write, review, execute"}"#,
+    )
+    .await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-plan", "planner", plan_server.uri().as_str(), true),
+        )
+        .unwrap();
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-a", "alpha", "http://localhost:9/v1", false),
+        )
+        .unwrap();
+        repos::roles::insert(&conn, &role_row("r-writer", "writer", Some("p-plan"))).unwrap();
+        repos::agent_profiles::insert(&conn, &cli_profile_fixture()).unwrap();
+    }
+
+    let before = counts(&store);
+    let plan: TeamPlan = preview_team(
+        store.db_path.clone(),
+        secrets_for(&["kr-p-plan"]).await,
+        None,
+        "build the feature",
+        5,
+    )
+    .await
+    .expect("preview must succeed on a valid plan");
+
+    assert_eq!(plan.topology, TeamTopology::Pipeline);
+    assert_eq!(plan.rationale, "write, review, execute");
+    assert_eq!(plan.max_rounds, Some(4));
+    assert_eq!(plan.required, vec!["code".to_string()]);
+    assert_eq!(plan.members.len(), 3);
+
+    // Reused role: planned display name, no creation flag.
+    let reused = &plan.members[0];
+    assert_eq!(reused.kind, "role");
+    assert_eq!(reused.ref_id, "r-writer");
+    assert_eq!(reused.name, "writer");
+    assert!(!reused.will_create_role);
+
+    // Provider member: suffix computed against existing role names…
+    let pinned = &plan.members[1];
+    assert_eq!(pinned.kind, "provider");
+    assert_eq!(pinned.ref_id, "p-a");
+    assert_eq!(pinned.name, "writer-2");
+    assert!(pinned.will_create_role);
+
+    // …and CLI profile member flagged for creation too.
+    let bound = &plan.members[2];
+    assert_eq!(bound.kind, "cli_profile");
+    assert_eq!(bound.ref_id, "cli-fix");
+    assert_eq!(bound.name, "executor");
+    assert!(bound.will_create_role);
+
+    // Zero writes: roles/teams/events counts identical before and after.
+    assert_eq!(counts(&store), before);
+}
+
+#[tokio::test]
+async fn preview_bad_plan_fails_after_retry_with_zero_writes() {
+    let session_id = "sess-preview-bad";
+    let store = seed_store(session_id);
+    let plan_server = canned_server("still not json {").await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-plan", "planner", plan_server.uri().as_str(), false),
+        )
+        .unwrap();
+        repos::roles::insert(&conn, &role_row("r-writer", "writer", Some("p-plan"))).unwrap();
+    }
+
+    let before = counts(&store);
+    let error = preview_team(
+        store.db_path.clone(),
+        secrets_for(&["kr-p-plan"]).await,
+        None,
+        "hopeless task",
+        5,
+    )
+    .await
+    .expect_err("unparseable plan must fail");
+
+    match error {
+        OrchestratorError::InvalidTeam(message) => assert!(message.contains("plan invalid")),
+        other => panic!("expected InvalidTeam, got {other}"),
+    }
+    // Both planner attempts failed; nothing leaked into any table.
+    assert_eq!(counts(&store), before);
+}
+
+#[tokio::test]
+async fn form_team_persists_normally_after_preview() {
+    let session_id = "sess-preview-form";
+    let store = seed_store(session_id);
+    let bus = EventBus::default();
+    let mut rx = bus.subscribe();
+    let plan_server = canned_server(
+        r#"{"topology":"group_chat","members":[{"kind":"role","id":"r-writer","roleName":"writer"},{"kind":"provider","id":"p-a","roleName":"analyst"}],"config":{"maxRounds":2},"rationale":"discuss"}"#,
+    )
+    .await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-plan", "planner", plan_server.uri().as_str(), true),
+        )
+        .unwrap();
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-a", "alpha", "http://localhost:9/v1", false),
+        )
+        .unwrap();
+        repos::roles::insert(&conn, &role_row("r-writer", "writer", Some("p-plan"))).unwrap();
+    }
+
+    let before = counts(&store);
+    let preview = preview_team(
+        store.db_path.clone(),
+        secrets_for(&["kr-p-plan"]).await,
+        None,
+        "cross check",
+        5,
+    )
+    .await
+    .expect("preview ok");
+    assert_eq!(counts(&store), before, "preview leaked writes");
+    assert_eq!(preview.members[1].name, "analyst");
+
+    // The real formation right after the preview persists normally — proof
+    // the shared planning phase carries no hidden side effects.
+    let formed = form_team(
+        store.db_path.clone(),
+        Some(bus),
+        secrets_for(&["kr-p-plan"]).await,
+        None,
+        Some(session_id),
+        "cross check",
+        5,
+    )
+    .await
+    .expect("form after preview");
+
+    assert_eq!(formed.created_role_ids.len(), 1);
+    assert_eq!(formed.team.member_role_ids.len(), 2);
+    assert_eq!(
+        repos::roles::get(&connect(&store), &formed.created_role_ids[0])
+            .unwrap()
+            .name,
+        preview.members[1].name,
+        "commit name matches the previewed uniquified name"
+    );
+    let mut after = counts(&store);
+    after.0 -= 1; // the one freshly created role row
+    after.1 -= 1; // the team row
+    assert_eq!(after, before, "exactly one role + one team written by form");
+
+    // Exactly one team.formed event — published by form_team only.
+    let event = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("bus event within timeout")
+        .expect("event received");
+    assert_eq!(event.topic, "team.formed");
 }

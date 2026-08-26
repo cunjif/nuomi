@@ -6,12 +6,18 @@
 //! profiles), validates the returned JSON plan **before any write**, then
 //! persists new member roles plus the [`Team`] row in one blocking
 //! connection. Every rejection path returns before touching the database.
+//!
+//! [`preview_team`] is the dry-run half of the打磨③a milestone: it runs the
+//! exact same planning phase (materialize → planner call → parse/retry →
+//! validation → name resolution) and returns a structured [`TeamPlan`] with
+//! zero writes and zero bus events — error paths are identical to
+//! [`form_team`].
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::team_runner::materialize;
@@ -31,7 +37,41 @@ pub struct FormedTeam {
     pub rationale: String,
 }
 
-/// Forms and persists a team for `task`:
+/// One planned member of a dry-run [`TeamPlan`]: what it references, how it
+/// will present itself, and whether committing would create a fresh Role row.
+#[derive(Debug, Clone, Serialize)]
+pub struct TeamPlanMember {
+    /// `"role"` | `"provider"` | `"cli_profile"`.
+    pub kind: String,
+    /// Referenced role / provider / agent-profile id.
+    pub ref_id: String,
+    /// Display name: the planned roleName for reused roles, or the uniquified
+    /// name (`base`, `base-2`, ...) a commit would give the created role.
+    pub name: String,
+    /// `provider` / `cli_profile` members create a new Role on commit.
+    pub will_create_role: bool,
+}
+
+/// Structured result of a validated formation plan — everything the UI needs
+/// for a dry-run preview without persisting anything.
+#[derive(Debug, Clone, Serialize)]
+pub struct TeamPlan {
+    pub topology: TeamTopology,
+    pub members: Vec<TeamPlanMember>,
+    pub max_rounds: Option<u32>,
+    pub required: Vec<String>,
+    pub rationale: String,
+}
+
+/// Output of the shared planning phase: the raw parsed plan (consumed by the
+/// persistence path) plus its structured preview projection.
+struct PlannedFormation {
+    parsed: ParsedPlan,
+    preview: TeamPlan,
+}
+
+/// Shared pre-persistence phase of formation (planning + parsing + validation
+/// + name resolution):
 ///
 /// 1. materializes clients; without a default HTTP provider there is no
 ///    planner and the call fails with `InvalidTeam("no planner provider
@@ -43,18 +83,17 @@ pub struct FormedTeam {
 ///    `InvalidTeam("plan invalid")`,
 /// 4. validates member count (`2..=max_members`) and every member reference
 ///    against the catalog, collecting all unknowns into a single error,
-/// 5. persists new roles (unique names, provider pin or `agent_profile_id`
-///    param binding) plus the team row on one connection,
-/// 6. publishes `team.formed` on the kernel bus when one is attached.
-pub async fn form_team(
+///
+/// then projects the plan into its structured [`TeamPlan`] preview. **Pure
+/// reads** — never writes, never publishes. Error paths are identical for
+/// [`form_team`] and [`preview_team`] by construction.
+async fn plan_formation(
     db_path: Arc<str>,
-    bus: Option<EventBus>,
     secrets: Arc<dyn SecretStore>,
     cwd: Option<PathBuf>,
-    session_id: Option<&str>,
     task: &str,
     max_members: usize,
-) -> Result<FormedTeam, OrchestratorError> {
+) -> Result<PlannedFormation, OrchestratorError> {
     let materialized = materialize(db_path.clone(), secrets, cwd)
         .await
         .map_err(|error| OrchestratorError::Store(error.to_string()))?;
@@ -69,7 +108,7 @@ pub async fn form_team(
         &build_planner_user_message(&catalog, task, max_members),
     );
 
-    let plan = match parse_plan(&ask_planner(&planner, &request).await?) {
+    let parsed = match parse_plan(&ask_planner(&planner, &request).await?) {
         Ok(plan) => plan,
         Err(first_error) => {
             tracing::warn!("team-formation plan rejected ({first_error}); retrying once");
@@ -79,12 +118,106 @@ pub async fn form_team(
         }
     };
 
-    validate_plan(&plan, &catalog, max_members)?;
+    validate_plan(&parsed, &catalog, max_members)?;
+    let (parsed, preview) = resolve_preview(parsed, &catalog);
+    Ok(PlannedFormation { parsed, preview })
+}
+
+/// Dry-run preview of team formation for `task`: runs the exact same planning
+/// phase as [`form_team`] (including duplicate-name suffix computation for
+/// members that would create roles) and returns the structured [`TeamPlan`].
+///
+/// Guarantees: **zero writes** (roles/teams/events tables untouched) and
+/// **zero bus events**; failures surface with the same errors as
+/// [`form_team`] — no planner / invalid plan after one retry / unknown
+/// member references listed in a single error.
+pub async fn preview_team(
+    db_path: Arc<str>,
+    secrets: Arc<dyn SecretStore>,
+    cwd: Option<PathBuf>,
+    task: &str,
+    max_members: usize,
+) -> Result<TeamPlan, OrchestratorError> {
+    Ok(plan_formation(db_path, secrets, cwd, task, max_members)
+        .await?
+        .preview)
+}
+
+/// Projects a validated [`ParsedPlan`] into its structured [`TeamPlan`]:
+/// reused roles keep their planned display name, while provider/cli_profile
+/// members get the uniquified name a commit would assign (suffix computed
+/// here for preview only — persistence recomputes it transactionally).
+/// Returns the plan unchanged alongside its projection.
+fn resolve_preview(plan: ParsedPlan, catalog: &Catalog) -> (ParsedPlan, TeamPlan) {
+    let mut taken: HashSet<String> = catalog.roles.iter().map(|role| role.name.clone()).collect();
+    let members = plan
+        .members
+        .iter()
+        .map(|member| match member.kind.as_str() {
+            "role" => TeamPlanMember {
+                kind: member.kind.clone(),
+                ref_id: member.id.clone(),
+                name: member.role_name.clone(),
+                will_create_role: false,
+            },
+            // "provider" | "cli_profile" — validated above.
+            kind => {
+                let trimmed = member.role_name.trim();
+                let base = if trimmed.is_empty() {
+                    &member.id
+                } else {
+                    trimmed
+                };
+                TeamPlanMember {
+                    kind: kind.to_string(),
+                    ref_id: member.id.clone(),
+                    name: uniquify_name(base, &mut taken),
+                    will_create_role: true,
+                }
+            }
+        })
+        .collect();
+    let preview = TeamPlan {
+        topology: plan.topology,
+        members,
+        max_rounds: plan
+            .config
+            .max_rounds
+            .filter(|rounds| *rounds > 0)
+            .and_then(|rounds| u32::try_from(rounds).ok()),
+        required: plan
+            .config
+            .required
+            .clone()
+            .filter(|ids| !ids.is_empty())
+            .unwrap_or_default(),
+        rationale: plan.rationale.clone(),
+    };
+    (plan, preview)
+}
+
+/// Forms and persists a team for `task`:
+///
+/// 1. runs the shared [`plan_formation`] phase (materialize, planner call
+///    with one parse-failure retry, validation),
+/// 2. persists new roles (unique names, provider pin or `agent_profile_id`
+///    param binding) plus the team row on one connection,
+/// 3. publishes `team.formed` on the kernel bus when one is attached.
+pub async fn form_team(
+    db_path: Arc<str>,
+    bus: Option<EventBus>,
+    secrets: Arc<dyn SecretStore>,
+    cwd: Option<PathBuf>,
+    session_id: Option<&str>,
+    task: &str,
+    max_members: usize,
+) -> Result<FormedTeam, OrchestratorError> {
+    let resolved = plan_formation(db_path.clone(), secrets, cwd, task, max_members).await?;
 
     let task = task.to_string();
-    let rationale = plan.rationale.clone();
+    let rationale = resolved.parsed.rationale.clone();
     let (created_role_ids, team) =
-        tokio::task::spawn_blocking(move || persist_formed_team(db_path, plan, task))
+        tokio::task::spawn_blocking(move || persist_formed_team(db_path, resolved.parsed, task))
             .await
             .map_err(|error| OrchestratorError::Store(error.to_string()))??;
 

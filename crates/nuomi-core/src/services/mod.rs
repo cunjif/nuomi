@@ -13,6 +13,6 @@ pub use scheduler_service::{
     next_after, parse_schedule, CronExpr, FieldSet, ScheduleSpec, SchedulerError, SchedulerHandle,
     SchedulerRunner,
 };
-pub use team_former::{form_team, FormedTeam};
+pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMember};
 pub use team_runner::{materialize, run_team, MaterializedProviders, TeamRunOutcome};
 pub use workspace::{FileEntry, WorkspaceError, WorkspaceService};
