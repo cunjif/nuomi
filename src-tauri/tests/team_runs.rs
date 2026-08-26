@@ -766,3 +766,155 @@ async fn form_team_without_providers_fails_with_no_planner() {
     assert_eq!(repos::roles::count(&conn).unwrap(), 0);
     assert_eq!(repos::teams::count(&conn).unwrap(), 0);
 }
+
+// ------------------------------------------------ team formation dry-run (打磨③a)
+
+fn event_count(conn: &rusqlite::Connection, where_clause: &str) -> i64 {
+    conn.query_row(
+        &format!("SELECT count(*) FROM events {where_clause}"),
+        [],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn preview_team_reports_plan_without_writes_then_form_succeeds() {
+    let (state, _dir) = boot_with_memory_secrets().await;
+
+    let profile = seed_fixture_profile(&state, "auto preview executor").await;
+    let planner_id = "p-preview-plan";
+    let spec_id = "p-preview-spec";
+
+    // Plan reusing a pre-built role, pinning a provider and binding the CLI
+    // profile — all three member kinds in one shot.
+    let plan_server = canned_server(format!(
+        r#"{{"topology":"pipeline","members":[{{"kind":"role","id":"r-preview-writer","roleName":"writer"}},{{"kind":"provider","id":"{spec_id}","roleName":"reviewer"}},{{"kind":"cli_profile","id":"{}","roleName":"executor"}}],"config":{{"maxRounds":4,"required":["code"]}},"rationale":"draft, review, execute locally"}}"#,
+        profile.id
+    ))
+    .await;
+    {
+        let conn = open_conn(&state);
+        repos::providers::insert_provider(
+            &conn,
+            &env_keyed_provider(planner_id, "planner", plan_server.uri().as_str(), true),
+        )
+        .unwrap();
+        repos::providers::insert_provider(
+            &conn,
+            &env_keyed_provider(spec_id, "spec writer", "http://localhost:9/v1", false),
+        )
+        .unwrap();
+        repos::roles::insert(
+            &conn,
+            &Role {
+                id: "r-preview-writer".into(),
+                name: "writer".into(),
+                provider_id: Some(spec_id.into()),
+                system_prompt_override: Some("You are the writer.".into()),
+                tool_allowlist: vec![],
+                temperature: None,
+                max_tokens: None,
+                params: json!({}),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+    }
+    std::env::set_var(provider_env_key(planner_id), "dummy");
+
+    let conn = open_conn(&state);
+    let roles_before = repos::roles::count(&conn).unwrap();
+    let teams_before = repos::teams::count(&conn).unwrap();
+    let events_before = event_count(&conn, "");
+
+    let plan = commands::impl_preview_team(&state, "produce the spec".into())
+        .await
+        .unwrap();
+
+    assert_eq!(plan.topology, TeamTopologyDto::Pipeline);
+    assert_eq!(plan.rationale, "draft, review, execute locally");
+    assert_eq!(plan.max_rounds, Some(4));
+    assert_eq!(plan.required, vec!["code".to_string()]);
+    assert_eq!(plan.members.len(), 3);
+
+    // Pre-built role: reused as-is, no creation flag.
+    let writer = &plan.members[0];
+    assert_eq!(writer.kind, "role");
+    assert_eq!(writer.ref_id, "r-preview-writer");
+    assert_eq!(writer.name, "writer");
+    assert!(!writer.will_create_role);
+
+    // Provider member would create a fresh pinned role on commit.
+    let reviewer = &plan.members[1];
+    assert_eq!(reviewer.kind, "provider");
+    assert_eq!(reviewer.ref_id, spec_id);
+    assert_eq!(reviewer.name, "reviewer");
+    assert!(reviewer.will_create_role);
+
+    // CLI profile member binds through the params convention.
+    let executor = &plan.members[2];
+    assert_eq!(executor.kind, "cli_profile");
+    assert_eq!(executor.ref_id, profile.id);
+    assert_eq!(executor.name, "executor");
+    assert!(executor.will_create_role);
+
+    // Zero writes: no role/team rows, no events at all (no team.formed).
+    assert_eq!(repos::roles::count(&conn).unwrap(), roles_before);
+    assert_eq!(repos::teams::count(&conn).unwrap(), teams_before);
+    assert_eq!(event_count(&conn, ""), events_before);
+    assert_eq!(event_count(&conn, "WHERE kind = 'team.formed'"), 0);
+    drop(conn);
+
+    // Zero bus events either: nothing on the kernel bus after the preview.
+    let mut bus_rx = state.kernel.context().subscribe();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(bus_rx.try_recv().is_err(), "preview published a bus event");
+
+    // Same inputs, real formation right after the preview: the shared
+    // planning phase leaked nothing, so form succeeds and persists.
+    let dto = commands::impl_form_team(&state, "produce the spec".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(dto.member_role_ids.len(), 3);
+
+    let conn = open_conn(&state);
+    assert_eq!(repos::roles::count(&conn).unwrap(), roles_before + 2);
+    assert_eq!(repos::teams::count(&conn).unwrap(), teams_before + 1);
+
+    // team.formed lives only on the bus (never in the events table): form
+    // publishes exactly one, proving the event came from this call.
+    assert_eq!(event_count(&conn, "WHERE kind = 'team.formed'"), 0);
+    let formed = tokio::time::timeout(std::time::Duration::from_secs(5), bus_rx.recv())
+        .await
+        .expect("bus event within timeout")
+        .expect("event received");
+    assert_eq!(formed.topic, "team.formed");
+    assert_eq!(
+        formed.payload["memberCount"], 3,
+        "unexpected payload: {}",
+        formed.payload
+    );
+
+    // The created members mirror exactly what the preview promised.
+    let reviewer_role = repos::roles::get(&conn, &dto.member_role_ids[1]).unwrap();
+    assert_eq!(reviewer_role.name, reviewer.name);
+    assert_eq!(reviewer_role.provider_id.as_deref(), Some(spec_id));
+    let executor_role = repos::roles::get(&conn, &dto.member_role_ids[2]).unwrap();
+    assert_eq!(executor_role.name, executor.name);
+    assert_eq!(
+        executor_role.params["agent_profile_id"],
+        profile.id.as_str()
+    );
+}
+
+#[tokio::test]
+async fn preview_team_rejects_blank_task() {
+    let (state, _dir) = boot_with_memory_secrets().await;
+
+    let err = commands::impl_preview_team(&state, "   ".into())
+        .await
+        .unwrap_err();
+    assert_eq!(error_code(err), "task.invalid");
+}

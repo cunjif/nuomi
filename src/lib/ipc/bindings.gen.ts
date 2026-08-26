@@ -366,6 +366,14 @@ async formTeam(task: string, sessionId: string | null) : Promise<Result<TeamDto,
     else return { status: "error", error: e  as any };
 }
 },
+async previewTeam(task: string) : Promise<Result<TeamPlanDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_team", { task }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async runTeamOnTask(taskId: string, teamId: string) : Promise<Result<RunDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("run_team_on_task", { taskId, teamId }) };
@@ -488,6 +496,12 @@ export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds
  * Topology-specific config (`max_rounds`, selector settings, ...).
  */
 config: JsonValue }
+/**
+ * Dry-run projection of a validated formation plan: what a commit would
+ * build, without touching roles/teams/events (打磨③a).
+ */
+export type TeamPlanDto = { topology: TeamTopologyDto; members: TeamPlanMemberDto[]; maxRounds: number | null; required: string[]; rationale: string }
+export type TeamPlanMemberDto = { kind: string; refId: string; name: string; willCreateRole: boolean }
 export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
 export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
 export type TestIntegrationDto = { ok: boolean; error: string | null }

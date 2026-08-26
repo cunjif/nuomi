@@ -1427,6 +1427,67 @@ pub async fn impl_form_team(
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
+pub struct TeamPlanMemberDto {
+    pub kind: String,
+    pub ref_id: String,
+    pub name: String,
+    pub will_create_role: bool,
+}
+
+/// Dry-run projection of a validated formation plan: what a commit would
+/// build, without touching roles/teams/events (打磨③a).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamPlanDto {
+    pub topology: TeamTopologyDto,
+    pub members: Vec<TeamPlanMemberDto>,
+    pub max_rounds: Option<u32>,
+    pub required: Vec<String>,
+    pub rationale: String,
+}
+
+impl From<nuomi_core::services::TeamPlan> for TeamPlanDto {
+    fn from(plan: nuomi_core::services::TeamPlan) -> Self {
+        Self {
+            topology: topology_to_dto(plan.topology),
+            members: plan
+                .members
+                .into_iter()
+                .map(|m| TeamPlanMemberDto {
+                    kind: m.kind,
+                    ref_id: m.ref_id,
+                    name: m.name,
+                    will_create_role: m.will_create_role,
+                })
+                .collect(),
+            max_rounds: plan.max_rounds,
+            required: plan.required,
+            rationale: plan.rationale,
+        }
+    }
+}
+
+/// Zero-write formation preview: identical task validation and error codes as
+/// [`impl_form_team`] (`task.invalid`, then the `map_form_error` family), but
+/// no bus is attached and nothing is persisted.
+pub async fn impl_preview_team(state: &AppState, task: String) -> Result<TeamPlanDto, IpcError> {
+    if task.trim().is_empty() {
+        return Err(IpcError::new("task.invalid", "task must not be empty"));
+    }
+    let plan = nuomi_core::services::preview_team(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        Some(state.current_workspace()),
+        &task,
+        FORM_TEAM_MAX_MEMBERS,
+    )
+    .await
+    .map_err(map_form_error)?;
+    Ok(TeamPlanDto::from(plan))
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WhiteBoardNoteDto {
     pub id: String,
     pub session_id: String,

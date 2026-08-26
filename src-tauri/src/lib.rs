@@ -70,6 +70,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::delete_team,
         tauri_cmds::list_whiteboard_notes,
         tauri_cmds::form_team,
+        tauri_cmds::preview_team,
         tauri_cmds::run_team_on_task,
         tauri_cmds::run_team_session,
         tauri_cmds::list_integrations,

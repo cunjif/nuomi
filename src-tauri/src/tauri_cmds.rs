@@ -406,6 +406,15 @@ pub async fn form_team(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn preview_team(
+    state: tauri::State<'_, AppState>,
+    task: String,
+) -> Result<commands::TeamPlanDto, IpcError> {
+    commands::impl_preview_team(&state, task).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn run_team_on_task(
     state: tauri::State<'_, AppState>,
     task_id: String,
