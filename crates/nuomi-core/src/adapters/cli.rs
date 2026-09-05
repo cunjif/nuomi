@@ -37,6 +37,89 @@ use super::AdapterError;
 /// Upper bound for stderr excerpts embedded in error values.
 const MAX_STDERR_CHARS: usize = 500;
 
+/// Environment variables stripped from every CLI-agent child process
+/// (parallel-code ENV_BLOCK_LIST approach). Spawn policy is full
+/// inheritance, so the combined parent + profile environment is collected
+/// first and then filtered through this deny list — the child never sees a
+/// blocked variable, no matter whether it came from the parent process or
+/// the profile's `env` object.
+///
+/// Each entry is an exact variable name, except entries ending in `*`,
+/// which match by prefix.
+pub const ENV_BLOCK_LIST: &[&str] = &[
+    // Arbitrary shared-object preloading into the child via the dynamic
+    // linker — instant code execution.
+    "LD_PRELOAD",
+    // Redirects shared-library resolution — library planting / code execution.
+    "LD_LIBRARY_PATH",
+    // macOS equivalent of LD_PRELOAD: injects a dylib into every child.
+    "DYLD_INSERT_LIBRARIES",
+    // macOS library search-path hijack, same class as LD_LIBRARY_PATH.
+    "DYLD_LIBRARY_PATH",
+    // Pairs with GIT_CONFIG_KEY_*: count-driven inline git config injection.
+    // A hostile environment can thereby hijack git behavior (hooks,
+    // credential helpers, fsmonitor) for every git call inside the child.
+    "GIT_CONFIG_COUNT",
+    // Wildcard prefix: per-key inline git config injection (see above).
+    "GIT_CONFIG_KEY_*",
+    // Node runtime flags — arbitrary code via --require / -e style preload.
+    "NODE_OPTIONS",
+    // Swaps Node's trust store — enables TLS CA MITM of outbound HTTPS.
+    "NODE_EXTRA_CA_CERTS",
+    // Python interactive-startup script — arbitrary code on REPL startup.
+    "PYTHONSTARTUP",
+    // Python module search path — import hijacking / code execution.
+    "PYTHONPATH",
+    // Ruby interpreter command-line injection via environment.
+    "RUBYOPT",
+    // Non-interactive bash sources this file — rc-file code injection.
+    "BASH_ENV",
+    // Interactive shells source $ENV — rc-file code injection.
+    "ENV",
+    // Alters shell `cd` resolution — execution / path redirection.
+    "CDPATH",
+    // Field-separator injection into every shell word splitting.
+    "IFS",
+    // Echoed under `set -x` tracing — command / output smuggling.
+    "PS4",
+];
+
+/// True when `key` must be stripped from the child environment: exact match
+/// against [`ENV_BLOCK_LIST`] (case-insensitive), or prefix match for
+/// entries ending in `*`.
+pub fn is_env_blocked(key: &str) -> bool {
+    ENV_BLOCK_LIST.iter().any(|entry| {
+        if let Some(prefix) = entry.strip_suffix('*') {
+            key.starts_with(prefix)
+        } else {
+            key.eq_ignore_ascii_case(entry)
+        }
+    })
+}
+
+/// Builds the sanitized child environment: the parent environment overlaid
+/// with the profile's `env` pairs, then filtered through
+/// [`ENV_BLOCK_LIST`]. The result is a closed set — the caller must clear
+/// the inherited environment before installing it.
+fn sanitized_env<I>(parent: I, profile_env: &[(String, String)]) -> Vec<(String, String)>
+where
+    I: IntoIterator<Item = (String, String)>,
+{
+    let mut map: std::collections::HashMap<String, String> = parent
+        .into_iter()
+        .filter(|(key, _)| !is_env_blocked(key))
+        .collect();
+    // The profile cannot re-introduce a blocked key (defense in depth:
+    // profile config is user-controlled but must not bypass the deny list).
+    for (key, value) in profile_env {
+        if is_env_blocked(key) {
+            continue;
+        }
+        map.insert(key.clone(), value.clone());
+    }
+    map.into_iter().collect()
+}
+
 /// An external CLI agent exposed as an [`LlmProvider`] team member.
 #[derive(Debug)]
 pub struct CliAgentClient {
@@ -90,10 +173,14 @@ impl CliAgentClient {
                 agent: profile.name.clone(),
                 message,
             })?;
-        let envs = resolve_env(&profile.env).map_err(|message| AdapterError::Protocol {
+        let profile_env = resolve_env(&profile.env).map_err(|message| AdapterError::Protocol {
             agent: profile.name.clone(),
             message,
         })?;
+        // Full-inheritance spawn policy: collect parent + profile env first,
+        // then subtract ENV_BLOCK_LIST so the child gets a closed, sanitized
+        // set (installed via env_clear + envs at spawn time).
+        let envs = sanitized_env(std::env::vars(), &profile_env);
         Ok(Prepared {
             agent: profile.name.clone(),
             program: profile.command.clone(),
@@ -230,9 +317,16 @@ async fn step(state: StepState) -> Result<Option<(StreamEvent, StepState)>, Prov
 async fn spawn_child(prepared: Prepared) -> Result<ReadState, AdapterError> {
     let mut command = Command::new(&prepared.program);
     command.args(&prepared.args);
-    for (key, value) in &prepared.envs {
-        command.env(key, value);
-    }
+    // `prepared.envs` is the complete sanitized environment (parent env +
+    // profile env minus ENV_BLOCK_LIST), so the inherited environment is
+    // cleared first — nothing unfiltered can leak through.
+    command.env_clear();
+    command.envs(
+        prepared
+            .envs
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
     if let Some(dir) = &prepared.working_dir {
         command.current_dir(dir);
     }
@@ -507,6 +601,8 @@ fn parse_usage(value: Option<&serde_json::Value>) -> Option<Usage> {
     Some(Usage {
         prompt_tokens: usage.get("input_tokens")?.as_i64()?,
         completion_tokens: usage.get("output_tokens")?.as_i64()?,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
     })
 }
 
@@ -565,6 +661,7 @@ mod tests {
             tools: Vec::<ToolDef>::new(),
             temperature: None,
             max_tokens: None,
+            cache_retention: Default::default(),
         }
     }
 
@@ -779,5 +876,72 @@ mod tests {
         assert!(resolve_env(&serde_json::json!({"A": "b"})).is_ok());
         assert!(resolve_env(&serde_json::json!([])).is_err());
         assert!(resolve_env(&serde_json::json!({"A": 3})).is_err());
+    }
+
+    #[test]
+    fn env_block_list_matches_exact_and_prefix_entries() {
+        // Exact entries.
+        assert!(is_env_blocked("LD_PRELOAD"));
+        assert!(is_env_blocked("NODE_OPTIONS"));
+        assert!(is_env_blocked("GIT_CONFIG_COUNT"));
+        assert!(is_env_blocked("BASH_ENV"));
+        // Wildcard prefix entry.
+        assert!(is_env_blocked("GIT_CONFIG_KEY_0"));
+        assert!(is_env_blocked("GIT_CONFIG_KEY_URL"));
+        // Case-insensitive exact match (Windows env names).
+        assert!(is_env_blocked("node_options"));
+        // Near misses must stay allowed.
+        assert!(!is_env_blocked("GIT_CONFIG"));
+        assert!(!is_env_blocked("NODE_PATH"));
+        assert!(!is_env_blocked("PATH"));
+        assert!(!is_env_blocked("MY_ENVIRONMENT"));
+    }
+
+    #[test]
+    fn sanitized_env_strips_blocked_vars_and_keeps_the_rest() {
+        let parent = vec![
+            ("PATH".to_string(), "/bin".to_string()),
+            ("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string()),
+            (
+                "NODE_OPTIONS".to_string(),
+                "--require /tmp/evil.js".to_string(),
+            ),
+            (
+                "GIT_CONFIG_KEY_0".to_string(),
+                "core.fsmonitor=/tmp/evil".to_string(),
+            ),
+            ("BASH_ENV".to_string(), "/tmp/evil.sh".to_string()),
+            ("SAFE_VAR".to_string(), "keep me".to_string()),
+        ];
+        let profile_env = vec![("MY_AGENT_MODE".to_string(), "fast".to_string())];
+
+        let env = sanitized_env(parent, &profile_env);
+        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+
+        // Benign variables survive (inherited + profile).
+        assert_eq!(get("PATH"), Some("/bin"));
+        assert_eq!(get("SAFE_VAR"), Some("keep me"));
+        assert_eq!(get("MY_AGENT_MODE"), Some("fast"));
+        // Blocked variables are gone.
+        assert!(get("LD_PRELOAD").is_none(), "{env:?}");
+        assert!(get("NODE_OPTIONS").is_none(), "{env:?}");
+        assert!(get("GIT_CONFIG_KEY_0").is_none(), "{env:?}");
+        assert!(get("BASH_ENV").is_none(), "{env:?}");
+    }
+
+    #[test]
+    fn sanitized_env_profile_cannot_reintroduce_blocked_keys() {
+        let profile_env = vec![
+            (
+                "NODE_OPTIONS".to_string(),
+                "--require /tmp/evil.js".to_string(),
+            ),
+            ("ld_preload".to_string(), "/tmp/evil.so".to_string()),
+            ("OK_VAR".to_string(), "v".to_string()),
+        ];
+        let env = sanitized_env(Vec::new(), &profile_env);
+        assert!(env.iter().all(|(k, _)| k != "NODE_OPTIONS"));
+        assert!(env.iter().all(|(k, _)| k != "ld_preload"));
+        assert!(env.iter().any(|(k, v)| k == "OK_VAR" && v == "v"));
     }
 }

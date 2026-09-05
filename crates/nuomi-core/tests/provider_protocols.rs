@@ -16,6 +16,7 @@ fn openai_request() -> ChatRequest {
         tools: vec![],
         temperature: Some(0.2),
         max_tokens: Some(128),
+        cache_retention: Default::default(),
     }
 }
 

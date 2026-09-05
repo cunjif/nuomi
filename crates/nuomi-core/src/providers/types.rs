@@ -85,6 +85,25 @@ pub struct ToolDef {
 pub struct Usage {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// Prompt tokens served from the provider's prompt cache, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<i64>,
+    /// Prompt tokens written to the provider's prompt cache, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<i64>,
+}
+
+/// How long the provider should retain the prompt cache for a request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheRetention {
+    /// Do not request prompt caching.
+    #[default]
+    None,
+    /// Short-lived cache (provider default TTL, e.g. Anthropic 5m).
+    Short,
+    /// Long-lived cache (e.g. Anthropic 1h).
+    Long,
 }
 
 /// A fully-buffered model response.
@@ -114,6 +133,8 @@ pub struct ChatRequest {
     pub tools: Vec<ToolDef>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
+    /// Prompt-cache retention hint honored by providers that support it.
+    pub cache_retention: CacheRetention,
 }
 
 impl ChatRequest {
@@ -125,6 +146,7 @@ impl ChatRequest {
             tools: Vec::new(),
             temperature: None,
             max_tokens: None,
+            cache_retention: CacheRetention::None,
         }
     }
 }

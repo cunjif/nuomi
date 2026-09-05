@@ -3,6 +3,7 @@
 
 pub mod anthropic;
 pub mod client;
+pub mod context;
 pub mod fake;
 pub mod master;
 pub mod openai;

@@ -235,6 +235,7 @@ impl GroupChatExecutor {
             tools: vec![handoff_tool_def()],
             temperature: role.temperature,
             max_tokens: role.max_tokens,
+            cache_retention: Default::default(),
         })
     }
 }

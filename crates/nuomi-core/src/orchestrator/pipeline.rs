@@ -50,6 +50,7 @@ impl PipelineExecutor {
                 tools: Vec::new(),
                 temperature: role.temperature,
                 max_tokens: role.max_tokens,
+                cache_retention: Default::default(),
             };
 
             let response = provider

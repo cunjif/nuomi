@@ -164,8 +164,12 @@ impl LoopEngine {
                 tools: defs.clone(),
                 temperature: None,
                 max_tokens: None,
+                cache_retention: Default::default(),
             };
             let response = self.stream_once(&request).await?;
+            // A length-capped response means emitted tool arguments were cut
+            // mid-JSON; executing them would act on corrupt input.
+            let output_truncated = response.finish_reason.as_deref() == Some("length");
 
             if response.tool_calls.is_empty() {
                 transcript.push(ChatMessage::assistant(response.content.clone()));
@@ -186,6 +190,13 @@ impl LoopEngine {
             transcript.push(assistant);
 
             for call in response.tool_calls {
+                if output_truncated {
+                    transcript.push(ChatMessage::tool_result(
+                        call.id,
+                        "[tool call skipped] output truncated; arguments may be incomplete",
+                    ));
+                    continue;
+                }
                 let payload = serde_json::json!({ "tool": call.name, "arguments": call.arguments });
                 let mut denied: Option<String> = None;
                 if let Some(hook_reg) = hooks {
@@ -440,6 +451,34 @@ mod tests {
             .unwrap();
         assert_eq!(result.final_text, "streamed answer");
         assert_eq!(*seen.lock().unwrap(), vec!["streamed answer".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn length_capped_response_skips_tool_execution() {
+        let mut truncated = tool_call_response();
+        truncated.finish_reason = Some("length".into());
+        let provider = Arc::new(FakeLlm::new(
+            "fake",
+            vec![truncated, FakeLlm::response("recovered")],
+        ));
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        tools.register(Arc::new(AddTool)).await.unwrap();
+        let engine = LoopEngine::new(provider, LoopConfig::default());
+        let result = engine
+            .run(&ctx, &tools, None, None, "compute 1+2")
+            .await
+            .unwrap();
+        assert_eq!(result.final_text, "recovered");
+        let tool_msg = result
+            .transcript
+            .iter()
+            .find(|m| m.role == MessageRole::Tool)
+            .expect("tool result present");
+        assert_eq!(
+            tool_msg.content,
+            "[tool call skipped] output truncated; arguments may be incomplete"
+        );
     }
 
     #[tokio::test]

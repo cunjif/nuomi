@@ -84,6 +84,7 @@ fn bare_request(user: &str) -> ChatRequest {
         tools: Vec::new(),
         temperature: None,
         max_tokens: None,
+        cache_retention: Default::default(),
     }
 }
 

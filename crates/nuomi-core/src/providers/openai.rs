@@ -147,6 +147,10 @@ fn parse_usage(v: Option<&Value>) -> Option<Usage> {
             .get("completion_tokens")
             .and_then(Value::as_i64)
             .unwrap_or(0),
+        cache_read_tokens: usage
+            .pointer("/prompt_tokens_details/cached_tokens")
+            .and_then(Value::as_i64),
+        cache_write_tokens: None,
     })
 }
 

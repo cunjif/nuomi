@@ -170,6 +170,8 @@ mod tests {
                 usage: Some(Usage {
                     prompt_tokens: 1,
                     completion_tokens: 1,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
                 }),
                 finish_reason: Some("stop".into()),
             })
@@ -196,6 +198,7 @@ mod tests {
             tools: vec![],
             temperature: None,
             max_tokens: None,
+            cache_retention: Default::default(),
         }
     }
 

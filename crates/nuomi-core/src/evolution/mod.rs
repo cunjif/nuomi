@@ -3,6 +3,7 @@
 
 pub mod reflection;
 pub mod research;
+pub mod review;
 pub mod scheduler;
 pub mod trajectory;
 pub mod versioning;
@@ -12,9 +13,10 @@ pub use research::{
     online_authorized, set_online_authorized, ResearchAllowlist, ResearchFetcher,
     ResearchReportEntry, ResearchScheduler,
 };
-pub use scheduler::PeriodicResearch;
+pub use review::{DefaultReviewGate, ReviewGate, ReviewProposal, ReviewVerdict};
+pub use scheduler::{CooldownDecision, CooldownGate, PeriodicResearch, DEFAULT_COOLDOWN};
 pub use trajectory::{TrajectoryAggregator, TrajectorySummary};
-pub use versioning::PromptVersionManager;
+pub use versioning::{ApplyBaseline, ApplySnapshot, PromptVersionManager};
 
 use thiserror::Error;
 
@@ -44,4 +46,17 @@ pub enum EvolutionError {
 
     #[error("research fetch failed for '{url}': {message}")]
     FetchFailed { url: String, message: String },
+
+    #[error(
+        "baseline conflict on '{plugin}': planning baseline was {expected_id} \
+         but the current active version is {actual_id}"
+    )]
+    BaselineConflict {
+        plugin: String,
+        expected_id: String,
+        actual_id: String,
+    },
+
+    #[error("nothing to roll back: the applied version had no prior active prompt")]
+    NothingToRollBack,
 }

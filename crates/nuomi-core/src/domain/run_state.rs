@@ -132,6 +132,66 @@ impl ApprovalOutcome {
     }
 }
 
+/// Failure modes of the generational guard ([`GenerationalRun::apply`]).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum MutationError {
+    /// The caller presented a generation older than the run's current one —
+    /// a late event (e.g. a cancel racing a requeue). The state machine is
+    /// untouched.
+    #[error("stale run mutation: given generation {given}, current {current}")]
+    Stale { given: u64, current: u64 },
+    /// The transition itself is illegal from the current state.
+    #[error(transparent)]
+    Invalid(#[from] TransitionError),
+}
+
+/// A run state machine guarded by a monotonic generation counter (`run_seq`).
+///
+/// Equivalent of a CAS on `(state, run_seq)`: a mutation carries the
+/// generation it was issued under and is applied only when that generation
+/// is at least the current one; each successful transition bumps the
+/// generation by one. Late events from a previous generation (a cancel or
+/// requeue that raced ahead) are rejected with [`MutationError::Stale`] and
+/// never touch the state.
+///
+/// Pure domain logic — no DB, no clock; persistence wiring lives in the
+/// store layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationalRun {
+    state: RunState,
+    run_seq: u64,
+}
+
+impl GenerationalRun {
+    pub fn new(state: RunState, run_seq: u64) -> Self {
+        Self { state, run_seq }
+    }
+
+    pub fn state(&self) -> RunState {
+        self.state
+    }
+
+    pub fn run_seq(&self) -> u64 {
+        self.run_seq
+    }
+
+    /// Applies `event` iff `expected_seq >= self.run_seq`; on success the
+    /// state advances and the generation increments. On [`MutationError`]
+    /// neither state nor generation changes.
+    pub fn apply(&mut self, expected_seq: u64, event: RunEvent) -> Result<RunState, MutationError> {
+        if expected_seq < self.run_seq {
+            return Err(MutationError::Stale {
+                given: expected_seq,
+                current: self.run_seq,
+            });
+        }
+        let next = self.state.transition(event)?;
+        self.state = next;
+        self.run_seq = self.run_seq.wrapping_add(1);
+        Ok(next)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +348,85 @@ mod tests {
             assert_eq!(RunState::parse(state.as_str()), Some(state));
         }
         assert_eq!(RunState::parse("bogus"), None);
+    }
+
+    // --- GenerationalRun (run_seq CAS) -----------------------------------
+
+    #[test]
+    fn generational_normal_sequence_is_unaffected() {
+        let mut run = GenerationalRun::new(RunState::Queued, 0);
+        assert_eq!(run.apply(0, RunEvent::Start), Ok(RunState::Running));
+        assert_eq!(run.run_seq(), 1);
+        assert_eq!(
+            run.apply(1, RunEvent::RequestApproval),
+            Ok(RunState::AwaitingApproval)
+        );
+        assert_eq!(
+            run.apply(2, RunEvent::Resolve(ApprovalOutcome::Approved)),
+            Ok(RunState::Running)
+        );
+        assert_eq!(run.apply(3, RunEvent::Succeed), Ok(RunState::Succeeded));
+        assert_eq!(run.state(), RunState::Succeeded);
+        assert_eq!(run.run_seq(), 4);
+    }
+
+    #[test]
+    fn generational_late_event_is_rejected_without_mutation() {
+        let mut run = GenerationalRun::new(RunState::Running, 3);
+        // A stale cancel issued back at generation 2 arrives after two
+        // generations have passed — it must be refused verbatim.
+        let err = run.apply(2, RunEvent::Cancel).unwrap_err();
+        assert_eq!(
+            err,
+            MutationError::Stale {
+                given: 2,
+                current: 3
+            }
+        );
+        assert_eq!(run.state(), RunState::Running);
+        assert_eq!(run.run_seq(), 3);
+        // The current generation still mutates normally afterwards.
+        assert_eq!(run.apply(3, RunEvent::Succeed), Ok(RunState::Succeeded));
+    }
+
+    #[test]
+    fn generational_cancel_and_requeue_only_hit_their_own_generation() {
+        // Crash recovery race: orphan timeout bumps to gen 1 (interrupted),
+        // a requeue lands (gen 2, queued), then the run starts again (gen 3).
+        // The stale `Cancel` that was issued while the run was still on gen 0
+        // must not cancel the fresh incarnation.
+        let mut run = GenerationalRun::new(RunState::Running, 0);
+        assert_eq!(
+            run.apply(0, RunEvent::OrphanTimeout),
+            Ok(RunState::Interrupted)
+        );
+        assert_eq!(run.apply(1, RunEvent::Requeue), Ok(RunState::Queued));
+        assert!(matches!(
+            run.apply(0, RunEvent::Cancel),
+            Err(MutationError::Stale { .. })
+        ));
+        assert_eq!(run.state(), RunState::Queued);
+        assert_eq!(run.apply(2, RunEvent::Start), Ok(RunState::Running));
+        assert_eq!(run.run_seq(), 3);
+    }
+
+    #[test]
+    fn generational_stale_check_precedes_transition_check() {
+        // Even an illegal event reports staleness first when the generation
+        // is behind — the guard is the outermost gate.
+        let mut run = GenerationalRun::new(RunState::Succeeded, 5);
+        assert!(matches!(
+            run.apply(0, RunEvent::Start),
+            Err(MutationError::Stale { .. })
+        ));
+        // At the current generation the same event surfaces as illegal.
+        assert_eq!(
+            run.apply(5, RunEvent::Start),
+            Err(MutationError::Invalid(TransitionError {
+                from: "succeeded",
+                event: "Start".to_string(),
+            }))
+        );
+        assert_eq!(run.run_seq(), 5);
     }
 }

@@ -2,13 +2,17 @@
 
 pub mod entities;
 pub mod run_state;
+pub mod status;
 
 pub use entities::{
     AgentProfile, Approval, ApprovalDecision, CliFlavor, EventRecord, Integration, IntegrationKind,
     MemoryEntry, PromptStatus, PromptVersion, ProviderConfig, ProviderProtocol, Role, Run,
     Schedule, Session, Task, TaskStatus, Team, TeamTopology, WhiteBoardNote,
 };
-pub use run_state::{ApprovalOutcome, RunEvent, RunState, TransitionError};
+pub use run_state::{
+    ApprovalOutcome, GenerationalRun, MutationError, RunEvent, RunState, TransitionError,
+};
+pub use status::{derive_status, DerivedStatus, RunFacts};
 
 use thiserror::Error;
 

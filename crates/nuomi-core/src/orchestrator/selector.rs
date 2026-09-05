@@ -191,6 +191,7 @@ impl SpeakerSelector for LlmSelector {
             tools: vec![],
             temperature: None,
             max_tokens: None,
+            cache_retention: Default::default(),
         };
         let Ok(resp) = self.provider.complete(&request).await else {
             return state.last_speaker.map_or(0, |last| (last + 1) % n);

@@ -10,8 +10,8 @@ pub mod context;
 pub mod kernel;
 pub mod plugin;
 
-pub use bus::{Event, EventBus};
-pub use context::Context;
+pub use bus::{Event, EventBus, EventRejected, Flow, WaterfallHandler};
+pub use context::{Context, Disposer, EffectGuard};
 pub use kernel::Kernel;
 pub use plugin::Plugin;
 
@@ -25,6 +25,12 @@ pub enum HarnessError {
 
     #[error("service '{name}' already registered by '{owner}'")]
     DuplicateService { name: String, owner: String },
+
+    #[error("service '{name}' not found")]
+    ServiceNotFound { name: String },
+
+    #[error("effect '{tag}' of plugin '{owner}' not found")]
+    EffectNotFound { owner: String, tag: String },
 
     #[error("plugin '{plugin}' failed during {phase}: {message}")]
     PluginFailed {

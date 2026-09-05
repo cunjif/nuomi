@@ -7,7 +7,9 @@ use serde_json::{json, Value};
 
 use super::client::LlmProvider;
 use super::sse;
-use super::types::{ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, Usage};
+use super::types::{
+    CacheRetention, ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, Usage,
+};
 use super::ProviderError;
 
 pub struct AnthropicCompatibleClient {
@@ -27,6 +29,49 @@ impl AnthropicCompatibleClient {
 
     fn endpoint(&self) -> String {
         format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+    }
+}
+
+fn cache_control(retention: CacheRetention) -> Value {
+    match retention {
+        CacheRetention::Long => json!({ "type": "ephemeral", "ttl": "1h" }),
+        _ => json!({ "type": "ephemeral" }),
+    }
+}
+
+/// Marks the system prompt and the last message with `cache_control` so the
+/// provider caches the stable prefix (system + latest turn boundary).
+fn apply_cache_marks(body: &mut Value, retention: CacheRetention) {
+    let marker = cache_control(retention);
+    if let Some(system) = body
+        .get("system")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
+        body["system"] = json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": marker,
+        }]);
+    }
+    if let Some(last) = body
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+        .and_then(|a| a.last_mut())
+    {
+        match last.get_mut("content") {
+            Some(Value::Array(blocks)) => {
+                if let Some(block) = blocks.last_mut() {
+                    block["cache_control"] = marker;
+                }
+            }
+            Some(Value::String(text)) => {
+                let text = text.clone();
+                last["content"] =
+                    json!([{ "type": "text", "text": text, "cache_control": marker }]);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -93,6 +138,9 @@ pub(crate) fn build_body(request: &ChatRequest, stream: bool) -> Value {
         // Anthropic requires max_tokens.
         body["max_tokens"] = json!(4096);
     }
+    if request.cache_retention != CacheRetention::None {
+        apply_cache_marks(&mut body, request.cache_retention);
+    }
     body
 }
 
@@ -107,6 +155,10 @@ fn parse_usage(v: Option<&Value>) -> Option<Usage> {
             .get("output_tokens")
             .and_then(Value::as_i64)
             .unwrap_or(0),
+        cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_i64),
+        cache_write_tokens: usage
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_i64),
     })
 }
 
