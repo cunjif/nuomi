@@ -25,3 +25,5 @@ Thumbs.db
 
 # Codebase-memory artifacts (team-shared graph is optional)
 .codebase-memory/
+
+session*.md
