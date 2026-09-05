@@ -118,6 +118,11 @@ cargo test                   # Rust 测试 rust tests
 pnpm coverage:rust           # Rust 行覆盖率 summary（cargo-llvm-cov；下钻 HTML: pnpm coverage:rust:html）rust line coverage
 ```
 
+**跨平台构建 / Cross-platform builds**（CI 未实测）
+- CI 入口：`.github/workflows/release.yml`——push tag `v*` 或手动触发；windows/macos/ubuntu 三平台矩阵，桌面 bundle 与 CLI（`nuomi-cli-{win64|macos-arm64|macos-x64|linux-x64}`）均以 workflow artifacts 上传。
+- 本机前置：Linux 需系统库 `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf`（Debian/Ubuntu 系）；macOS 需 Xcode CLT（`xcode-select --install`）；Windows 无额外依赖。
+- 本机构建命令不变：`pnpm tauri build` 出各平台原生 bundle；`cargo build --release -p nuomi-cli` 出 CLI。
+
 ## 7. 工作流硬规则 / Workflow Hard Rules
 
 1. **契约先行 / Contract-first**: 改 Rust 类型 ⇒ 同一提交内重新生成 bindings + 更新消费端。One commit touches type + regenerated bindings + consumers.

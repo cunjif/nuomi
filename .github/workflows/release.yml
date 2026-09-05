@@ -1,0 +1,148 @@
+# Release pipeline: per-platform desktop bundles + headless nuomi-cli binaries.
+#
+# NOTE (CI 未实测): authored on Windows, validated at YAML-syntax level only —
+# this workflow has NOT been executed on real runners yet.
+#
+# macOS notes:
+#   - No signing identities/secrets are configured → macOS .app/.dmg are UNSIGNED.
+#   - Bundle arch follows the runner (macos-latest = arm64); universal2 is NOT forced.
+#     The macos-x64 CLI binary is cross-compiled on the same arm64 runner.
+#
+# Known gap (portability audit, report-only): src-tauri/tauri.conf.json lists
+# only icons/icon.ico. The Tauri v2 bundler needs .icns (macOS) and PNGs
+# (Linux deb/rpm/AppImage), so desktop bundle steps fail there until
+# `pnpm tauri icon <source.png>` regenerates the full platform icon set.
+# CLI build/upload runs first so a bundle failure never blocks CLI artifacts.
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag/version label for artifact names (e.g. v0.2.0); defaults to run-N"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win64
+            cli_ext: .exe
+          - os: macos-latest
+            platform: macos-arm64
+            cli_ext: ""
+          - os: ubuntu-22.04
+            platform: linux-x64
+            cli_ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node 20 (pnpm cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # Tauri v2 system dependencies for Ubuntu 22.04 (webkit2gtk-4.1 line).
+      - name: Install Tauri v2 system deps (Ubuntu 22.04)
+        if: matrix.platform == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            patchelf
+
+      # tagName resolution: dispatch input > pushed tag > run-N fallback.
+      - name: Resolve tag name
+        id: meta
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag_name }}
+        run: |
+          if [ -n "$DISPATCH_TAG" ]; then
+            echo "tag_name=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "tag_name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_name=run-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build nuomi-cli (host arch)
+        shell: bash
+        run: cargo build --release -p nuomi-cli
+
+      - name: Stage CLI binary as nuomi-cli-${{ matrix.platform }}
+        shell: bash
+        run: |
+          mkdir -p cli-dist
+          cp "target/release/nuomi${{ matrix.cli_ext }}" \
+             "cli-dist/nuomi-cli-${{ matrix.platform }}${{ matrix.cli_ext }}"
+
+      # macos-latest runners are arm64; cross-compile the x64 CLI here so both
+      # macos-arm64 and macos-x64 binaries ship from one macOS job.
+      - name: Cross-build nuomi-cli for macOS x64
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo build --release -p nuomi-cli --target x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/nuomi cli-dist/nuomi-cli-macos-x64
+
+      - name: Upload nuomi-cli binaries (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuomi-cli-${{ matrix.platform }}-${{ steps.meta.outputs.tag_name }}
+          path: cli-dist/*
+          if-no-files-found: error
+
+      # Frontend build happens inside tauri-action via beforeBuildCommand
+      # ("pnpm build" in src-tauri/tauri.conf.json) — no separate vite step.
+      # Release inputs (tagName/releaseName/draft) are intentionally omitted:
+      # bundles land as workflow artifacts only, no GitHub Release is created.
+      - name: Build desktop bundles via tauri-action (macOS artifacts UNSIGNED)
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ${{ github.workspace }}
+          args: --config src-tauri/tauri.conf.json
+
+      - name: Upload desktop bundles (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuomi-desktop-${{ matrix.platform }}-${{ steps.meta.outputs.tag_name }}
+          path: ${{ steps.tauri.outputs.artifactPaths }}
+          if-no-files-found: error
