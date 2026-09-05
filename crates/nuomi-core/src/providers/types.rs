@@ -125,7 +125,7 @@ pub enum StreamEvent {
 }
 
 /// One-shot request. `stream` is implied by which method is called.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub model: String,
     pub system_prompt: Option<String>,
@@ -135,6 +135,11 @@ pub struct ChatRequest {
     pub max_tokens: Option<i64>,
     /// Prompt-cache retention hint honored by providers that support it.
     pub cache_retention: CacheRetention,
+    /// Cache-lineage scope (session lineage root) for providers that route
+    /// their prompt cache by an explicit key (OpenAI `prompt_cache_key`).
+    /// `None` falls back to provider-default cache routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_scope: Option<String>,
 }
 
 impl ChatRequest {
@@ -147,6 +152,7 @@ impl ChatRequest {
             temperature: None,
             max_tokens: None,
             cache_retention: CacheRetention::None,
+            cache_scope: None,
         }
     }
 }

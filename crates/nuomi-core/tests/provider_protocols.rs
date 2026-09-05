@@ -17,6 +17,7 @@ fn openai_request() -> ChatRequest {
         temperature: Some(0.2),
         max_tokens: Some(128),
         cache_retention: Default::default(),
+        cache_scope: None,
     }
 }
 

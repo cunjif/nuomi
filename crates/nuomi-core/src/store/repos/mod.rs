@@ -1,6 +1,7 @@
 //! Repositories: all SQL lives here (parameterized only).
 
 pub mod agent_profiles;
+pub mod change_log;
 pub mod events;
 pub mod integrations;
 pub mod memory;

@@ -15,6 +15,8 @@
 //! Everything else is illegal. The iron rule lives with the caller: persist the
 //! `state_changed` EventRecord BEFORE applying any external side effect.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -188,6 +190,271 @@ impl GenerationalRun {
         let next = self.state.transition(event)?;
         self.state = next;
         self.run_seq = self.run_seq.wrapping_add(1);
+        Ok(next)
+    }
+}
+
+// --- Self-landing pipeline (parallel-code) --------------------------------
+//
+// An independent, composable machine for how a delegated sub-run lands its
+// own work. It runs BESIDE the run lifecycle above — it never reuses or
+// reinterprets RunState, whose semantics stay untouched.
+//
+// Mapping from parallel-code's five landing states (`mcp/types.ts:113`):
+// - `landing_pending`   → `Pending` (verification not yet reported)
+// - (implicit in-flight verification) → `Verifying` — split out so the
+//   structured `record_verification` gate has its own phase
+// - (implicit in-flight merge) → `Merging` — merging is the side-effectful
+//   step, so it gets its own phase; callers persist the phase transition
+//   BEFORE merging, mirroring the run state machine's iron rule
+// - `landing_escalated` + `pending_review` → `Escalated` — both mean "a
+//   human/coordinator must take over"; nuomi has a single approvals inbox,
+//   so the distinction carries no domain weight
+// - `failed` + `cleanup_failed` → `Failed` — a cleanup failure is still a
+//   terminal failure at the domain level; cleanup retry policy belongs to
+//   the executor layer
+// - landed/reviewed → `Landed`
+//
+// Trade-off: five states collapse into six phases here — we split the two
+// implicit in-flight stages (verification, merge) because nuomi's event
+// sourcing needs a persisted phase per side effect, and we collapse the
+// escalated/reviewed pair because there is exactly one escalation surface.
+//
+// Legal transitions:
+//
+// ```text
+// pending --RecordVerification(all passed)--> verifying
+// pending --RecordVerification(any failed)--> escalated
+// verifying --BeginMerge--> merging
+// merging --MarkLanded--> landed
+// pending|verifying|merging --Escalate--> escalated   (explicit escalation)
+// pending|verifying|merging --Fail--> failed
+// ```
+//
+// `escalated`, `failed` and `landed` are terminal; a retry is a fresh
+// `LandingTracker::begin` for a new attempt id.
+
+/// Phases of the self-landing pipeline for a delegated sub-run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum LandingPhase {
+    Pending,
+    Verifying,
+    Merging,
+    Escalated,
+    Failed,
+    Landed,
+}
+
+/// Events driving the landing pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+pub enum LandingEvent {
+    RecordVerification { all_passed: bool },
+    BeginMerge,
+    MarkLanded,
+    Escalate,
+    Fail,
+}
+
+/// The only error [`LandingPhase::transition`] can produce.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid landing transition: {from} --{event}-->")]
+pub struct LandingTransitionError {
+    pub from: &'static str,
+    pub event: String,
+}
+
+impl LandingPhase {
+    /// Total transition function: exhaustive over `(LandingPhase, LandingEvent)`.
+    pub fn transition(self, ev: LandingEvent) -> Result<LandingPhase, LandingTransitionError> {
+        let next = match (self, ev) {
+            (LandingPhase::Pending, LandingEvent::RecordVerification { all_passed: true }) => {
+                LandingPhase::Verifying
+            }
+            (LandingPhase::Pending, LandingEvent::RecordVerification { all_passed: false }) => {
+                LandingPhase::Escalated
+            }
+            (LandingPhase::Verifying, LandingEvent::BeginMerge) => LandingPhase::Merging,
+            (LandingPhase::Merging, LandingEvent::MarkLanded) => LandingPhase::Landed,
+            (
+                LandingPhase::Pending | LandingPhase::Verifying | LandingPhase::Merging,
+                LandingEvent::Escalate,
+            ) => LandingPhase::Escalated,
+            (
+                LandingPhase::Pending | LandingPhase::Verifying | LandingPhase::Merging,
+                LandingEvent::Fail,
+            ) => LandingPhase::Failed,
+            (from, event) => {
+                return Err(LandingTransitionError {
+                    from: from.as_str(),
+                    event: format!("{event:?}"),
+                })
+            }
+        };
+        Ok(next)
+    }
+
+    /// Canonical DB/IPC text form (`snake_case`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LandingPhase::Pending => "pending",
+            LandingPhase::Verifying => "verifying",
+            LandingPhase::Merging => "merging",
+            LandingPhase::Escalated => "escalated",
+            LandingPhase::Failed => "failed",
+            LandingPhase::Landed => "landed",
+        }
+    }
+
+    /// Inverse of [`LandingPhase::as_str`].
+    pub fn parse(s: &str) -> Option<LandingPhase> {
+        match s {
+            "pending" => Some(LandingPhase::Pending),
+            "verifying" => Some(LandingPhase::Verifying),
+            "merging" => Some(LandingPhase::Merging),
+            "escalated" => Some(LandingPhase::Escalated),
+            "failed" => Some(LandingPhase::Failed),
+            "landed" => Some(LandingPhase::Landed),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for LandingPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Errors produced by [`LandingTracker`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LandingError {
+    #[error("unknown landing run: {0}")]
+    UnknownRun(String),
+
+    #[error("landing run already tracked: {0}")]
+    AlreadyTracked(String),
+
+    #[error(transparent)]
+    Invalid(#[from] LandingTransitionError),
+}
+
+/// A tracked run's current landing record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandingRecord {
+    pub phase: LandingPhase,
+    /// Last reported verification checks (name, passed) — parallel-code's
+    /// "self-reported but structured" verification.
+    pub checks: Vec<(String, bool)>,
+    /// Reason recorded by `escalate` / `fail`.
+    pub reason: Option<String>,
+}
+
+/// Tracks the landing pipeline of many runs in memory.
+///
+/// Pure domain logic — no DB, no clock; persistence wiring lives in the
+/// store layer. The iron rule lives with the caller: persist the phase
+/// change BEFORE any external side effect (e.g. before actually merging).
+#[derive(Debug, Default, Clone)]
+pub struct LandingTracker {
+    runs: HashMap<String, LandingRecord>,
+}
+
+impl LandingTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers `run_id` at [`LandingPhase::Pending`].
+    pub fn begin(&mut self, run_id: impl Into<String>) -> Result<LandingPhase, LandingError> {
+        let run_id = run_id.into();
+        if self.runs.contains_key(&run_id) {
+            return Err(LandingError::AlreadyTracked(run_id));
+        }
+        self.runs.insert(
+            run_id.clone(),
+            LandingRecord {
+                phase: LandingPhase::Pending,
+                checks: Vec::new(),
+                reason: None,
+            },
+        );
+        Ok(LandingPhase::Pending)
+    }
+
+    /// Records structured verification checks. All passed → `Verifying`
+    /// (cleared to merge); any failed → `Escalated`. Empty checks count as
+    /// vacuously passed.
+    pub fn record_verification(
+        &mut self,
+        run_id: &str,
+        checks: Vec<(String, bool)>,
+    ) -> Result<LandingPhase, LandingError> {
+        let all_passed = checks.iter().all(|&(_, passed)| passed);
+        let phase = self.apply(run_id, LandingEvent::RecordVerification { all_passed })?;
+        if let Some(record) = self.runs.get_mut(run_id) {
+            record.checks = checks;
+        }
+        Ok(phase)
+    }
+
+    /// `Verifying → Merging`; callers persist this, then perform the merge.
+    pub fn begin_merge(&mut self, run_id: &str) -> Result<LandingPhase, LandingError> {
+        self.apply(run_id, LandingEvent::BeginMerge)
+    }
+
+    /// `Merging → Landed` once the merge actually succeeded.
+    pub fn mark_landed(&mut self, run_id: &str) -> Result<LandingPhase, LandingError> {
+        self.apply(run_id, LandingEvent::MarkLanded)
+    }
+
+    /// Explicit escalation to a human/coordinator from any active phase.
+    pub fn escalate(
+        &mut self,
+        run_id: &str,
+        reason: impl Into<String>,
+    ) -> Result<LandingPhase, LandingError> {
+        let phase = self.apply(run_id, LandingEvent::Escalate)?;
+        if let Some(record) = self.runs.get_mut(run_id) {
+            record.reason = Some(reason.into());
+        }
+        Ok(phase)
+    }
+
+    /// Terminal failure from any active phase.
+    pub fn fail(
+        &mut self,
+        run_id: &str,
+        reason: impl Into<String>,
+    ) -> Result<LandingPhase, LandingError> {
+        let phase = self.apply(run_id, LandingEvent::Fail)?;
+        if let Some(record) = self.runs.get_mut(run_id) {
+            record.reason = Some(reason.into());
+        }
+        Ok(phase)
+    }
+
+    /// Current phase of `run_id`.
+    pub fn phase(&self, run_id: &str) -> Result<LandingPhase, LandingError> {
+        self.runs
+            .get(run_id)
+            .map(|r| r.phase)
+            .ok_or_else(|| LandingError::UnknownRun(run_id.to_string()))
+    }
+
+    /// Full record (phase, checks, reason) of `run_id`, if tracked.
+    pub fn get(&self, run_id: &str) -> Option<&LandingRecord> {
+        self.runs.get(run_id)
+    }
+
+    fn apply(&mut self, run_id: &str, ev: LandingEvent) -> Result<LandingPhase, LandingError> {
+        let record = self
+            .runs
+            .get_mut(run_id)
+            .ok_or_else(|| LandingError::UnknownRun(run_id.to_string()))?;
+        let next = record.phase.transition(ev)?;
+        record.phase = next;
         Ok(next)
     }
 }
@@ -428,5 +695,220 @@ mod tests {
             }))
         );
         assert_eq!(run.run_seq(), 5);
+    }
+
+    // --- LandingPhase (self-landing pipeline) ------------------------------
+
+    /// Every legal landing transition: (from, event, to).
+    const LANDING_LEGAL: &[(LandingPhase, LandingEvent, LandingPhase)] = &[
+        (
+            LandingPhase::Pending,
+            LandingEvent::RecordVerification { all_passed: true },
+            LandingPhase::Verifying,
+        ),
+        (
+            LandingPhase::Pending,
+            LandingEvent::RecordVerification { all_passed: false },
+            LandingPhase::Escalated,
+        ),
+        (
+            LandingPhase::Verifying,
+            LandingEvent::BeginMerge,
+            LandingPhase::Merging,
+        ),
+        (
+            LandingPhase::Merging,
+            LandingEvent::MarkLanded,
+            LandingPhase::Landed,
+        ),
+        (
+            LandingPhase::Pending,
+            LandingEvent::Escalate,
+            LandingPhase::Escalated,
+        ),
+        (
+            LandingPhase::Verifying,
+            LandingEvent::Escalate,
+            LandingPhase::Escalated,
+        ),
+        (
+            LandingPhase::Merging,
+            LandingEvent::Escalate,
+            LandingPhase::Escalated,
+        ),
+        (
+            LandingPhase::Pending,
+            LandingEvent::Fail,
+            LandingPhase::Failed,
+        ),
+        (
+            LandingPhase::Verifying,
+            LandingEvent::Fail,
+            LandingPhase::Failed,
+        ),
+        (
+            LandingPhase::Merging,
+            LandingEvent::Fail,
+            LandingPhase::Failed,
+        ),
+    ];
+
+    const LANDING_ALL_STATES: [LandingPhase; 6] = [
+        LandingPhase::Pending,
+        LandingPhase::Verifying,
+        LandingPhase::Merging,
+        LandingPhase::Escalated,
+        LandingPhase::Failed,
+        LandingPhase::Landed,
+    ];
+
+    fn all_landing_events() -> Vec<LandingEvent> {
+        vec![
+            LandingEvent::RecordVerification { all_passed: true },
+            LandingEvent::RecordVerification { all_passed: false },
+            LandingEvent::BeginMerge,
+            LandingEvent::MarkLanded,
+            LandingEvent::Escalate,
+            LandingEvent::Fail,
+        ]
+    }
+
+    #[test]
+    fn landing_every_legal_transition_succeeds() {
+        for &(from, ev, to) in LANDING_LEGAL {
+            let got = from.transition(ev);
+            assert_eq!(got, Ok(to), "{from:?} --{ev:?}--> expected {to:?}");
+        }
+    }
+
+    #[test]
+    fn landing_every_illegal_transition_is_rejected_exhaustively() {
+        // Exhaustive sweep over all (phase, event) pairs not in LANDING_LEGAL.
+        for &phase in &LANDING_ALL_STATES {
+            for ev in all_landing_events() {
+                let legal = LANDING_LEGAL.iter().any(|&(f, e, _)| f == phase && e == ev);
+                if legal {
+                    continue;
+                }
+                let err = phase
+                    .transition(ev)
+                    .expect_err(&format!("expected {phase:?} --{ev:?}--> to be illegal"));
+                assert_eq!(err.from, phase.as_str());
+            }
+        }
+    }
+
+    #[test]
+    fn landing_terminal_states_reject_everything() {
+        for &terminal in &[
+            LandingPhase::Escalated,
+            LandingPhase::Failed,
+            LandingPhase::Landed,
+        ] {
+            for ev in all_landing_events() {
+                assert!(terminal.transition(ev).is_err(), "{terminal:?} --{ev:?}-->");
+            }
+        }
+    }
+
+    #[test]
+    fn landing_serde_phase_roundtrip() {
+        for &phase in &LANDING_ALL_STATES {
+            let json = serde_json::to_string(&phase).unwrap();
+            assert_eq!(serde_json::from_str::<LandingPhase>(&json).unwrap(), phase);
+        }
+    }
+
+    #[test]
+    fn landing_tracker_happy_path_lands() {
+        let mut t = LandingTracker::new();
+        assert_eq!(t.begin("run-1"), Ok(LandingPhase::Pending));
+        let phase = t
+            .record_verification(
+                "run-1",
+                vec![("tests".to_string(), true), ("lint".to_string(), true)],
+            )
+            .unwrap();
+        assert_eq!(phase, LandingPhase::Verifying);
+        assert_eq!(t.begin_merge("run-1").unwrap(), LandingPhase::Merging);
+        assert_eq!(t.mark_landed("run-1").unwrap(), LandingPhase::Landed);
+        assert_eq!(t.phase("run-1").unwrap(), LandingPhase::Landed);
+    }
+
+    #[test]
+    fn landing_tracker_failed_check_escalates_with_checks_recorded() {
+        let mut t = LandingTracker::new();
+        t.begin("run-1").unwrap();
+        let phase = t
+            .record_verification(
+                "run-1",
+                vec![("tests".to_string(), true), ("build".to_string(), false)],
+            )
+            .unwrap();
+        assert_eq!(phase, LandingPhase::Escalated);
+        let record = t.get("run-1").unwrap();
+        assert_eq!(record.checks.len(), 2);
+        // Escalated is terminal: every further transition is rejected.
+        assert!(t.record_verification("run-1", vec![]).is_err());
+        assert!(t.begin_merge("run-1").is_err());
+        assert!(t.escalate("run-1", "again").is_err());
+        assert!(t.fail("run-1", "again").is_err());
+    }
+
+    #[test]
+    fn landing_tracker_escalate_and_fail_carry_reasons() {
+        let mut t = LandingTracker::new();
+        t.begin("r1").unwrap();
+        assert_eq!(
+            t.escalate("r1", "needs human merge").unwrap(),
+            LandingPhase::Escalated
+        );
+        assert_eq!(
+            t.get("r1").unwrap().reason.as_deref(),
+            Some("needs human merge")
+        );
+        t.begin("r2").unwrap();
+        assert_eq!(
+            t.fail("r2", "merge conflict").unwrap(),
+            LandingPhase::Failed
+        );
+        assert_eq!(
+            t.get("r2").unwrap().reason.as_deref(),
+            Some("merge conflict")
+        );
+    }
+
+    #[test]
+    fn landing_tracker_rejects_unknown_and_duplicate_runs() {
+        let mut t = LandingTracker::new();
+        assert!(matches!(t.phase("nope"), Err(LandingError::UnknownRun(_))));
+        assert!(matches!(
+            t.record_verification("nope", vec![]),
+            Err(LandingError::UnknownRun(_))
+        ));
+        assert!(matches!(
+            t.begin_merge("nope"),
+            Err(LandingError::UnknownRun(_))
+        ));
+        t.begin("r").unwrap();
+        assert!(matches!(t.begin("r"), Err(LandingError::AlreadyTracked(_))));
+    }
+
+    #[test]
+    fn landing_tracker_invalid_mid_sequence_transitions() {
+        let mut t = LandingTracker::new();
+        t.begin("r").unwrap();
+        // Landed before verifying/merging is illegal.
+        assert!(t.mark_landed("r").is_err());
+        assert!(t.begin_merge("r").is_err());
+        // Verification must come first; direct merge is illegal even after a
+        // verify-less flow is attempted.
+        assert!(matches!(
+            t.begin_merge("r"),
+            Err(LandingError::Invalid(LandingTransitionError {
+                from: "pending",
+                ..
+            }))
+        ));
     }
 }

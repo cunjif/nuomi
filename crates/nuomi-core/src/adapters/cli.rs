@@ -32,6 +32,7 @@ use crate::providers::client::LlmProvider;
 use crate::providers::types::{ChatRequest, ChatResponse, MessageRole, StreamEvent, Usage};
 use crate::providers::ProviderError;
 
+use super::traits::{AdapterCapabilities, BinaryResolver, EnvSanitizer, ResumableSession};
 use super::AdapterError;
 
 /// Upper bound for stderr excerpts embedded in error values.
@@ -263,6 +264,41 @@ impl LlmProvider for CliAgentClient {
             )
             .boxed(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Optional capability impls (hexagonal port: adapters implement what they
+// support; see adapters/traits.rs)
+// ---------------------------------------------------------------------------
+
+impl BinaryResolver for CliAgentClient {
+    fn resolve_binary(&self, command: &str) -> Option<String> {
+        is_allowlisted(command, &self.allowlist).then(|| executable_base_name(command))
+    }
+}
+
+impl EnvSanitizer for CliAgentClient {
+    fn sanitize_env(
+        &self,
+        parent: Vec<(String, String)>,
+        profile_env: &[(String, String)],
+    ) -> Vec<(String, String)> {
+        sanitized_env(parent, profile_env)
+    }
+}
+
+impl AdapterCapabilities for CliAgentClient {
+    fn as_binary_resolver(&self) -> Option<&dyn BinaryResolver> {
+        Some(self)
+    }
+
+    fn as_env_sanitizer(&self) -> Option<&dyn EnvSanitizer> {
+        Some(self)
+    }
+
+    fn as_resumable_session(&self) -> Option<&dyn ResumableSession> {
+        None
     }
 }
 
@@ -635,6 +671,7 @@ fn adapter_error(agent: &str, error: AdapterError) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::traits::AgentAdapter;
     use crate::providers::types::{ChatMessage, ToolDef};
 
     fn profile(command: &str, args: serde_json::Value) -> AgentProfile {
@@ -662,6 +699,7 @@ mod tests {
             temperature: None,
             max_tokens: None,
             cache_retention: Default::default(),
+            cache_scope: None,
         }
     }
 
@@ -943,5 +981,49 @@ mod tests {
         assert!(env.iter().all(|(k, _)| k != "NODE_OPTIONS"));
         assert!(env.iter().all(|(k, _)| k != "ld_preload"));
         assert!(env.iter().any(|(k, v)| k == "OK_VAR" && v == "v"));
+    }
+
+    #[test]
+    fn capability_queries_report_present_capabilities_on_cli_adapter() {
+        let client = CliAgentClient::new(
+            profile("node", serde_json::json!(["{prompt}"])),
+            vec!["node".into()],
+        )
+        .expect("allowlisted profile must construct");
+        let caps: &dyn AdapterCapabilities = &client;
+        assert!(caps.supports_binary_resolution());
+        assert!(caps.supports_env_sanitization());
+
+        let resolver = caps.as_binary_resolver().expect("capability declared");
+        assert_eq!(resolver.resolve_binary("node"), Some("node".to_string()));
+
+        let sanitizer = caps.as_env_sanitizer().expect("capability declared");
+        let env = sanitizer.sanitize_env(vec![("PATH".to_string(), "/bin".to_string())], &[]);
+        assert!(env.iter().any(|(k, _)| k == "PATH"));
+        assert!(env.iter().all(|(k, _)| !super::is_env_blocked(k)));
+    }
+
+    #[test]
+    fn capability_queries_report_absent_capabilities_and_unresolved_binaries() {
+        let client =
+            CliAgentClient::new(profile("node", serde_json::json!([])), vec!["node".into()])
+                .expect("allowlisted profile must construct");
+        let caps: &dyn AdapterCapabilities = &client;
+        // The CLI adapter has no session-resume support (reserved for the
+        // future PTY long-session adapters).
+        assert!(!caps.supports_session_resume());
+        assert!(caps.as_resumable_session().is_none());
+
+        let resolver = caps.as_binary_resolver().expect("capability declared");
+        assert_eq!(resolver.resolve_binary("python"), None);
+    }
+
+    #[test]
+    fn cli_adapter_satisfies_agent_adapter_port_through_trait_object() {
+        let client =
+            CliAgentClient::new(profile("node", serde_json::json!([])), vec!["node".into()])
+                .expect("allowlisted profile must construct");
+        let port: &dyn AgentAdapter = &client;
+        assert_eq!(port.id(), "cli-1");
     }
 }

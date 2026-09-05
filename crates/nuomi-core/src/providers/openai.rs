@@ -81,6 +81,11 @@ pub(crate) fn build_body(request: &ChatRequest, stream: bool) -> Value {
     if let Some(mt) = request.max_tokens {
         body["max_tokens"] = json!(mt);
     }
+    // OpenAI routes prompt caches by this key; the session lineage root
+    // (hermes cache-lineage) goes here.
+    if let Some(scope) = &request.cache_scope {
+        body["prompt_cache_key"] = json!(scope);
+    }
     body
 }
 
@@ -291,5 +296,22 @@ impl LlmProvider for OpenAiCompatibleClient {
         });
 
         rx.boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_scope_maps_to_prompt_cache_key_only_when_set() {
+        let mut request = ChatRequest::simple("gpt", "sys", "hi");
+        request.cache_scope = Some("lineage-root".into());
+        let body = build_body(&request, false);
+        assert_eq!(body["prompt_cache_key"], "lineage-root");
+
+        let request = ChatRequest::simple("gpt", "sys", "hi");
+        let body = build_body(&request, false);
+        assert!(body.get("prompt_cache_key").is_none());
     }
 }

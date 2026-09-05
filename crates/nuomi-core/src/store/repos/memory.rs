@@ -66,6 +66,72 @@ pub fn search(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// A memory search result carrying its FTS5 relevance rank (lower = better;
+/// `0.0` when produced by the LIKE fallback path).
+pub struct MemorySearchHit {
+    pub entry: MemoryEntry,
+    pub rank: f64,
+}
+
+/// Full-text search over `memory_fts` (trigram-indexed `memory_entries`).
+/// Queries shorter than 3 characters fall back to the LIKE-based `search`
+/// because the trigram tokenizer cannot index them. MATCH special characters
+/// are neutralized by double-quoting each token.
+pub fn search_fts(
+    conn: &Connection,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<MemorySearchHit>, StoreError> {
+    let trimmed = query.trim();
+    let Some(fts_query) = build_fts_query(trimmed) else {
+        return like_fallback(conn, trimmed, limit);
+    };
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.content, m.source_session_id, m.tags, m.kind, m.user_profile,
+                m.created_at, m.updated_at, memory_fts.rank
+         FROM memory_fts JOIN memory_entries m ON m.rowid = memory_fts.rowid
+         WHERE memory_fts MATCH ?1 ORDER BY memory_fts.rank LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![fts_query, limit], |row| {
+        let entry = row_to_memory(row)?;
+        Ok(MemorySearchHit {
+            entry,
+            rank: row.get(8)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// LIKE-based fallback ranked at 0.0 (used for sub-trigram queries).
+fn like_fallback(
+    conn: &Connection,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<MemorySearchHit>, StoreError> {
+    Ok(search(conn, Some(query), None, limit)?
+        .into_iter()
+        .map(|entry| MemorySearchHit { entry, rank: 0.0 })
+        .collect())
+}
+
+/// Builds a safe FTS5 MATCH expression: each whitespace-separated token is
+/// double-quoted (internal quotes doubled) so special characters cannot alter
+/// the query grammar. Tokens shorter than 3 characters are dropped because the
+/// trigram tokenizer cannot match them. Returns `None` when nothing qualifies,
+/// signaling the LIKE fallback.
+fn build_fts_query(query: &str) -> Option<String> {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| t.chars().count() >= 3)
+        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" "))
+    }
+}
+
 /// All user-profile facts (always injected by evolution).
 pub fn list_user_profile(conn: &Connection) -> Result<Vec<MemoryEntry>, StoreError> {
     let mut stmt = conn.prepare(
@@ -152,5 +218,78 @@ mod tests {
             all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             vec!["new", "old"]
         );
+    }
+
+    fn db_fts() -> Connection {
+        // 0005_memory_fts is applied by the migrations runner itself.
+        db()
+    }
+
+    #[test]
+    fn fts_matches_cjk_substring_and_english() {
+        let conn = db_fts();
+        insert(
+            &conn,
+            &entry("m1", "糯米是插件化的Agent内核", &[], false, 1),
+        )
+        .unwrap();
+        insert(&conn, &entry("m2", "loves rust programming", &[], false, 2)).unwrap();
+        let cjk: Vec<String> = search_fts(&conn, "插件化", 10)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.entry.id)
+            .collect();
+        assert_eq!(cjk, vec!["m1"]);
+        let en: Vec<String> = search_fts(&conn, "rust", 10)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.entry.id)
+            .collect();
+        assert_eq!(en, vec!["m2"]);
+    }
+
+    #[test]
+    fn fts_short_query_falls_back_to_like() {
+        let conn = db_fts();
+        insert(
+            &conn,
+            &entry("m1", "糯米是插件化的Agent内核", &[], false, 1),
+        )
+        .unwrap();
+        let hits = search_fts(&conn, "糯米", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.id, "m1");
+        assert_eq!(hits[0].rank, 0.0);
+    }
+
+    #[test]
+    fn fts_special_characters_do_not_break_match() {
+        let conn = db_fts();
+        insert(&conn, &entry("m1", "loves rust programming", &[], false, 1)).unwrap();
+        // MATCH grammar metacharacters must be neutralized, not panic.
+        let hits = search_fts(&conn, "rust\" OR (1=1) NEAR --", 10).unwrap();
+        assert!(hits.is_empty());
+        // FTS keywords (AND/OR/NOT/NEAR) are matched literally, not parsed:
+        // unquoted "programming NOT" would be a syntax error.
+        let hits = search_fts(&conn, "programming NOT", 10).unwrap();
+        assert!(hits.is_empty());
+        let hits = search_fts(&conn, "programming", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn fts_index_syncs_on_update_and_delete() {
+        let conn = db_fts();
+        insert(&conn, &entry("m1", "alpha beta gamma", &[], false, 1)).unwrap();
+        conn.execute(
+            "UPDATE memory_entries SET content = 'delta epsilon zeta' WHERE id = 'm1'",
+            [],
+        )
+        .unwrap();
+        assert!(search_fts(&conn, "alpha", 10).unwrap().is_empty());
+        assert_eq!(search_fts(&conn, "delta", 10).unwrap().len(), 1);
+        conn.execute("DELETE FROM memory_entries WHERE id = 'm1'", [])
+            .unwrap();
+        assert!(search_fts(&conn, "delta", 10).unwrap().is_empty());
     }
 }

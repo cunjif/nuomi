@@ -41,6 +41,30 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0004_integrations.sql"
         )),
     ),
+    (
+        5,
+        "0005_memory_fts",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0005_memory_fts.sql"
+        )),
+    ),
+    (
+        6,
+        "0006_change_log",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0006_change_log.sql"
+        )),
+    ),
+    (
+        7,
+        "0007_session_cache_scope",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0007_session_cache_scope.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

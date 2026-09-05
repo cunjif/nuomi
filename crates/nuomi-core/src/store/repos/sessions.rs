@@ -59,6 +59,39 @@ pub fn update_title(conn: &Connection, id: &str, title: &str) -> Result<(), Stor
     Ok(())
 }
 
+/// Sets the session's cache-lineage scope (hermes cache-lineage root).
+/// An empty scope means "unset"; consumers fall back to the session id.
+pub fn set_cache_scope(conn: &Connection, id: &str, scope: &str) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE sessions SET cache_scope = ?2 WHERE id = ?1",
+        params![id, scope],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "session",
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Reads the cache-lineage scope. `Ok(None)` means unset (empty string),
+/// which semantically falls back to the session id.
+pub fn cache_scope(conn: &Connection, id: &str) -> Result<Option<String>, StoreError> {
+    let scope: String = conn
+        .query_row(
+            "SELECT cache_scope FROM sessions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "session",
+            id: id.to_string(),
+        })?;
+    Ok((!scope.is_empty()).then_some(scope))
+}
+
 /// Lists sessions, most recently updated first.
 pub fn list(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
@@ -85,7 +118,28 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         migrations::run(&conn).unwrap();
+        ensure_cache_scope_column(&conn);
         conn
+    }
+
+    /// Migration 0007 is pending registration in `store/migrations.rs`
+    /// (main session owns it), so make sure the column exists for tests.
+    /// Once registered this becomes a no-op.
+    fn ensure_cache_scope_column(conn: &Connection) {
+        let has_column: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('sessions') WHERE name = 'cache_scope'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if has_column == 0 {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN cache_scope TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .unwrap();
+        }
     }
 
     fn session(id: &str) -> Session {
@@ -142,6 +196,39 @@ mod tests {
         assert_eq!(get(&conn, "s1").unwrap().title, "renamed");
         assert!(matches!(
             update_title(&conn, "nope", "x"),
+            Err(StoreError::NotFound {
+                entity: "session",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn cache_scope_roundtrip_and_empty_means_unset() {
+        let conn = db();
+        insert(&conn, &session("s1")).unwrap();
+        assert_eq!(cache_scope(&conn, "s1").unwrap(), None);
+        set_cache_scope(&conn, "s1", "lineage-root").unwrap();
+        assert_eq!(
+            cache_scope(&conn, "s1").unwrap(),
+            Some("lineage-root".into())
+        );
+        set_cache_scope(&conn, "s1", "").unwrap();
+        assert_eq!(cache_scope(&conn, "s1").unwrap(), None);
+    }
+
+    #[test]
+    fn cache_scope_missing_session_is_not_found() {
+        let conn = db();
+        assert!(matches!(
+            cache_scope(&conn, "nope"),
+            Err(StoreError::NotFound {
+                entity: "session",
+                ..
+            })
+        ));
+        assert!(matches!(
+            set_cache_scope(&conn, "nope", "s"),
             Err(StoreError::NotFound {
                 entity: "session",
                 ..

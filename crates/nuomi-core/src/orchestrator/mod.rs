@@ -1,6 +1,7 @@
 //! Role/Team executors: pipeline, router, group chat (Selector + Handoff), whiteboard.
 //! Milestone K6 / SPEC T9.
 
+pub mod delegation;
 pub mod group_chat;
 pub mod input;
 pub mod pipeline;
@@ -8,6 +9,10 @@ pub mod router;
 pub mod selector;
 pub mod whiteboard;
 
+pub use delegation::{
+    DelegateExecutor, DelegationBroker, DelegationError, DelegationEvent, DelegationOutcome,
+    DelegationTask, TaskId, TaskStatus,
+};
 pub use group_chat::{GroupChatExecutor, GroupChatOutcome, HANDOFF_TOOL};
 pub use input::{ProviderResolver, TeamRunInput};
 pub use pipeline::{PipelineExecutor, PipelineOutcome, PipelineStep};
@@ -17,6 +22,10 @@ pub use selector::{
     SpeakerSelector,
 };
 pub use whiteboard::WhiteBoardService;
+
+// Self-landing pipeline lives in the domain (single source of truth);
+// re-exported here for orchestrator consumers.
+pub use crate::domain::{LandingPhase, LandingTracker};
 
 use thiserror::Error;
 

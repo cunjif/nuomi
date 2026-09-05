@@ -1,6 +1,13 @@
 //! Loop Engine: the ReAct executor (thought → tool_call → tool_result …).
+//!
+//! Follows pi's dual-queue model: a *steering* queue injects external
+//! interjections before the next assistant response while the run is
+//! in-flight, and a *follow-up* queue extends the run after the agent
+//! stops naturally. A per-turn hook (`prepareNextTurn`) may override
+//! request parameters (model / temperature / provider) before each turn.
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 
@@ -19,6 +26,9 @@ pub struct LoopConfig {
     pub max_steps: usize,
     /// Memory keywords injected at session start (tag filter).
     pub memory_tag: Option<String>,
+    /// Cache-lineage scope (session lineage root) forwarded to providers
+    /// that route their prompt cache by key (OpenAI `prompt_cache_key`).
+    pub cache_scope: Option<String>,
 }
 
 impl Default for LoopConfig {
@@ -27,9 +37,24 @@ impl Default for LoopConfig {
             model: "default".into(),
             max_steps: 16,
             memory_tag: None,
+            cache_scope: None,
         }
     }
 }
+
+/// Overrides a single turn's request, returned by the prepare-next-turn
+/// hook. All fields default to "keep the configured value".
+#[derive(Default)]
+pub struct TurnOverride {
+    pub model: Option<String>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    /// Swaps the provider for this turn (per-turn model hot-switch).
+    pub provider: Option<Arc<dyn LlmProvider>>,
+}
+
+/// Callback invoked before every turn with the 1-based turn number.
+pub type TurnHook = Arc<dyn Fn(usize) -> TurnOverride + Send + Sync>;
 
 /// Outcome of one loop run.
 #[derive(Debug)]
@@ -49,6 +74,22 @@ pub struct LoopEngine {
     provider: Arc<dyn LlmProvider>,
     config: LoopConfig,
     on_delta: Option<DeltaCallback>,
+    turn_hook: Option<TurnHook>,
+    /// External interjections injected before the next assistant response.
+    steering: Arc<Mutex<VecDeque<String>>>,
+    /// Messages that continue the run after a natural stop.
+    follow_ups: Arc<Mutex<VecDeque<String>>>,
+}
+
+/// Recovers the queue even if a panicking writer poisoned the mutex.
+fn drain_queue(queue: &Mutex<VecDeque<String>>) -> Vec<String> {
+    std::mem::take(
+        &mut *queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
+    .into_iter()
+    .collect()
 }
 
 impl LoopEngine {
@@ -57,6 +98,9 @@ impl LoopEngine {
             provider,
             config,
             on_delta: None,
+            turn_hook: None,
+            steering: Arc::new(Mutex::new(VecDeque::new())),
+            follow_ups: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -67,11 +111,37 @@ impl LoopEngine {
         self
     }
 
+    /// Sets the per-turn hook (pi-style `prepareNextTurn`): called before
+    /// each turn; its [`TurnOverride`] adjusts the outgoing request.
+    pub fn with_turn_hook(mut self, hook: TurnHook) -> Self {
+        self.turn_hook = Some(hook);
+        self
+    }
+
+    /// Queues an external interjection; it enters the context before the
+    /// next assistant response (or extends the run after a natural stop).
+    pub fn push_steering(&self, msg: impl Into<String>) {
+        self.steering
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_back(msg.into());
+    }
+
+    /// Queues a follow-up; when the agent stops naturally and this queue
+    /// is non-empty, the messages are sent and the run continues.
+    pub fn push_follow_up(&self, msg: impl Into<String>) {
+        self.follow_ups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_back(msg.into());
+    }
+
     async fn stream_once(
         &self,
+        provider: &Arc<dyn LlmProvider>,
         request: &ChatRequest,
     ) -> Result<crate::providers::ChatResponse, HarnessError> {
-        let mut stream = self.provider.stream(request);
+        let mut stream = provider.stream(request);
         let mut final_resp = None;
         while let Some(item) = stream.next().await {
             match item {
@@ -157,32 +227,60 @@ impl LoopEngine {
         let mut steps = 0usize;
         while steps < self.config.max_steps {
             steps += 1;
+            // prepareNextTurn hook: per-turn overrides (model hot-switch …).
+            let turn_override = self
+                .turn_hook
+                .as_ref()
+                .map(|hook| hook(steps))
+                .unwrap_or_default();
             let request = ChatRequest {
-                model: self.config.model.clone(),
+                model: turn_override
+                    .model
+                    .unwrap_or_else(|| self.config.model.clone()),
                 system_prompt: Some(system_prompt.clone()),
                 messages: transcript.clone(),
                 tools: defs.clone(),
-                temperature: None,
-                max_tokens: None,
+                temperature: turn_override.temperature,
+                max_tokens: turn_override.max_tokens,
                 cache_retention: Default::default(),
+                cache_scope: self.config.cache_scope.clone(),
             };
-            let response = self.stream_once(&request).await?;
+            let provider = turn_override.provider.as_ref().unwrap_or(&self.provider);
+            let response = self.stream_once(provider, &request).await?;
             // A length-capped response means emitted tool arguments were cut
             // mid-JSON; executing them would act on corrupt input.
             let output_truncated = response.finish_reason.as_deref() == Some("length");
 
             if response.tool_calls.is_empty() {
                 transcript.push(ChatMessage::assistant(response.content.clone()));
-                ctx.publish(Event::new(
-                    "session.end",
-                    serde_json::json!({ "steps": steps }),
-                ));
-                return Ok(LoopRunResult {
-                    transcript,
-                    final_text: response.content,
-                    steps,
-                    truncated: false,
-                });
+                // Dual-queue check on natural stop: interjections and
+                // follow-ups extend the run with a new turn.
+                let steering = drain_queue(&self.steering);
+                let follow_ups = drain_queue(&self.follow_ups);
+                let mut injected = false;
+                for (kind, msgs) in [("steering", steering), ("follow_up", follow_ups)] {
+                    for msg in msgs {
+                        ctx.publish(Event::new(
+                            "message.injected",
+                            serde_json::json!({ "kind": kind, "content": msg }),
+                        ));
+                        transcript.push(ChatMessage::user(msg));
+                        injected = true;
+                    }
+                }
+                if !injected {
+                    ctx.publish(Event::new(
+                        "session.end",
+                        serde_json::json!({ "steps": steps }),
+                    ));
+                    return Ok(LoopRunResult {
+                        transcript,
+                        final_text: response.content,
+                        steps,
+                        truncated: false,
+                    });
+                }
+                continue;
             }
 
             let mut assistant = ChatMessage::assistant(response.content.clone());
@@ -232,6 +330,16 @@ impl LoopEngine {
                     ));
                 }
                 transcript.push(ChatMessage::tool_result(call.id, result));
+            }
+
+            // Steering drained at turn end enters the context before the
+            // next assistant response.
+            for msg in drain_queue(&self.steering) {
+                ctx.publish(Event::new(
+                    "message.injected",
+                    serde_json::json!({ "kind": "steering", "content": msg }),
+                ));
+                transcript.push(ChatMessage::user(msg));
             }
         }
 
@@ -396,6 +504,7 @@ mod tests {
                 model: "m".into(),
                 max_steps: 3,
                 memory_tag: None,
+                cache_scope: None,
             },
         );
         let result = engine
@@ -511,5 +620,106 @@ mod tests {
             sent,
             vec!["earlier question", "earlier answer", "follow up"]
         );
+    }
+
+    #[tokio::test]
+    async fn steering_enters_context_before_next_turn() {
+        let provider = Arc::new(FakeLlm::new(
+            "fake",
+            vec![tool_call_response(), FakeLlm::response("steered answer")],
+        ));
+        let engine = LoopEngine::new(provider.clone(), LoopConfig::default());
+        engine.push_steering("user interjection");
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        tools.register(Arc::new(AddTool)).await.unwrap();
+        let result = engine
+            .run(&ctx, &tools, None, None, "compute 1+2")
+            .await
+            .unwrap();
+        assert_eq!(result.final_text, "steered answer");
+
+        let reqs = provider.requests.lock().unwrap();
+        assert!(!reqs[0]
+            .messages
+            .iter()
+            .any(|m| m.content == "user interjection"));
+        assert!(reqs[1]
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::User && m.content == "user interjection"));
+    }
+
+    #[tokio::test]
+    async fn follow_up_extends_run_after_natural_stop() {
+        let provider = Arc::new(FakeLlm::new(
+            "fake",
+            vec![
+                FakeLlm::response("first answer"),
+                FakeLlm::response("second answer"),
+            ],
+        ));
+        let engine = LoopEngine::new(provider.clone(), LoopConfig::default());
+        engine.push_follow_up("one more thing");
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        let result = engine.run(&ctx, &tools, None, None, "hello").await.unwrap();
+        assert_eq!(result.final_text, "second answer");
+        assert_eq!(result.steps, 2);
+
+        let reqs = provider.requests.lock().unwrap();
+        let second: Vec<&str> = reqs[1]
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(second, vec!["hello", "first answer", "one more thing"]);
+    }
+
+    #[tokio::test]
+    async fn turn_hook_overrides_model_and_temperature() {
+        let provider = Arc::new(FakeLlm::new(
+            "fake",
+            vec![tool_call_response(), FakeLlm::response("done")],
+        ));
+        let hot_model: TurnHook = Arc::new(|turn| {
+            let mut o = TurnOverride::default();
+            if turn >= 2 {
+                o.model = Some("hot-model".into());
+                o.temperature = Some(0.3);
+            }
+            o
+        });
+        let engine =
+            LoopEngine::new(provider.clone(), LoopConfig::default()).with_turn_hook(hot_model);
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        tools.register(Arc::new(AddTool)).await.unwrap();
+        let result = engine
+            .run(&ctx, &tools, None, None, "compute 1+2")
+            .await
+            .unwrap();
+        assert_eq!(result.final_text, "done");
+
+        let reqs = provider.requests.lock().unwrap();
+        assert_eq!(reqs[0].model, "default");
+        assert_eq!(reqs[0].temperature, None);
+        assert_eq!(reqs[1].model, "hot-model");
+        assert_eq!(reqs[1].temperature, Some(0.3));
+    }
+
+    #[tokio::test]
+    async fn cache_scope_is_forwarded_to_provider_requests() {
+        let provider = Arc::new(FakeLlm::new("fake", vec![FakeLlm::response("ok")]));
+        let config = LoopConfig {
+            cache_scope: Some("lineage-root".into()),
+            ..LoopConfig::default()
+        };
+        let engine = LoopEngine::new(provider.clone(), config);
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        engine.run(&ctx, &tools, None, None, "hi").await.unwrap();
+        let reqs = provider.requests.lock().unwrap();
+        assert_eq!(reqs[0].cache_scope.as_deref(), Some("lineage-root"));
     }
 }

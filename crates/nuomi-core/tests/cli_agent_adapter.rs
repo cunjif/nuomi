@@ -85,6 +85,7 @@ fn bare_request(user: &str) -> ChatRequest {
         temperature: None,
         max_tokens: None,
         cache_retention: Default::default(),
+        cache_scope: None,
     }
 }
 

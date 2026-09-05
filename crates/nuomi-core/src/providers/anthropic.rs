@@ -76,6 +76,10 @@ fn apply_cache_marks(body: &mut Value, retention: CacheRetention) {
 }
 
 /// Builds the wire body. Exposed for tests.
+///
+/// Note: `ChatRequest::cache_scope` is intentionally unused here. Anthropic
+/// buckets its prompt cache by exact content prefix, so the cached prefix
+/// itself is the scope — there is no routing parameter to set (no-op).
 pub(crate) fn build_body(request: &ChatRequest, stream: bool) -> Value {
     let mut messages = Vec::new();
     for m in &request.messages {

@@ -8,8 +8,17 @@
 //! `kill_on_drop` reaping.
 
 pub mod cli;
+pub mod pty;
+pub mod traits;
 
 pub use cli::CliAgentClient;
+pub use pty::{
+    strip_ansi, DeliveryReadiness, PromptAnchor, PromptDetector, PromptPattern, PtySession,
+    ReadinessPoller, PROMPT_PATTERNS,
+};
+pub use traits::{
+    AdapterCapabilities, AgentAdapter, BinaryResolver, EnvSanitizer, ResumableSession,
+};
 
 use thiserror::Error;
 

@@ -23,7 +23,13 @@ keyring.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 base64.workspace = true
+# PTY long sessions for interactive CLI agents (harness-research P1):
+# wezterm's portable-pty — Windows ConPTY / macOS & Linux unix PTYs.
+portable-pty = "0.9"
 
 [dev-dependencies]
 tempfile.workspace = true
 wiremock.workspace = true
+# Enables tokio::time::pause / #[tokio::test(start_paused = true)] for
+# deterministic DeliveryReadiness window tests (no real sleeps in CI).
+tokio = { workspace = true, features = ["test-util"] }

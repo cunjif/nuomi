@@ -11,6 +11,7 @@
     "lint": "eslint src",
     "test": "vitest run",
     "contracts:gen": "cargo run -p nuomi-shell --bin contracts_gen",
+    "contracts:check": "cargo run -p nuomi-shell --bin contracts_gen && git diff --exit-code -- src/lib/ipc",
     "coverage:rust": "cargo llvm-cov --workspace --summary-only",
     "coverage:rust:html": "cargo llvm-cov --workspace --html --output-dir target/llvm-cov"
   },

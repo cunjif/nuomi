@@ -51,6 +51,7 @@ impl PipelineExecutor {
                 temperature: role.temperature,
                 max_tokens: role.max_tokens,
                 cache_retention: Default::default(),
+                cache_scope: None,
             };
 
             let response = provider

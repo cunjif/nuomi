@@ -146,3 +146,46 @@ jobs:
           name: nuomi-desktop-${{ matrix.platform }}-${{ steps.meta.outputs.tag_name }}
           path: ${{ steps.tauri.outputs.artifactPaths }}
           if-no-files-found: error
+
+  # IPC contract drift gate: regenerate tauri-specta bindings and fail if
+  # `src/lib/ipc` differs from the committed ones. Independent of the build
+  # matrix — a red drift check never blocks artifact production and vice versa.
+  contracts-drift:
+    name: contracts drift
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # contracts:check compiles nuomi-shell (tauri deps) → system libs needed
+      - name: Install Tauri v2 system deps (Ubuntu 22.04)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check IPC bindings drift
+        run: pnpm contracts:check
