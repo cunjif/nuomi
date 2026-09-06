@@ -39,6 +39,45 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<ProviderConfig>, StoreErr
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Updates an existing row in place (id/created_at preserved). The name
+/// column carries a UNIQUE constraint, so renaming onto an existing name
+/// fails here just like on insert.
+pub fn update_provider(conn: &Connection, p: &ProviderConfig) -> Result<(), StoreError> {
+    let changed = conn.execute(
+        "UPDATE provider_configs
+         SET name = ?2, protocol = ?3, base_url = ?4, keyring_ref = ?5, capabilities = ?6,
+             is_master = ?7, fallback_order = ?8, params_json = ?9, updated_at = ?10
+         WHERE id = ?1",
+        params![
+            p.id,
+            p.name,
+            protocol_to_str(p.protocol),
+            p.base_url,
+            p.keyring_ref,
+            serde_json::to_string(&p.capabilities)?,
+            p.is_master as i64,
+            p.fallback_order,
+            serde_json::to_string(&p.params)?,
+            p.updated_at
+        ],
+    )?;
+    if changed == 0 {
+        return Err(StoreError::NotFound {
+            entity: "provider_config",
+            id: p.id.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Deletes a row; `false` when the id does not exist. A `ForeignKey`
+/// failure means roles/teams still reference this provider — the caller
+/// surfaces that instead of cascading.
+pub fn delete_provider(conn: &Connection, id: &str) -> Result<bool, StoreError> {
+    let changed = conn.execute("DELETE FROM provider_configs WHERE id = ?1", params![id])?;
+    Ok(changed > 0)
+}
+
 pub fn get_provider(conn: &Connection, id: &str) -> Result<ProviderConfig, StoreError> {
     conn.query_row(
         "SELECT id, name, protocol, base_url, keyring_ref, capabilities, is_master, fallback_order, params_json, created_at, updated_at
@@ -140,5 +179,42 @@ mod tests {
         let mut b = provider("b");
         b.name = "p-a".into();
         assert!(insert_provider(&conn, &b).is_err());
+    }
+
+    #[test]
+    fn update_provider_preserves_id_and_created_at() {
+        let conn = db();
+        insert_provider(&conn, &provider("p1")).unwrap();
+        let mut edited = provider("p1");
+        edited.name = "renamed".into();
+        edited.base_url = "http://elsewhere".into();
+        edited.params =
+            crate::domain::entities::ProviderSettings::default().into_params(edited.params);
+        edited.updated_at = 99;
+        update_provider(&conn, &edited).unwrap();
+        let got = get_provider(&conn, "p1").unwrap();
+        assert_eq!(got.name, "renamed");
+        assert_eq!(got.base_url, "http://elsewhere");
+        assert_eq!(got.created_at, 1);
+        assert_eq!(got.updated_at, 99);
+        assert_eq!(
+            crate::domain::entities::ProviderSettings::from_params(&got.params),
+            crate::domain::entities::ProviderSettings::default()
+        );
+    }
+
+    #[test]
+    fn update_missing_provider_is_not_found() {
+        let conn = db();
+        assert!(update_provider(&conn, &provider("ghost")).is_err());
+    }
+
+    #[test]
+    fn delete_provider_reports_existence() {
+        let conn = db();
+        insert_provider(&conn, &provider("p1")).unwrap();
+        assert!(delete_provider(&conn, "p1").unwrap());
+        assert!(!delete_provider(&conn, "p1").unwrap());
+        assert!(get_provider(&conn, "p1").is_err());
     }
 }

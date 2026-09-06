@@ -20,13 +20,17 @@
 }
 
 .dark {
-  --nuomi-surface: #1e2229;
-  --nuomi-surface-raised: #262b33;
-  --nuomi-surface-overlay: #2f3540;
-  --nuomi-scrim: rgba(0, 0, 0, 0.5);
+  /* Near-black app frame (#0b0c0e) → panel (#141518) → field (#1b1d21),
+     hairline family around #26282c via ink-muted alpha borders. */
+  --nuomi-surface: #0b0c0e;
+  --nuomi-surface-raised: #141518;
+  --nuomi-surface-overlay: #1b1d21;
+  --nuomi-scrim: rgba(0, 0, 0, 0.55);
   --nuomi-ink: #e6e6e6;
   --nuomi-ink-muted: #9aa3ad;
-  --nuomi-accent: #98bcfc;
+  /* Brightest blue that keeps every pairing in themeContrast.test.ts ≥ 4.5:1
+     (the design's raw #3b82f6 fails the accent/20 badge pair at 3.86:1). */
+  --nuomi-accent: #5b9bf8;
   --nuomi-ok: #9ece6a;
   --nuomi-warn: #e0af68;
   --nuomi-danger: #f7768e;

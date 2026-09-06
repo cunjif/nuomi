@@ -7,15 +7,15 @@ module.exports = {
       colors: {
         // Dark-first palette; light theme mirrors via CSS vars in M-UI1 polish.
         surface: {
-          DEFAULT: "var(--nuomi-surface, #1e2229)",
-          raised: "var(--nuomi-surface-raised, #262b33)",
-          overlay: "var(--nuomi-surface-overlay, #2f3540)",
-          scrim: "var(--nuomi-scrim, rgba(0, 0, 0, 0.5))",
+          DEFAULT: "var(--nuomi-surface, #0b0c0e)",
+          raised: "var(--nuomi-surface-raised, #141518)",
+          overlay: "var(--nuomi-surface-overlay, #1b1d21)",
+          scrim: "var(--nuomi-scrim, rgba(0, 0, 0, 0.55))",
         },
         ink: {
           DEFAULT: "var(--nuomi-ink, #e6e6e6)",
           muted: "var(--nuomi-ink-muted, #9aa3ad)",
-          accent: "var(--nuomi-accent, #98bcfc)",
+          accent: "var(--nuomi-accent, #5b9bf8)",
         },
         state: {
           ok: "var(--nuomi-ok, #9ece6a)",

@@ -36,6 +36,90 @@ pub enum ProviderProtocol {
     AnthropicCompatible,
 }
 
+/// Provider-level model/routing settings, persisted under the `"settings"`
+/// key inside `ProviderConfig::params` (JSON params extension — no schema
+/// change; unknown params keys are preserved).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSettings {
+    /// Model ids exposed by this endpoint.
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<i64>,
+    #[serde(default)]
+    pub timeout_secs: Option<i64>,
+    #[serde(default)]
+    pub retry: Option<i64>,
+    #[serde(default)]
+    pub max_concurrency: Option<i64>,
+    /// Routing weight (0-10); higher wins when the router picks a master.
+    #[serde(default)]
+    pub priority: Option<f64>,
+    /// Role tags this provider is suited for, e.g. `["code","review"]`.
+    #[serde(default)]
+    pub roles: Vec<String>,
+    #[serde(default = "crate::domain::entities::provider_enabled_default")]
+    pub enabled: bool,
+}
+
+fn provider_enabled_default() -> bool {
+    true
+}
+
+impl Default for ProviderSettings {
+    fn default() -> Self {
+        Self {
+            models: Vec::new(),
+            default_model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            timeout_secs: None,
+            retry: None,
+            max_concurrency: None,
+            priority: None,
+            roles: Vec::new(),
+            enabled: true,
+        }
+    }
+}
+
+impl ProviderSettings {
+    /// Extracts the `"settings"` key from a provider `params` object;
+    /// missing/malformed payloads fall back to defaults.
+    pub fn from_params(params: &serde_json::Value) -> Self {
+        params
+            .get("settings")
+            .and_then(|value| serde_json::from_value::<ProviderSettings>(value.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    /// Writes the settings back into a `params` object, preserving any
+    /// pre-existing keys outside the `"settings"` namespace.
+    pub fn into_params(self, mut params: serde_json::Value) -> serde_json::Value {
+        if !params.is_object() {
+            params = serde_json::json!({});
+        }
+        match serde_json::to_value(&self) {
+            Ok(settings) => {
+                if let Some(obj) = params.as_object_mut() {
+                    obj.insert("settings".into(), settings);
+                }
+                params
+            }
+            // ProviderSettings serialization is infallible in practice; on
+            // the impossible failure the original params pass through.
+            Err(_) => params,
+        }
+    }
+}
+
 /// A model service endpoint (master or slave).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {

@@ -33,6 +33,7 @@ function provider(overrides: Partial<ProviderDto> = {}): ProviderDto {
     hasKey: true,
     capabilities: ["chat"],
     isMaster: false,
+    settings: { models: ["gpt-4o-mini"], enabled: true },
     ...overrides,
   };
 }

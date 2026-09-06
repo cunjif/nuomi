@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
+import type { CommandContext } from "../../lib/commands/registry";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { useTheme } from "../../lib/store/useTheme";
 import { useUiStore } from "../../lib/store/uiStore";
 import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
@@ -16,8 +18,16 @@ export function ChatView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const sessionId = useUiStore((s) => s.selectedSessionId);
+  const navigate = useUiStore((s) => s.setView);
+  const selectSession = useUiStore((s) => s.selectSession);
+  const { toggleTheme } = useTheme();
   const stream = useSessionStream(sessionId);
   const [finalText, setFinalText] = useState<string | null>(null);
+
+  const commandContext = useMemo<CommandContext>(
+    () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme, toast, t }),
+    [sessionId, qc, navigate, selectSession, toggleTheme, t],
+  );
 
   const submitMut = useMutation({
     mutationFn: (input: string) => {
@@ -64,6 +74,7 @@ export function ChatView(): ReactNode {
       <ChatInput
         disabled={false}
         pending={submitMut.isPending}
+        commandContext={commandContext}
         onSubmit={async (input) => {
           await submitMut.mutateAsync(input);
         }}
