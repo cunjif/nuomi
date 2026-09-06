@@ -15,6 +15,7 @@ pub mod adapters;
 pub mod domain;
 pub mod error;
 pub mod evolution;
+pub mod exchange;
 pub mod facade;
 pub mod harness;
 pub mod integrations;
