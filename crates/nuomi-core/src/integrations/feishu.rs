@@ -25,7 +25,9 @@ impl FeishuSink {
         Self {
             url: url.into(),
             secret,
-            client: super::http_client(),
+            // Shared process-wide pool; the 10s budget from
+            // `integrations::HTTP_TIMEOUT` wraps the request below.
+            client: crate::providers::pool::shared_client(),
         }
     }
 }
@@ -54,7 +56,14 @@ impl OutboundSink for FeishuSink {
             payload["timestamp"] = json!(ts);
             payload["sign"] = json!(sign(ts, secret)?);
         }
-        let text = post_json_checked(&self.client, &self.url, &payload).await?;
+        // Per-request timeout preserves the previous client-level 10s
+        // semantics now that the shared (timeout-free) pool is used.
+        let text = tokio::time::timeout(
+            super::HTTP_TIMEOUT,
+            post_json_checked(&self.client, &self.url, &payload),
+        )
+        .await
+        .map_err(|_| OutboundError::Timeout)??;
         // Feishu reports business errors with HTTP 200 + non-zero `code`.
         let code = serde_json::from_str::<serde_json::Value>(&text)
             .ok()

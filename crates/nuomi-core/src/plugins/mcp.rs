@@ -30,6 +30,10 @@ fn rpc_error(method: &str, message: impl Into<String>) -> HarnessError {
 
 /// stdio transport: newline-delimited JSON-RPC over a child process.
 /// Arguments are passed as an array (never a shell string).
+///
+/// This is a long-lived transport: one persistent child process with piped
+/// stdin/stdout is reused for every request (no per-request spawn), so there
+/// is no connection pool to warm — the "connection" is the process itself.
 pub struct StdioTransport {
     child: tokio::sync::Mutex<tokio::process::Child>,
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
@@ -120,6 +124,11 @@ impl McpTransport for StdioTransport {
 }
 
 /// Streamable HTTP transport: JSON-RPC over HTTP POST.
+///
+/// Requests go through the process-wide shared connection pool
+/// (`providers::pool::shared_client`), so DNS/TLS/connections are reused
+/// with all other HTTP outlets. The previous client-level 60s timeout is
+/// preserved as a per-request timeout.
 pub struct HttpTransport {
     http: reqwest::Client,
     url: String,
@@ -127,13 +136,13 @@ pub struct HttpTransport {
     next_id: AtomicU64,
 }
 
+/// Per-request budget (previously the client-level timeout).
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 impl HttpTransport {
     pub fn new(url: impl Into<String>, headers: Vec<(String, String)>) -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(60))
-                .build()
-                .unwrap_or_default(),
+            http: crate::providers::pool::shared_client(),
             url: url.into(),
             headers,
             next_id: AtomicU64::new(1),
@@ -146,7 +155,11 @@ impl McpTransport for HttpTransport {
     async fn request(&self, method: &str, params: Value) -> Result<Value, HarnessError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let body = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let mut req = self.http.post(&self.url).json(&body);
+        let mut req = self
+            .http
+            .post(&self.url)
+            .json(&body)
+            .timeout(HTTP_REQUEST_TIMEOUT);
         for (k, v) in &self.headers {
             req = req.header(k.as_str(), v.as_str());
         }

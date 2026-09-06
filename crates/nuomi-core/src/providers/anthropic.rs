@@ -21,7 +21,9 @@ pub struct AnthropicCompatibleClient {
 impl AnthropicCompatibleClient {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            // Shared process-wide pool: DNS/TLS/connections are reused
+            // across every provider client and HTTP outlet.
+            http: super::pool::shared_client(),
             base_url: base_url.into(),
             api_key: api_key.into(),
         }

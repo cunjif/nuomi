@@ -29,7 +29,9 @@ impl GenericWebhookSink {
             kind,
             url: url.into(),
             headers,
-            client: super::http_client(),
+            // Shared process-wide pool; the 10s budget from
+            // `integrations::HTTP_TIMEOUT` is applied per request below.
+            client: crate::providers::pool::shared_client(),
         }
     }
 }
@@ -47,7 +49,11 @@ impl OutboundSink for GenericWebhookSink {
             "body": body,
             "meta": {},
         });
-        let mut req = self.client.post(&self.url).json(&payload);
+        let mut req = self
+            .client
+            .post(&self.url)
+            .timeout(super::HTTP_TIMEOUT)
+            .json(&payload);
         for (k, v) in &self.headers {
             req = req.header(k, v);
         }
