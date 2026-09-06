@@ -106,6 +106,7 @@ impl NuomiKernel {
     /// Opens the database, runs migrations, creates the first session row,
     /// builds the provider and registers the core plugins.
     pub async fn boot(config: NuomiConfig) -> CoreResult<Self> {
+        let boot_started = std::time::Instant::now();
         let db_path: Arc<str> = Arc::from(config.db_path.to_string_lossy().to_string());
         let session_id = {
             let path = db_path.clone();
@@ -124,6 +125,10 @@ impl NuomiKernel {
             .await
             .map_err(join_err)??
         };
+        tracing::info!(
+            db_boot_ms = boot_started.elapsed().as_millis() as u64,
+            "kernel database boot complete (open + migrations + first session)"
+        );
 
         let model = match &config.provider {
             ProviderSource::Endpoint(ep) => ep.model.clone(),

@@ -9,9 +9,9 @@ describe("App shell (U8)", () => {
     tdState.sessions.push({ id: "s1", title: "demo session", createdAt: 1, updatedAt: 1 });
     renderWithProviders(<App />);
 
-    // Nav entries for every surface.
+    // Nav entries for every surface (after the workspace gate resolves).
     for (const label of ["对话", "看板", "Trace", "审批", "定时任务", "设置"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
     }
     // Connection status resolves via the sessions probe.
     await screen.findByText("已连接");

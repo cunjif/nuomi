@@ -29,9 +29,10 @@ function unwrap<T>(pending: Promise<Result<T, IpcError>>): Promise<T> {
 
 let current: Commands = production;
 
-/** Test-only: replace one or more commands with doubles. */
+/** Test-only: replace one or more commands with doubles. Merges over the
+ * current set so stacked injections keep earlier doubles intact. */
 export function injectIpcCommands(overrides: Partial<Commands>): void {
-  current = { ...production, ...overrides };
+  current = { ...current, ...overrides };
 }
 
 /** Test-only: restore the production command set. */
@@ -79,6 +80,9 @@ export const ipc = {
   upsertProvider: (provider: Parameters<Commands["upsertProvider"]>[0]) =>
     unwrap(current.upsertProvider(provider)),
   listProviders: () => unwrap(current.listProviders()),
+  deleteProvider: (providerId: string) => unwrap(current.deleteProvider(providerId)),
+  testProviderConnection: (input: Parameters<Commands["testProviderConnection"]>[0]) =>
+    unwrap(current.testProviderConnection(input)),
   setSensitiveTools: (patterns: string[]) => unwrap(current.setSensitiveTools(patterns)),
   getSensitiveTools: () => unwrap(current.getSensitiveTools()),
   setOnlineAuthorized: (authorized: boolean) =>

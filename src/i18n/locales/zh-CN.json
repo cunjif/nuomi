@@ -71,6 +71,35 @@
     "toolResult": "工具结果",
     "running": "正在执行…"
   },
+  "commands": {
+    "panelLabel": "命令补全",
+    "workspace": {
+      "description": "切换工作区目录",
+      "usage": "<path>"
+    },
+    "new": {
+      "description": "新建会话"
+    },
+    "sessions": {
+      "description": "打开会话列表"
+    },
+    "clear": {
+      "description": "清空输入框"
+    },
+    "help": {
+      "description": "列出全部命令"
+    },
+    "theme": {
+      "description": "切换暗色/亮色主题"
+    },
+    "unknown": "未知命令 /{{name}}，相近命令：{{suggestions}}",
+    "unknownNone": "未知命令 /{{name}}",
+    "helpTitle": "可用命令：",
+    "workspaceRequired": "用法：/workspace <path>",
+    "workspaceDone": "工作区已切换：{{path}}",
+    "sessionCreated": "已新建会话",
+    "themeToggled": "主题已切换"
+  },
   "board": {
     "newTask": "新建任务",
     "taskTitle": "标题",
@@ -271,6 +300,65 @@
       "empty": "还没有集成，填写上方表单添加一个。"
     }
   },
+  "provider": {
+    "heading": "服务商",
+    "count": "{{count}} 个",
+    "searchPlaceholder": "搜索 provider",
+    "add": "+ 添加 Provider",
+    "untitled": "新建 Provider",
+    "empty": "还没有 Provider，点击下方按钮添加。",
+    "noSearchMatch": "没有匹配的 Provider",
+    "selectHint": "选择左侧 Provider 查看详情",
+    "subtitleModel": "当前模型 {{model}}",
+    "subtitleNoModel": "未配置模型",
+    "statusConnected": "已连接",
+    "statusUntested": "未测试",
+    "statusError": "连接错误",
+    "enabled": "启用",
+    "connection": "连接信息",
+    "providerType": "服务商类型",
+    "typeOpenAi": "OpenAI 兼容",
+    "typeAnthropic": "Anthropic 兼容",
+    "typeDeepSeek": "DeepSeek",
+    "typeOllama": "Ollama",
+    "typeCustom": "自定义",
+    "displayName": "显示名称",
+    "baseUrl": "API Base URL",
+    "apiKey": "API Key",
+    "apiKeyHint": "仅经 OS keyring 加密存储，不会写入日志",
+    "show": "显示",
+    "hide": "隐藏",
+    "hasKeyStored": "已录入密钥",
+    "testConnection": "测试连接",
+    "testing": "测试中…",
+    "testOk": "✓ 已连接 · {{ms}}ms",
+    "testTimeout": "连接测试超时",
+    "testFailed": "连接失败",
+    "models": "模型",
+    "addModelPlaceholder": "+ 添加模型 id",
+    "defaultModel": "默认模型",
+    "defaultModelNone": "未设置",
+    "advanced": "高级参数",
+    "temperature": "temperature",
+    "topP": "top_p",
+    "maxTokens": "max tokens",
+    "timeoutSecs": "超时时间(秒)",
+    "retry": "重试次数",
+    "maxConcurrency": "最大并发",
+    "routing": "路由与优先级",
+    "priority": "优先级权重",
+    "roles": "适用角色",
+    "roleCode": "代码生成",
+    "roleReview": "代码审查",
+    "roleDocs": "文档撰写",
+    "rolePlan": "任务规划",
+    "deleteConfirm": "确认删除该 Provider？",
+    "deleted": "Provider 已删除",
+    "deleteFailed": "删除 Provider 失败",
+    "saved": "Provider 已保存",
+    "saveFailed": "保存 Provider 失败",
+    "deleteConflict": "该 Provider 仍被 Role/Team 引用，请先解除绑定"
+  },
   "editor": {
     "languageLabel": "语言",
     "saveHint": "Ctrl+S 保存"
@@ -287,6 +375,15 @@
     "saved": "文件已保存",
     "save": "保存 (Ctrl+S)",
     "loadingFile": "加载文件中…"
+  },
+  "workspace": {
+    "setupTitle": "设置工作区",
+    "setupDescription": "选择编辑器与 Agent 的沙箱根目录，目录之外的文件不可访问。",
+    "pathLabel": "工作区目录",
+    "confirm": "确认",
+    "switchWorkspace": "切换工作区",
+    "current": "工作区",
+    "setupFailed": "设置工作区失败"
   },
   "errors": {
     "generic": "操作失败：{{message}}",
@@ -305,6 +402,7 @@
     "team_form_failed": "自发组队失败，请稍后重试",
     "integration_invalid": "Webhook URL 无效或配置不合法",
     "integration_not_found": "集成不存在或已被删除",
+    "provider_not_found": "Provider 不存在或已被删除",
     "task_invalid": "任务内容无效",
     "task_not_found": "任务不存在或已被删除",
     "task_invalid_status": "任务当前状态不允许该操作",

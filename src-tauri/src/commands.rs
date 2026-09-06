@@ -659,9 +659,75 @@ pub async fn impl_delete_schedule(state: &AppState, schedule_id: String) -> Resu
 
 // ---------- settings / providers ----------
 
+/// Provider-level settings mirrored from
+/// `nuomi_core::domain::entities::ProviderSettings` (stored inside the
+/// provider row's `params_json` under the `"settings"` key).
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSettingsDto {
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<i64>,
+    #[serde(default)]
+    pub timeout_secs: Option<i64>,
+    #[serde(default)]
+    pub retry: Option<i64>,
+    #[serde(default)]
+    pub max_concurrency: Option<i64>,
+    #[serde(default)]
+    pub priority: Option<f64>,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl ProviderSettingsDto {
+    fn from_entity(settings: nuomi_core::domain::entities::ProviderSettings) -> Self {
+        Self {
+            models: settings.models,
+            default_model: settings.default_model,
+            temperature: settings.temperature,
+            top_p: settings.top_p,
+            max_tokens: settings.max_tokens,
+            timeout_secs: settings.timeout_secs,
+            retry: settings.retry,
+            max_concurrency: settings.max_concurrency,
+            priority: settings.priority,
+            roles: settings.roles,
+            enabled: settings.enabled,
+        }
+    }
+
+    fn into_entity(self) -> nuomi_core::domain::entities::ProviderSettings {
+        nuomi_core::domain::entities::ProviderSettings {
+            models: self.models,
+            default_model: self.default_model,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            max_tokens: self.max_tokens,
+            timeout_secs: self.timeout_secs,
+            retry: self.retry,
+            max_concurrency: self.max_concurrency,
+            priority: self.priority,
+            roles: self.roles,
+            enabled: self.enabled,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderInput {
+    /// `None` inserts a fresh row; `Some(id)` updates that row in place.
+    pub id: Option<String>,
     pub name: String,
     pub protocol: ProviderProtocolDto,
     pub base_url: String,
@@ -670,42 +736,102 @@ pub struct ProviderInput {
     /// Plaintext only in transit — stored straight into the OS keyring,
     /// never persisted to SQLite or logs.
     pub api_key: Option<String>,
+    /// Model/routing settings (persisted inside `params_json`).
+    pub settings: ProviderSettingsDto,
 }
 
+fn protocol_from_dto(p: ProviderProtocolDto) -> ProviderProtocol {
+    match p {
+        ProviderProtocolDto::OpenAiCompatible => ProviderProtocol::OpenAiCompatible,
+        ProviderProtocolDto::AnthropicCompatible => ProviderProtocol::AnthropicCompatible,
+    }
+}
+
+fn protocol_to_dto(p: ProviderProtocol) -> ProviderProtocolDto {
+    match p {
+        ProviderProtocol::OpenAiCompatible => ProviderProtocolDto::OpenAiCompatible,
+        ProviderProtocol::AnthropicCompatible => ProviderProtocolDto::AnthropicCompatible,
+    }
+}
+
+/// `id` is the update handle: an existing provider id is updated in place
+/// (keeping `created_at` and — when no new key is supplied — the stored
+/// keyring reference), otherwise a fresh row is inserted. The `name` column
+/// stays UNIQUE, so renaming onto a taken name fails at the store layer.
 pub async fn impl_upsert_provider(
     state: &AppState,
     provider: ProviderInput,
 ) -> Result<(), IpcError> {
     use nuomi_core::providers::SecretStore;
-    let keyring_ref = provider
-        .api_key
-        .as_ref()
-        .map(|_| format!("provider/{}", provider.name));
-    if let (Some(key), Some(reference)) = (provider.api_key.as_ref(), keyring_ref.as_ref()) {
+    if let Some(key) = provider.api_key.as_ref() {
+        let reference = format!("provider/{}", provider.name);
         let store = nuomi_core::providers::OsKeyring;
-        store.set(reference, key).await?;
+        store.set(&reference, key).await?;
     }
-    let config = ProviderConfig {
-        id: nuomi_core::domain::new_id(),
-        name: provider.name,
-        protocol: match provider.protocol {
-            ProviderProtocolDto::OpenAiCompatible => ProviderProtocol::OpenAiCompatible,
-            ProviderProtocolDto::AnthropicCompatible => ProviderProtocol::AnthropicCompatible,
-        },
-        base_url: provider.base_url,
-        keyring_ref,
-        capabilities: provider.capabilities,
-        is_master: provider.is_master,
-        fallback_order: None,
-        params: serde_json::json!({}),
-        created_at: now_ms(),
-        updated_at: now_ms(),
-    };
     let path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        Ok(repos::providers::insert_provider(&db.0, &config)?)
+        let now = now_ms();
+        let existing = match provider.id.as_deref() {
+            Some(id) => match repos::providers::get_provider(&db.0, id) {
+                Ok(row) => Some(row),
+                Err(StoreError::NotFound { .. }) => {
+                    return Err(IpcError::new(
+                        "provider.not_found",
+                        format!("provider#{id} not found"),
+                    ))
+                }
+                Err(e) => return Err(e.into()),
+            },
+            None => None,
+        };
+        let keyring_ref = match &provider.api_key {
+            Some(_) => Some(format!("provider/{}", provider.name)),
+            None => existing.as_ref().and_then(|row| row.keyring_ref.clone()),
+        };
+        let base_params = existing
+            .as_ref()
+            .map(|row| row.params.clone())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let params = provider.settings.into_entity().into_params(base_params);
+        let config = ProviderConfig {
+            id: existing
+                .as_ref()
+                .map(|row| row.id.clone())
+                .unwrap_or_else(nuomi_core::domain::new_id),
+            name: provider.name,
+            protocol: protocol_from_dto(provider.protocol),
+            base_url: provider.base_url,
+            keyring_ref,
+            capabilities: provider.capabilities,
+            is_master: provider.is_master,
+            fallback_order: existing.as_ref().and_then(|row| row.fallback_order),
+            params,
+            created_at: existing.as_ref().map(|row| row.created_at).unwrap_or(now),
+            updated_at: now,
+        };
+        if existing.is_some() {
+            Ok(repos::providers::update_provider(&db.0, &config)?)
+        } else {
+            Ok(repos::providers::insert_provider(&db.0, &config)?)
+        }
+    })
+    .await?
+}
+
+pub async fn impl_delete_provider(state: &AppState, provider_id: String) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if !repos::providers::delete_provider(&db.0, &provider_id)? {
+            return Err(IpcError::new(
+                "provider.not_found",
+                format!("provider#{provider_id} not found"),
+            ));
+        }
+        Ok(())
     })
     .await?
 }
@@ -723,16 +849,140 @@ pub async fn impl_list_providers(state: &AppState) -> Result<Vec<ProviderDto>, I
         .map(|p| ProviderDto {
             id: p.id,
             name: p.name,
-            protocol: match p.protocol {
-                ProviderProtocol::OpenAiCompatible => ProviderProtocolDto::OpenAiCompatible,
-                ProviderProtocol::AnthropicCompatible => ProviderProtocolDto::AnthropicCompatible,
-            },
+            protocol: protocol_to_dto(p.protocol),
             base_url: p.base_url,
             has_key: p.keyring_ref.is_some(),
             capabilities: p.capabilities,
             is_master: p.is_master,
+            settings: ProviderSettingsDto::from_entity(
+                nuomi_core::domain::entities::ProviderSettings::from_params(&p.params),
+            ),
         })
         .collect())
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestProviderConnectionInput {
+    /// When set and `api_key` is empty, the stored keyring secret is used.
+    pub provider_id: Option<String>,
+    pub protocol: ProviderProtocolDto,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    /// Model for the minimal chat probe; protocol defaults apply when empty.
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestProviderConnectionDto {
+    pub ok: bool,
+    pub latency_ms: Option<i64>,
+    pub error: Option<String>,
+}
+
+/// Read-only connectivity probe (5s budget): resolves the API key (explicit
+/// input, else the stored keyring secret for `provider_id`), then sends a
+/// one-token chat through the matching core client. Never persists anything;
+/// failures come back as `ok:false`, never as IPC errors.
+pub async fn impl_test_provider_connection(
+    state: &AppState,
+    input: TestProviderConnectionInput,
+) -> Result<TestProviderConnectionDto, IpcError> {
+    use nuomi_core::providers::{LlmProvider, SecretStore};
+    /// Probe budget; mirrors the CLI-agent check so a wedged endpoint
+    /// surfaces as `ok:false`, never a hang.
+    const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    let api_key = if input.api_key.as_deref().is_some_and(|k| !k.is_empty()) {
+        input.api_key.unwrap_or_default()
+    } else {
+        match input.provider_id.as_deref() {
+            Some(provider_id) => {
+                let path = state.db_path.clone();
+                let pid = provider_id.to_string();
+                let reference =
+                    tokio::task::spawn_blocking(move || -> Result<Option<String>, IpcError> {
+                        let db = Db::open(&path)?;
+                        migrations::run(&db.0)?;
+                        match repos::providers::get_provider(&db.0, &pid) {
+                            Ok(row) => Ok(row.keyring_ref),
+                            Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                                "provider.not_found",
+                                format!("provider#{pid} not found"),
+                            )),
+                            Err(e) => Err(e.into()),
+                        }
+                    })
+                    .await??;
+                match reference {
+                    Some(reference) => nuomi_core::providers::OsKeyring
+                        .get(&reference)
+                        .await
+                        .unwrap_or_default(),
+                    None => String::new(),
+                }
+            }
+            None => String::new(),
+        }
+    };
+
+    let model = input
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| match input.protocol {
+            ProviderProtocolDto::OpenAiCompatible => "gpt-4o-mini".to_string(),
+            ProviderProtocolDto::AnthropicCompatible => "claude-3-5-haiku-latest".to_string(),
+        });
+    let mut request =
+        nuomi_core::providers::ChatRequest::simple(&model, "connection probe", "ping");
+    request.temperature = Some(0.0);
+    request.max_tokens = Some(1);
+
+    let started = std::time::Instant::now();
+    let probe: std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        nuomi_core::providers::ChatResponse,
+                        nuomi_core::providers::ProviderError,
+                    >,
+                > + Send,
+        >,
+    > = match input.protocol {
+        ProviderProtocolDto::OpenAiCompatible => Box::pin(async {
+            nuomi_core::providers::OpenAiCompatibleClient::new(&input.base_url, &api_key)
+                .complete(&request)
+                .await
+        }),
+        ProviderProtocolDto::AnthropicCompatible => Box::pin(async {
+            nuomi_core::providers::AnthropicCompatibleClient::new(&input.base_url, &api_key)
+                .complete(&request)
+                .await
+        }),
+    };
+    let result = tokio::time::timeout(TEST_TIMEOUT, probe).await;
+    let latency_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+    Ok(match result {
+        Ok(Ok(_)) => TestProviderConnectionDto {
+            ok: true,
+            latency_ms: Some(latency_ms),
+            error: None,
+        },
+        Ok(Err(e)) => TestProviderConnectionDto {
+            ok: false,
+            latency_ms: Some(latency_ms),
+            error: Some(e.to_string()),
+        },
+        Err(_elapsed) => TestProviderConnectionDto {
+            ok: false,
+            latency_ms: Some(latency_ms),
+            error: Some(format!("timed out after {}s", TEST_TIMEOUT.as_secs())),
+        },
+    })
 }
 
 pub async fn impl_set_sensitive_tools(
@@ -2185,6 +2435,7 @@ pub struct ProviderDto {
     pub has_key: bool,
     pub capabilities: Vec<String>,
     pub is_master: bool,
+    pub settings: ProviderSettingsDto,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -2288,23 +2539,52 @@ impl From<Schedule> for ScheduleDto {
 
 // ---------- workspace switch ----------
 
-pub async fn impl_get_workspace(state: &AppState) -> Result<String, IpcError> {
-    Ok(state.current_workspace().to_string_lossy().to_string())
+/// Workspace contract: the active sandbox root plus whether the workspace has
+/// been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env
+/// was set at boot). `configured=false` gates first-launch setup in the UI.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub root: String,
+    pub configured: bool,
 }
 
-pub async fn impl_set_workspace(state: &AppState, path: String) -> Result<String, IpcError> {
+pub async fn impl_get_workspace(state: &AppState) -> Result<WorkspaceInfo, IpcError> {
+    Ok(WorkspaceInfo {
+        root: state.current_workspace().to_string_lossy().to_string(),
+        configured: state.workspace_env_configured || workspace_persisted(state)?,
+    })
+}
+
+pub async fn impl_set_workspace(state: &AppState, path: String) -> Result<WorkspaceInfo, IpcError> {
     let previous = state
         .switch_workspace(PathBuf::from(&path))
         .map_err(IpcError::from)?;
+    let db = Db::open(&state.db_path)?;
     repos::events::append(
-        &Db::open(&state.db_path)?.0,
+        &db.0,
         "domain",
         "global",
         "workspace.switched",
         &serde_json::json!({ "path": path, "previous": previous.to_string_lossy() }),
         nuomi_core::domain::now_ms(),
     )?;
-    Ok(previous.to_string_lossy().to_string())
+    // Persist AFTER a successful switch so a restart restores this root.
+    repos::settings::set(
+        &db.0,
+        repos::settings::WORKSPACE_ROOT,
+        &state.current_workspace().to_string_lossy(),
+    )?;
+    Ok(WorkspaceInfo {
+        root: state.current_workspace().to_string_lossy().to_string(),
+        configured: true,
+    })
+}
+
+/// Whether a persisted workspace root row exists (blocking call context).
+fn workspace_persisted(state: &AppState) -> Result<bool, IpcError> {
+    let db = Db::open(&state.db_path)?;
+    Ok(repos::settings::get(&db.0, repos::settings::WORKSPACE_ROOT)?.is_some())
 }
 
 #[cfg(test)]

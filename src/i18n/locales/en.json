@@ -71,6 +71,35 @@
     "toolResult": "Tool result",
     "running": "Running…"
   },
+  "commands": {
+    "panelLabel": "Command completions",
+    "workspace": {
+      "description": "Switch the workspace directory",
+      "usage": "<path>"
+    },
+    "new": {
+      "description": "Create a new session"
+    },
+    "sessions": {
+      "description": "Open the session list"
+    },
+    "clear": {
+      "description": "Clear the input box"
+    },
+    "help": {
+      "description": "List all available commands"
+    },
+    "theme": {
+      "description": "Toggle dark/light theme"
+    },
+    "unknown": "Unknown command /{{name}}. Closest: {{suggestions}}",
+    "unknownNone": "Unknown command /{{name}}",
+    "helpTitle": "Available commands:",
+    "workspaceRequired": "Usage: /workspace <path>",
+    "workspaceDone": "Workspace switched to {{path}}",
+    "sessionCreated": "Session created",
+    "themeToggled": "Theme switched"
+  },
   "board": {
     "newTask": "New task",
     "taskTitle": "Title",
@@ -271,6 +300,65 @@
       "empty": "No integrations yet — fill in the form above to add one."
     }
   },
+  "provider": {
+    "heading": "Providers",
+    "count": "{{count}}",
+    "searchPlaceholder": "Search providers",
+    "add": "+ Add provider",
+    "untitled": "New provider",
+    "empty": "No providers yet — add one below.",
+    "noSearchMatch": "No matching provider",
+    "selectHint": "Select a provider on the left to see details",
+    "subtitleModel": "Model {{model}}",
+    "subtitleNoModel": "No model configured",
+    "statusConnected": "Connected",
+    "statusUntested": "Untested",
+    "statusError": "Connection error",
+    "enabled": "Enabled",
+    "connection": "Connection",
+    "providerType": "Provider type",
+    "typeOpenAi": "OpenAI compatible",
+    "typeAnthropic": "Anthropic compatible",
+    "typeDeepSeek": "DeepSeek",
+    "typeOllama": "Ollama",
+    "typeCustom": "Custom",
+    "displayName": "Display name",
+    "baseUrl": "API Base URL",
+    "apiKey": "API Key",
+    "apiKeyHint": "Stored encrypted in the OS keyring, never logged",
+    "show": "Show",
+    "hide": "Hide",
+    "hasKeyStored": "Key stored",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "testOk": "✓ Connected · {{ms}}ms",
+    "testTimeout": "Connection test timed out",
+    "testFailed": "Connection failed",
+    "models": "Models",
+    "addModelPlaceholder": "+ Add model id",
+    "defaultModel": "Default model",
+    "defaultModelNone": "Unset",
+    "advanced": "Advanced",
+    "temperature": "temperature",
+    "topP": "top_p",
+    "maxTokens": "max tokens",
+    "timeoutSecs": "Timeout (s)",
+    "retry": "Retries",
+    "maxConcurrency": "Max concurrency",
+    "routing": "Routing & priority",
+    "priority": "Priority weight",
+    "roles": "Suited roles",
+    "roleCode": "Code generation",
+    "roleReview": "Code review",
+    "roleDocs": "Doc writing",
+    "rolePlan": "Task planning",
+    "deleteConfirm": "Delete this provider?",
+    "deleted": "Provider deleted",
+    "deleteFailed": "Failed to delete provider",
+    "saved": "Provider saved",
+    "saveFailed": "Failed to save provider",
+    "deleteConflict": "This provider is still referenced by a Role/Team — unbind it first"
+  },
   "editor": {
     "languageLabel": "Language",
     "saveHint": "Ctrl+S to save"
@@ -287,6 +375,15 @@
     "saved": "File saved",
     "save": "Save (Ctrl+S)",
     "loadingFile": "Loading file…"
+  },
+  "workspace": {
+    "setupTitle": "Set up your workspace",
+    "setupDescription": "Choose the sandbox root directory for the editor and agents. Files outside this directory are not accessible.",
+    "pathLabel": "Workspace directory",
+    "confirm": "Confirm",
+    "switchWorkspace": "Switch workspace",
+    "current": "Workspace",
+    "setupFailed": "Failed to set workspace"
   },
   "errors": {
     "generic": "Operation failed: {{message}}",
@@ -305,6 +402,7 @@
     "team_form_failed": "Failed to form the team, please retry",
     "integration_invalid": "Invalid webhook URL or configuration",
     "integration_not_found": "Integration not found or already deleted",
+    "provider_not_found": "Provider not found or already deleted",
     "task_invalid": "Task content must not be empty",
     "task_not_found": "Task not found or already deleted",
     "task_invalid_status": "Task status does not allow this operation",

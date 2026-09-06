@@ -65,6 +65,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0007_session_cache_scope.sql"
         )),
     ),
+    (
+        8,
+        "0008_app_settings",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0008_app_settings.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

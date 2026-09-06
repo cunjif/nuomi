@@ -9,6 +9,7 @@ pub mod prompts;
 pub mod providers;
 pub mod roles;
 pub mod sessions;
+pub mod settings;
 pub mod tasks_runs;
 pub mod teams;
 pub mod whiteboard;

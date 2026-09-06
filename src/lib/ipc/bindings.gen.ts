@@ -230,6 +230,22 @@ async listProviders() : Promise<Result<ProviderDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async deleteProvider(providerId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_provider", { providerId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async testProviderConnection(input: TestProviderConnectionInput) : Promise<Result<TestProviderConnectionDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("test_provider_connection", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setSensitiveTools(patterns: string[]) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_sensitive_tools", { patterns }) };
@@ -262,7 +278,7 @@ async getOnlineAuthorized() : Promise<Result<boolean, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async getWorkspace() : Promise<Result<string, IpcError>> {
+async getWorkspace() : Promise<Result<WorkspaceInfo, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_workspace") };
 } catch (e) {
@@ -270,7 +286,7 @@ async getWorkspace() : Promise<Result<string, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async setWorkspace(path: string) : Promise<Result<string, IpcError>> {
+async setWorkspace(path: string) : Promise<Result<WorkspaceInfo, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_workspace", { path }) };
 } catch (e) {
@@ -478,14 +494,28 @@ export type IntegrationKindDto = "feishu_bot" | "qq_webhook" | "telemetry"
  */
 export type IpcError = { generic: { code: string; message: string; details?: JsonValue | null } }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
-export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean }
-export type ProviderInput = { name: string; protocol: ProviderProtocolDto; baseUrl: string; capabilities: string[]; isMaster: boolean; 
+export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean; settings: ProviderSettingsDto }
+export type ProviderInput = { 
+/**
+ * `None` inserts a fresh row; `Some(id)` updates that row in place.
+ */
+id: string | null; name: string; protocol: ProviderProtocolDto; baseUrl: string; capabilities: string[]; isMaster: boolean; 
 /**
  * Plaintext only in transit — stored straight into the OS keyring,
  * never persisted to SQLite or logs.
  */
-apiKey: string | null }
+apiKey: string | null; 
+/**
+ * Model/routing settings (persisted inside `params_json`).
+ */
+settings: ProviderSettingsDto }
 export type ProviderProtocolDto = "open_ai_compatible" | "anthropic_compatible"
+/**
+ * Provider-level settings mirrored from
+ * `nuomi_core::domain::entities::ProviderSettings` (stored inside the
+ * provider row's `params_json` under the `"settings"` key).
+ */
+export type ProviderSettingsDto = { models?: string[]; defaultModel?: string | null; temperature?: number | null; topP?: number | null; maxTokens?: number | null; timeoutSecs?: number | null; retry?: number | null; maxConcurrency?: number | null; priority?: number | null; roles?: string[]; enabled?: boolean }
 export type RoleDto = { id: string; name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; params: JsonValue; createdAt: number; updatedAt: number }
 export type RoleInput = { name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; 
 /**
@@ -513,7 +543,23 @@ export type TeamPlanMemberDto = { kind: string; refId: string; name: string; wil
 export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
 export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
 export type TestIntegrationDto = { ok: boolean; error: string | null }
+export type TestProviderConnectionDto = { ok: boolean; latencyMs: number | null; error: string | null }
+export type TestProviderConnectionInput = { 
+/**
+ * When set and `api_key` is empty, the stored keyring secret is used.
+ */
+providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKey: string | null; 
+/**
+ * Model for the minimal chat probe; protocol defaults apply when empty.
+ */
+model: string | null }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
+/**
+ * Workspace contract: the active sandbox root plus whether the workspace has
+ * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env
+ * was set at boot). `configured=false` gates first-launch setup in the UI.
+ */
+export type WorkspaceInfo = { root: string; configured: boolean }
 
 /** tauri-specta globals **/
 

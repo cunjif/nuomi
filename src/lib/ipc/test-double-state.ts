@@ -33,6 +33,10 @@ interface DoubleState {
   whiteboardNotes: WhiteBoardNoteDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
+  /** Active workspace root returned by get/setWorkspace (files stay flat paths). */
+  workspaceRoot: string;
+  /** Whether the workspace has been configured (drives first-launch gating). */
+  workspaceConfigured: boolean;
   /** path → entry; dirs have content === null */
   files: Map<string, { isDir: boolean; size: number; content: string | null }>;
 }
@@ -52,6 +56,8 @@ export const tdState: DoubleState = {
   whiteboardNotes: [],
   sensitiveTools: null,
   onlineAuthorized: false,
+  workspaceRoot: "C:\\workspace",
+  workspaceConfigured: true,
   files: new Map(),
 };
 
@@ -91,6 +97,8 @@ export function tdReset(): void {
   tdState.whiteboardNotes.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
+  tdState.workspaceRoot = "C:\\workspace";
+  tdState.workspaceConfigured = true;
   tdState.files.clear();
 }
 

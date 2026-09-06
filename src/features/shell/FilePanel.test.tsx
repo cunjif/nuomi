@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { tdSeedFiles } from "../../lib/ipc/test-double";
+import { tdState } from "../../lib/ipc/test-double-state";
 import { renderWithProviders } from "../../test/helpers";
 import { Toaster } from "../../components/ui/Toaster";
 import { useUiStore } from "../../lib/store/uiStore";
@@ -81,5 +82,34 @@ describe("FilePanel — editor dirty flow", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "关闭 a.json" }));
     await waitFor(() => expect(screen.queryByRole("tab", { name: "a.json" })).toBeNull());
+  });
+});
+
+describe("FilePanel — workspace title bar", () => {
+  it("shows the current workspace root in the title bar", async () => {
+    tdState.workspaceRoot = "D:\\projects\\demo";
+    renderPanel();
+
+    const label = await screen.findByText("D:\\projects\\demo");
+    expect(label).toHaveAttribute("title", "D:\\projects\\demo");
+  });
+
+  it("opens the switch dialog and persists the new root on confirm", async () => {
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
+    const input = await screen.findByLabelText("工作区目录");
+    expect(input).toHaveValue("C:\\workspace");
+
+    fireEvent.change(input, { target: { value: "E:\\next" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(tdState.workspaceRoot).toBe("E:\\next");
+      expect(tdState.workspaceConfigured).toBe(true);
+    });
+    // The dialog closes after a successful switch; the title bar shows the new root.
+    await waitFor(() => expect(screen.queryByLabelText("工作区目录")).toBeNull());
+    expect(await screen.findByText("E:\\next")).toBeInTheDocument();
   });
 });

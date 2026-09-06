@@ -182,10 +182,12 @@ export function testDoubleCommands(): CommandSet {
       return ok([]);
     },
     async getWorkspace() {
-      return ok("C:\\workspace");
+      return ok({ root: tdState.workspaceRoot, configured: tdState.workspaceConfigured });
     },
-    async setWorkspace(_path: string) {
-      return ok("C:\\workspace");
+    async setWorkspace(path: string) {
+      tdState.workspaceRoot = path;
+      tdState.workspaceConfigured = true;
+      return ok({ root: tdState.workspaceRoot, configured: true });
     },
     async createSchedule(name, cronExpr, taskTitle, _taskDescription) {
       const s: ScheduleDto = {
@@ -215,28 +217,58 @@ export function testDoubleCommands(): CommandSet {
       return ok(null);
     },
     async upsertProvider(provider: ProviderInput) {
-      const existing = tdState.providers.find((p) => p.name === provider.name);
+      const settings = {
+        models: [...(provider.settings.models ?? [])],
+        defaultModel: provider.settings.defaultModel ?? null,
+        temperature: provider.settings.temperature ?? null,
+        topP: provider.settings.topP ?? null,
+        maxTokens: provider.settings.maxTokens ?? null,
+        timeoutSecs: provider.settings.timeoutSecs ?? null,
+        retry: provider.settings.retry ?? null,
+        maxConcurrency: provider.settings.maxConcurrency ?? null,
+        priority: provider.settings.priority ?? null,
+        roles: [...(provider.settings.roles ?? [])],
+        enabled: provider.settings.enabled ?? true,
+      };
+      const existing = provider.id !== null
+        ? tdState.providers.find((p) => p.id === provider.id)
+        : tdState.providers.find((p) => p.name === provider.name);
       if (existing) {
+        existing.name = provider.name;
         existing.protocol = provider.protocol;
         existing.baseUrl = provider.baseUrl;
         existing.capabilities = [...provider.capabilities];
         existing.isMaster = provider.isMaster;
         if (provider.apiKey !== null) existing.hasKey = true;
+        existing.settings = settings;
       } else {
         tdState.providers.push({
-          id: nextId("prov"),
+          id: provider.id ?? nextId("prov"),
           name: provider.name,
           protocol: provider.protocol,
           baseUrl: provider.baseUrl,
           hasKey: provider.apiKey !== null,
           capabilities: [...provider.capabilities],
           isMaster: provider.isMaster,
+          settings,
         });
       }
       return ok(null);
     },
     async listProviders() {
       return ok([...tdState.providers]);
+    },
+    async deleteProvider(providerId) {
+      const idx = tdState.providers.findIndex((p) => p.id === providerId);
+      if (idx < 0) return err("provider.not_found", `provider#${providerId} not found`);
+      tdState.providers.splice(idx, 1);
+      return ok(null);
+    },
+    async testProviderConnection(input) {
+      if (!isValidWebhookUrl(input.baseUrl)) {
+        return ok({ ok: false, latencyMs: 0, error: "invalid base url" });
+      }
+      return ok({ ok: true, latencyMs: 42, error: null });
     },
     async setSensitiveTools(patterns) {
       tdState.sensitiveTools = [...patterns];

@@ -262,6 +262,24 @@ pub async fn list_providers(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn delete_provider(
+    state: tauri::State<'_, AppState>,
+    provider_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_provider(&state, provider_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn test_provider_connection(
+    state: tauri::State<'_, AppState>,
+    input: commands::TestProviderConnectionInput,
+) -> Result<commands::TestProviderConnectionDto, IpcError> {
+    commands::impl_test_provider_connection(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn set_sensitive_tools(
     state: tauri::State<'_, AppState>,
     patterns: Vec<String>,
@@ -294,7 +312,9 @@ pub async fn get_online_authorized(state: tauri::State<'_, AppState>) -> Result<
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_workspace(state: tauri::State<'_, AppState>) -> Result<String, IpcError> {
+pub async fn get_workspace(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::WorkspaceInfo, IpcError> {
     commands::impl_get_workspace(&state).await
 }
 
@@ -303,7 +323,7 @@ pub async fn get_workspace(state: tauri::State<'_, AppState>) -> Result<String, 
 pub async fn set_workspace(
     state: tauri::State<'_, AppState>,
     path: String,
-) -> Result<String, IpcError> {
+) -> Result<commands::WorkspaceInfo, IpcError> {
     commands::impl_set_workspace(&state, path).await
 }
 

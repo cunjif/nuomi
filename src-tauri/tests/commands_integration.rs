@@ -9,7 +9,7 @@ use nuomi_shell_lib::state::AppState;
 async fn boot(script: Vec<ChatResponse>) -> (AppState, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("t.db");
-    let state = AppState::boot(db, ProviderSource::Fake(script))
+    let state = AppState::boot(db, ProviderSource::Fake(script), dir.path().join("ws"))
         .await
         .unwrap();
     (state, dir)

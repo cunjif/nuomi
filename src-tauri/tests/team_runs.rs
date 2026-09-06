@@ -26,6 +26,7 @@ async fn boot_with_memory_secrets() -> (AppState, tempfile::TempDir) {
         db,
         ProviderSource::Fake(vec![ChatResponse::default()]),
         Arc::new(MemorySecretStore::default()),
+        dir.path().join("ws"),
     )
     .await
     .unwrap();

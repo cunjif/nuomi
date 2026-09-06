@@ -24,6 +24,7 @@ async fn boot_with_memory_secrets() -> (nuomi_shell_lib::state::AppState, tempfi
         db,
         ProviderSource::Fake(vec![ChatResponse::default()]),
         Arc::new(MemorySecretStore::default()),
+        dir.path().join("ws"),
     )
     .await
     .unwrap();

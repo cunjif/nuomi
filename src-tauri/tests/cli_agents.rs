@@ -12,9 +12,13 @@ use nuomi_shell_lib::{state::AppState, IpcError};
 async fn boot() -> (AppState, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("t.db");
-    let state = AppState::boot(db, ProviderSource::Fake(vec![FakeLlm::response("hi")]))
-        .await
-        .unwrap();
+    let state = AppState::boot(
+        db,
+        ProviderSource::Fake(vec![FakeLlm::response("hi")]),
+        dir.path().join("ws"),
+    )
+    .await
+    .unwrap();
     (state, dir)
 }
 
