@@ -319,15 +319,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_db_reports_store_error() {
+    async fn missing_parent_dir_is_created_on_open() {
         let dir = tempfile::tempdir().unwrap();
-        let bad = dir
+        let fresh = dir
             .path()
             .join("no-such-dir")
             .join("x")
             .to_string_lossy()
             .into_owned();
-        assert!(materialize(bad).await.is_err());
+        // Db::open creates missing parent directories (first launch on a
+        // fresh machine, e.g. Tauri's app_data_dir), so this must succeed.
+        assert!(materialize(fresh).await.is_ok());
     }
 
     #[test]
