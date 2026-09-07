@@ -30,3 +30,4 @@ session*.md
 
 # Local docs (not for repo)
 principle.md
+.codebuddy/
