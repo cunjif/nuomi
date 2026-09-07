@@ -132,6 +132,7 @@ pnpm coverage:rust           # Rust 行覆盖率 summary（cargo-llvm-cov；下�
 5. **禁止抑制 / No suppression**: 无 `unwrap()`（测试外）、无 `as any`、无 `@ts-ignore`。No unwrap outside tests, no any/ts-ignore.
 6. **提交纪律 / Commit discipline**: 仅在用户明确要求时 git 提交。Commit only when explicitly asked.
 7. **重大决策 / Major decisions**: 写 ADR 到 `docs/adr/`，等用户确认再动工。Write an ADR and wait for user confirmation.
+8. **实现原理沉淀 / Principle docs**: 每次完成核心功能编码后，把实现原理（设计思想、关键权衡、数据流/调用链）追加或更新到根目录 `principle.md`（该文件不入库）。After core feature coding, record implementation principles into the repo-root `principle.md` (gitignored).
 
 ## 8. 开发团队 / AI Dev Team（`.opencode/agent/`）
 
