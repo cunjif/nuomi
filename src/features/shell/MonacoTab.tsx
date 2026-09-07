@@ -58,6 +58,9 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? fileQuery.data ?? "";
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  // Latest-save indirection: the Monaco Ctrl+S command registers once at
+  // mount but must always invoke the current closure (value/pending state).
+  const saveRef = useRef<() => void>(() => {});
   const [outlineOpen, setOutlineOpen] = useState(true);
 
   const preview = findPreviewForPath(path);
@@ -84,6 +87,7 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
   const save = (): void => {
     if (!saveMut.isPending && !fileQuery.isLoading) saveMut.mutate();
   };
+  saveRef.current = save;
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -121,6 +125,12 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
         onMount={(editor, monaco) => {
           editorRef.current = editor;
           attachMonacoProviders(monaco, editor);
+          // Native Monaco chord for Ctrl/Cmd+S (the React handler on the
+          // section never sees keys Monaco consumes). Routes through the
+          // latest-save ref so it always uses current state.
+          editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+            saveRef.current();
+          });
         }}
         theme={theme === "dark" ? NUOMI_MONACO_DARK : NUOMI_MONACO_LIGHT}
         value={value}
@@ -147,7 +157,11 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
     preview !== null ? <preview.component key={preview.extId} path={path} content={value} /> : null;
 
   return (
-    <section aria-label={path} onKeyDown={onKeyDown} className="flex min-w-0 flex-1 flex-col">
+    <section
+      aria-label={path}
+      onKeyDown={onKeyDown}
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+    >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-muted/30 px-2 py-1">
         <span className="truncate font-mono text-xs text-ink-muted" title={path}>
           {path}
@@ -176,10 +190,17 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
         )}
       </div>
       <div className="flex min-h-0 flex-1">
-        {showEditor && <div className="min-w-0 flex-1">{editorBody}</div>}
+        {/* Absolute-fill: Monaco measures its container; a definite (not
+        content-driven) box guarantees the editor viewport never leaks its
+        scrollbar into an outer scroll container. */}
+        {showEditor && (
+          <div className="relative min-h-0 min-w-0 flex-1">
+            <div className="absolute inset-0">{editorBody}</div>
+          </div>
+        )}
         {previewNode}
         {showEditor && outlineOpen && symbols.length > 0 && (
-          <nav aria-label={t("editor.outline")} className="w-48 shrink-0 overflow-y-auto border-l border-ink-muted/30 p-2">
+          <nav aria-label={t("editor.outline")} className="min-h-0 w-48 shrink-0 overflow-y-auto border-l border-ink-muted/30 p-2">
             <ul className="space-y-0.5">
               {symbols.map((sym, i) => (
                 <li key={`${sym.name}-${i}`}>

@@ -14,7 +14,7 @@ import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { AreaNav } from "./AreaNav";
-import { EditorArea } from "./EditorArea";
+import { EditorArea, EditorToolbar } from "./EditorArea";
 import { LeftRail } from "./LeftRail";
 import { TopBar } from "./TopBar";
 import { WorkspaceSetup } from "./WorkspaceSetup";
@@ -190,7 +190,9 @@ export function Shell(): ReactNode {
       <div className="flex min-h-0 flex-1">
         <LeftRail />
         <div className="flex min-w-0 flex-1 flex-col">
-          <AreaNav />
+          {/* VSCode-style nav strip: centered tabs, editor workspace actions
+          right-aligned (only while the editor area is active). */}
+          <AreaNav right={activeArea === "editor" ? <EditorToolbar /> : undefined} />
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
             {/* Mutually exclusive surfaces (需求 5): the editor occupies the
             same area as the conversation view; opening a file flips

@@ -6,13 +6,17 @@ import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
 import { useUiStore } from "../../lib/store/uiStore";
 
-/** U10 lazy-loading workspace file tree (root listing + per-dir expansion). */
+/**
+ * Workspace file tree contents (lazy: root listing + per-dir expansion).
+ * Pure node list — chrome (header, width, border) and the scroll container
+ * are owned by the Explorer sidebar in EditorArea (VSCode split: the tree
+ * itself never owns scrolling).
+ */
 export function FileTree(): ReactNode {
   const { t } = useTranslation();
   const rootQuery = useQuery({ queryKey: ["dir", ""], queryFn: () => ipc.listDir("") });
   return (
-    <section aria-label={t("files.treeLabel")} className="w-56 shrink-0 overflow-y-auto border-r border-ink-muted/30 p-2">
-      <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">{t("files.treeLabel")}</h2>
+    <>
       {rootQuery.isError && (
         <p className="text-xs text-state-danger">
           {t("files.loadFailedDir")}: {describeError(rootQuery.error)}
@@ -27,9 +31,9 @@ export function FileTree(): ReactNode {
         ),
       )}
       {!rootQuery.isLoading && (rootQuery.data?.length ?? 0) === 0 && !rootQuery.isError && (
-        <p className="text-xs text-ink-muted">{t("common.empty")}</p>
+        <p className="text-xs text-ink-muted">{t("files.dirEmpty")}</p>
       )}
-    </section>
+    </>
   );
 }
 

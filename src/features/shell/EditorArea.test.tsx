@@ -5,7 +5,8 @@ import { tdState } from "../../lib/ipc/test-double-state";
 import { renderWithProviders } from "../../test/helpers";
 import { Toaster } from "../../components/ui/Toaster";
 import { useUiStore } from "../../lib/store/uiStore";
-import { EditorArea } from "./EditorArea";
+import { AreaNav } from "./AreaNav";
+import { EditorArea, EditorToolbar } from "./EditorArea";
 
 // Monaco never loads in jsdom — stand in with a plain textarea
 // (same mock isolation as MonacoTab.test).
@@ -86,16 +87,27 @@ describe("EditorArea — editor dirty flow", () => {
 });
 
 describe("EditorArea — workspace title bar", () => {
-  it("shows the current workspace root in the title bar", async () => {
+  /** The toolbar lives in the AreaNav strip's right slot (VSCode-style). */
+  function renderWithToolbar(): void {
+    renderWithProviders(
+      <>
+        <AreaNav right={<EditorToolbar />} />
+        <EditorArea />
+        <Toaster />
+      </>,
+    );
+  }
+
+  it("shows the current workspace root in the nav strip toolbar", async () => {
     tdState.workspaceRoot = "D:\\projects\\demo";
-    renderPanel();
+    renderWithToolbar();
 
     const label = await screen.findByText("D:\\projects\\demo");
     expect(label).toHaveAttribute("title", "D:\\projects\\demo");
   });
 
   it("opens the switch dialog and persists the new root on confirm", async () => {
-    renderPanel();
+    renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
     const input = await screen.findByLabelText("工作区目录");
@@ -108,7 +120,7 @@ describe("EditorArea — workspace title bar", () => {
       expect(tdState.workspaceRoot).toBe("E:\\next");
       expect(tdState.workspaceConfigured).toBe(true);
     });
-    // The dialog closes after a successful switch; the title bar shows the new root.
+    // The dialog closes after a successful switch; the toolbar shows the new root.
     await waitFor(() => expect(screen.queryByLabelText("工作区目录")).toBeNull());
     expect(await screen.findByText("E:\\next")).toBeInTheDocument();
   });

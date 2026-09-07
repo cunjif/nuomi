@@ -27,8 +27,12 @@ const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> 
  * Central main-area navigation (需求 5): 对话 | 文件编辑 toggle. The two
  * surfaces are mutually exclusive — clicking a tab (or opening a workspace
  * file) flips uiStore.activeArea.
+ *
+ * `right` hosts an optional context toolbar slot (VSCode-style: the editor
+ * workspace actions share the nav strip, right-aligned) without disturbing
+ * the centered tabs.
  */
-export function AreaNav(): ReactNode {
+export function AreaNav({ right }: { right?: ReactNode }): ReactNode {
   const { t } = useTranslation();
   const activeArea = useUiStore((s) => s.activeArea);
   const setActiveArea = useUiStore((s) => s.setActiveArea);
@@ -36,7 +40,7 @@ export function AreaNav(): ReactNode {
     <div
       role="tablist"
       aria-label={t("nav.areaLabel")}
-      className="flex h-9 shrink-0 items-center justify-center gap-1 border-b border-ink-muted/30 bg-surface-raised px-3"
+      className="relative flex h-9 shrink-0 items-center justify-center gap-1 border-b border-ink-muted/30 bg-surface-raised px-3"
     >
       {AREA_TABS.map((tab) => (
         <button
@@ -53,6 +57,9 @@ export function AreaNav(): ReactNode {
           {t(tab.labelKey)}
         </button>
       ))}
+      {right !== undefined && (
+        <div className="absolute inset-y-0 right-2 flex items-center gap-1">{right}</div>
+      )}
     </div>
   );
 }
