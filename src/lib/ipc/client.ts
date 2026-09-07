@@ -97,6 +97,13 @@ export const ipc = {
   listRoles: () => unwrap(current.listRoles()),
   upsertRole: (role: Parameters<Commands["upsertRole"]>[0]) => unwrap(current.upsertRole(role)),
   deleteRole: (roleId: string) => unwrap(current.deleteRole(roleId)),
+  seedBuiltinRoles: () => unwrap(current.seedBuiltinRoles()),
+  generateRole: (description: string) => unwrap(current.generateRole(description)),
+  getRoutingRules: () => unwrap(current.getRoutingRules()),
+  setRoutingRules: (rules: Parameters<Commands["setRoutingRules"]>[0]) =>
+    unwrap(current.setRoutingRules(rules)),
+  routeCapability: (request: Parameters<Commands["routeCapability"]>[0]) =>
+    unwrap(current.routeCapability(request)),
   listTeams: () => unwrap(current.listTeams()),
   upsertTeam: (team: Parameters<Commands["upsertTeam"]>[0]) => unwrap(current.upsertTeam(team)),
   deleteTeam: (teamId: string) => unwrap(current.deleteTeam(teamId)),

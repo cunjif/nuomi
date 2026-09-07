@@ -18,6 +18,9 @@ const NAV_ITEMS: Array<{ view: View; labelKey: string }> = [
 export function LeftRail(): ReactNode {
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
+  // Selecting a left-rail view reveals the chat side of the main area (the
+  // editor may be hiding it after a file was opened).
+  const setActiveArea = useUiStore((s) => s.setActiveArea);
   const { t } = useTranslation();
   return (
     <nav aria-label={t("shell.appName")} className="flex w-56 shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised">
@@ -26,7 +29,10 @@ export function LeftRail(): ReactNode {
           <button
             key={item.view}
             type="button"
-            onClick={() => setView(item.view)}
+            onClick={() => {
+              setView(item.view);
+              setActiveArea("chat");
+            }}
             aria-current={view === item.view ? "page" : undefined}
             className={`rounded px-3 py-1.5 text-left text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
               view === item.view ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"

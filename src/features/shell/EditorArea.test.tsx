@@ -5,7 +5,7 @@ import { tdState } from "../../lib/ipc/test-double-state";
 import { renderWithProviders } from "../../test/helpers";
 import { Toaster } from "../../components/ui/Toaster";
 import { useUiStore } from "../../lib/store/uiStore";
-import { FilePanel } from "./FilePanel";
+import { EditorArea } from "./EditorArea";
 
 // Monaco never loads in jsdom — stand in with a plain textarea
 // (same mock isolation as MonacoTab.test).
@@ -24,13 +24,13 @@ function openInStore(path: string): void {
 function renderPanel(): void {
   renderWithProviders(
     <>
-      <FilePanel />
+      <EditorArea />
       <Toaster />
     </>,
   );
 }
 
-describe("FilePanel — editor dirty flow", () => {
+describe("EditorArea — editor dirty flow", () => {
   it("marks the tab dirty on input and clears it after save; status bar shows language + hint", async () => {
     tdSeedFiles({ "README.md": "hello" });
     openInStore("README.md");
@@ -85,7 +85,7 @@ describe("FilePanel — editor dirty flow", () => {
   });
 });
 
-describe("FilePanel — workspace title bar", () => {
+describe("EditorArea — workspace title bar", () => {
   it("shows the current workspace root in the title bar", async () => {
     tdState.workspaceRoot = "D:\\projects\\demo";
     renderPanel();

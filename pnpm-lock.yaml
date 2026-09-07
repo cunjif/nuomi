@@ -26,6 +26,9 @@ importers:
       i18next:
         specifier: ^26.4.0
         version: 26.4.0(typescript@5.5.4)
+      marked:
+        specifier: ^18.0.11
+        version: 18.0.11
       monaco-editor:
         specifier: ^0.56.0
         version: 0.56.0
@@ -1436,6 +1439,11 @@ packages:
   marked@14.0.0:
     resolution: {integrity: sha512-uIj4+faQ+MgHgwUW1l2PsPglZLOLOT1uErt06dAPtx2kjteLAkbsd/0FiYg/MGS+i7ZKLb7w2WClxHkzOOuryQ==}
     engines: {node: '>= 18'}
+    hasBin: true
+
+  marked@18.0.11:
+    resolution: {integrity: sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   math-intrinsics@1.1.0:
@@ -3263,6 +3271,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   marked@14.0.0: {}
+
+  marked@18.0.11: {}
 
   math-intrinsics@1.1.0: {}
 

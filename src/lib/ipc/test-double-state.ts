@@ -33,6 +33,8 @@ interface DoubleState {
   whiteboardNotes: WhiteBoardNoteDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
+  /** Persisted capability-routing rules (get/setRoutingRules round-trip). */
+  routingRules: { preferLocal: boolean; capabilityOverrides: Record<string, string> };
   /** Active workspace root returned by get/setWorkspace (files stay flat paths). */
   workspaceRoot: string;
   /** Whether the workspace has been configured (drives first-launch gating). */
@@ -56,6 +58,7 @@ export const tdState: DoubleState = {
   whiteboardNotes: [],
   sensitiveTools: null,
   onlineAuthorized: false,
+  routingRules: { preferLocal: false, capabilityOverrides: {} },
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
   files: new Map(),
@@ -97,6 +100,7 @@ export function tdReset(): void {
   tdState.whiteboardNotes.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
+  tdState.routingRules = { preferLocal: false, capabilityOverrides: {} };
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;
   tdState.files.clear();

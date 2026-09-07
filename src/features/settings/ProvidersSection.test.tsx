@@ -18,7 +18,10 @@ function provider(overrides: Partial<ProviderDto>): ProviderDto {
     capabilities: [],
     isMaster: false,
     settings: {
-      models: ["model-a", "model-b"],
+      models: [
+        { id: "model-a", capabilities: ["reasoning"] },
+        { id: "model-b", capabilities: [] },
+      ],
       defaultModel: "model-a",
       temperature: 0.7,
       topP: 1,
@@ -135,7 +138,9 @@ describe("ProvidersSection", () => {
       id: null,
       name: "deep",
       protocol: "open_ai_compatible",
-      settings: expect.objectContaining({ models: ["deepseek-chat"] }),
+      settings: expect.objectContaining({
+        models: [{ id: "deepseek-chat", capabilities: ["reasoning"] }],
+      }),
     });
   });
 

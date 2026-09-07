@@ -350,6 +350,54 @@ async deleteRole(roleId: string) : Promise<Result<null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async seedBuiltinRoles() : Promise<Result<SeedRolesDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("seed_builtin_roles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async generateRole(description: string) : Promise<Result<RoleDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("generate_role", { description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getRoutingRules() : Promise<Result<RoutingRulesDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_routing_rules") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setRoutingRules(rules: RoutingRulesDto) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_routing_rules", { rules }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async routeCapability(request: RouteRequestDto) : Promise<Result<RouteResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("route_capability", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async journalRollback(seq: number) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("journal_rollback", { seq }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listTeams() : Promise<Result<TeamDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_teams") };
@@ -461,6 +509,10 @@ async testIntegration(integrationId: string) : Promise<Result<TestIntegrationDto
 export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; createdAt: number; updatedAt: number }
 export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
+/**
+ * System modality capability (mirrors `nuomi_core::domain::Capability`).
+ */
+export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
@@ -494,6 +546,11 @@ export type IntegrationKindDto = "feishu_bot" | "qq_webhook" | "telemetry"
  */
 export type IpcError = { generic: { code: string; message: string; details?: JsonValue | null } }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * One model exposed by a provider endpoint plus its capability tags
+ * (KiloCode-style per-model capabilities).
+ */
+export type ModelEntryDto = { id: string; capabilities: CapabilityDto[] }
 export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean; settings: ProviderSettingsDto }
 export type ProviderInput = { 
 /**
@@ -515,17 +572,47 @@ export type ProviderProtocolDto = "open_ai_compatible" | "anthropic_compatible"
  * `nuomi_core::domain::entities::ProviderSettings` (stored inside the
  * provider row's `params_json` under the `"settings"` key).
  */
-export type ProviderSettingsDto = { models?: string[]; defaultModel?: string | null; temperature?: number | null; topP?: number | null; maxTokens?: number | null; timeoutSecs?: number | null; retry?: number | null; maxConcurrency?: number | null; priority?: number | null; roles?: string[]; enabled?: boolean }
-export type RoleDto = { id: string; name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; params: JsonValue; createdAt: number; updatedAt: number }
-export type RoleInput = { name: string; providerId: string | null; systemPromptOverride: string | null; toolAllowlist: string[]; temperature: number | null; maxTokens: number | null; 
+export type ProviderSettingsDto = { 
+/**
+ * Per-model entries with capability tags. Legacy string model ids are
+ * normalized to `{ id, capabilities: ["reasoning"] }` by the entity.
+ */
+models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | null; topP?: number | null; maxTokens?: number | null; timeoutSecs?: number | null; retry?: number | null; maxConcurrency?: number | null; priority?: number | null; roles?: string[]; enabled?: boolean }
+export type RoleDto = { id: string; name: string; providerId: string | null; providerIds: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities: CapabilityDto[]; temperature: number | null; maxTokens: number | null; params: JsonValue; builtin: boolean; generated: boolean; ephemeral: boolean; source: JsonValue; createdAt: number; updatedAt: number }
+export type RoleInput = { name: string; providerId: string | null; 
+/**
+ * Multi-provider bindings (Agent = Role + Provider); merged with
+ * `provider_id` when both are supplied.
+ */
+providerIds?: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities?: CapabilityDto[]; temperature: number | null; maxTokens: number | null; 
 /**
  * Free-form extras; the `agent_profile_id` key binds a CLI agent
  * profile (SPEC team-shell-m1 D2b).
  */
 params: JsonValue }
+/**
+ * A capability-routing probe: resolves a role for the required capability
+ * set (optionally creating + immediately cleaning an ephemeral temp role
+ * when `dryRun` is false and only a provider can serve).
+ */
+export type RouteRequestDto = { requiredCapabilities: CapabilityDto[]; preferRoleId: string | null }
+export type RouteResultDto = { role: RoleDto; 
+/**
+ * True when the router created an ephemeral temp role for the request.
+ */
+createdTemp: boolean }
+/**
+ * Routing rules mirrored from `nuomi_core::services::RoutingRules`
+ * (persisted in `app_settings`).
+ */
+export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
 export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; enabled: boolean; nextTriggerAt: number | null }
+/**
+ * Outcome counts of a preset seeding pass.
+ */
+export type SeedRolesDto = { inserted: number; updated: number; skipped: number }
 export type SessionDto = { id: string; title: string; createdAt: number; updatedAt: number }
 export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }

@@ -2,13 +2,21 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { JsonValue, RoleInput } from "../../lib/ipc/bindings.gen";
+import type { CapabilityDto, JsonValue, RoleInput } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 
 /** Binding mode of the role form: unbound ("默认"), provider or CLI agent profile. */
 export type BindingMode = "none" | "provider" | "cli";
+
+/** Capability choices shown as checkboxes (reasoning/image/voice/video). */
+const CAPABILITY_KEYS: ReadonlyArray<{ key: CapabilityDto; labelKey: string }> = [
+  { key: "reasoning", labelKey: "capability.reasoning" },
+  { key: "image", labelKey: "capability.image" },
+  { key: "voice", labelKey: "capability.voice" },
+  { key: "video", labelKey: "capability.video" },
+];
 
 /** Reads the `agent_profile_id` convention key out of a role's params JSON. */
 export function readAgentProfileId(params: JsonValue): string | null {
@@ -28,6 +36,7 @@ export function RoleForm(): ReactNode {
   const [providerId, setProviderId] = useState("");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [systemPromptOverride, setSystemPromptOverride] = useState("");
+  const [requiredCapabilities, setRequiredCapabilities] = useState<CapabilityDto[]>([]);
 
   const providersQuery = useQuery({ queryKey: ["providers"], queryFn: ipc.listProviders });
   const profilesQuery = useQuery({ queryKey: ["agentProfiles"], queryFn: ipc.listAgentProfiles });
@@ -42,6 +51,7 @@ export function RoleForm(): ReactNode {
       setProviderId("");
       setAgentProfileId("");
       setSystemPromptOverride("");
+      setRequiredCapabilities([]);
     },
     onError: (e) => {
       // Inputs stay as-is so the user can fix and resubmit.
@@ -67,9 +77,11 @@ export function RoleForm(): ReactNode {
           name: name.trim(),
           // CLI-agent binding wins over provider (SPEC team-shell-m1 D2b).
           providerId: boundProvider,
+          providerIds: boundProvider !== null ? [boundProvider] : [],
           systemPromptOverride:
             systemPromptOverride.trim().length > 0 ? systemPromptOverride.trim() : null,
           toolAllowlist: [],
+          requiredCapabilities,
           temperature: null,
           maxTokens: null,
           params:
@@ -140,6 +152,36 @@ export function RoleForm(): ReactNode {
             </select>
           </label>
         )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-ink-muted">{t("settings.roles.requiredCapabilities")}</span>
+        {CAPABILITY_KEYS.map((cap) => {
+          const active = requiredCapabilities.includes(cap.key);
+          return (
+            <label
+              key={cap.key}
+              className={`flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-xs focus-within:ring-2 focus-within:ring-ink-accent ${
+                active
+                  ? "border-ink-accent bg-ink-accent/20 text-ink"
+                  : "border-ink-muted/40 text-ink-muted hover:bg-surface-overlay"
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={active}
+                onChange={() =>
+                  setRequiredCapabilities((prev) =>
+                    prev.includes(cap.key)
+                      ? prev.filter((c) => c !== cap.key)
+                      : [...prev, cap.key],
+                  )
+                }
+              />
+              {t(cap.labelKey)}
+            </label>
+          );
+        })}
       </div>
       <label className="mt-2 flex min-w-48 flex-1 flex-col gap-0.5 text-xs text-ink-muted">
         {t("settings.roles.systemPromptOverride")}

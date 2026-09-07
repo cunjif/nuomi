@@ -29,7 +29,7 @@ interface ListRowProps {
 /** One provider row: initial avatar + name + current model + status dot. */
 function ListRow({ provider, status, active, onSelect }: ListRowProps): ReactNode {
   const { t } = useTranslation();
-  const currentModel = provider.settings.defaultModel ?? provider.settings.models?.[0] ?? null;
+  const currentModel = provider.settings.defaultModel ?? provider.settings.models?.[0]?.id ?? null;
   return (
     <li>
       <button

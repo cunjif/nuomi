@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -13,7 +13,8 @@ import { SchedulerView } from "../scheduler/SchedulerView";
 import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
-import { FilePanel } from "./FilePanel";
+import { AreaNav } from "./AreaNav";
+import { EditorArea } from "./EditorArea";
 import { LeftRail } from "./LeftRail";
 import { TopBar } from "./TopBar";
 import { WorkspaceSetup } from "./WorkspaceSetup";
@@ -70,9 +71,45 @@ function BootScreen({ error }: { error?: string }): ReactNode {
   );
 }
 
-/** U8 three-pane shell: top status bar, left rail, center view, file panel. */
+/**
+ * Global navigation chords (需求 5), handled at window keydown CAPTURE phase
+ * so no inner surface (Monaco keybindings, inputs, composer) can see or
+ * override them. 不可覆盖 constraint:
+ * - Alt+H toggles the main area between editor and chat (both directions);
+ * - Alt+E switches to the editor area (symmetric counterpart).
+ * Monaco never registers these chords by default, and MonacoTab adds none —
+ * see the note there. preventDefault + stopImmediatePropagation guarantee
+ * nothing else on the window even observes the event.
+ */
+function useGlobalNavShortcuts(): void {
+  const handler = useRef<(e: KeyboardEvent) => void>(() => {});
+  handler.current = (e: KeyboardEvent): void => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.code === "KeyH") {
+      // 不可覆盖: toggle editor ↔ chat.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const { activeArea, setActiveArea } = useUiStore.getState();
+      setActiveArea(activeArea === "editor" ? "chat" : "editor");
+    } else if (e.code === "KeyE") {
+      // 不可覆盖: focus the editor area.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      useUiStore.getState().setActiveArea("editor");
+    }
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent): void => handler.current(e);
+    window.addEventListener("keydown", listener, true);
+    return () => window.removeEventListener("keydown", listener, true);
+  }, []);
+}
+
+/** U8 shell: top status bar, left rail, area nav, mutually exclusive main area. */
 export function Shell(): ReactNode {
   const view = useUiStore((s) => s.view);
+  const activeArea = useUiStore((s) => s.activeArea);
+  useGlobalNavShortcuts();
   const queryClient = useQueryClient();
   // Kernel boot lifecycle as observed through events; the workspace query
   // poll below is the fallback signal when an event is missed.
@@ -152,10 +189,17 @@ export function Shell(): ReactNode {
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
-        <main className="min-w-0 flex-1 overflow-hidden">
-          <ErrorBoundary key={view}>{renderView(view)}</ErrorBoundary>
-        </main>
-        <FilePanel />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <AreaNav />
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {/* Mutually exclusive surfaces (需求 5): the editor occupies the
+            same area as the conversation view; opening a file flips
+            activeArea, Alt+H flips it back. */}
+            <ErrorBoundary key={activeArea === "editor" ? "editor" : view}>
+              {activeArea === "editor" ? <EditorArea /> : renderView(view)}
+            </ErrorBoundary>
+          </main>
+        </div>
       </div>
     </div>
   );

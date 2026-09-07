@@ -13,11 +13,17 @@ function role(overrides: Partial<RoleDto>): RoleDto {
     id: "role-x",
     name: "coder",
     providerId: null,
+    providerIds: [],
     systemPromptOverride: null,
     toolAllowlist: [],
+    requiredCapabilities: [],
     temperature: null,
     maxTokens: null,
     params: {},
+    builtin: false,
+    generated: false,
+    ephemeral: false,
+    source: null,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -33,7 +39,7 @@ function provider(overrides: Partial<ProviderDto> = {}): ProviderDto {
     hasKey: true,
     capabilities: ["chat"],
     isMaster: false,
-    settings: { models: ["gpt-4o-mini"], enabled: true },
+    settings: { models: [{ id: "gpt-4o-mini", capabilities: ["reasoning"] }], enabled: true },
     ...overrides,
   };
 }
@@ -114,8 +120,10 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
       expect(upsertRole).toHaveBeenCalledWith({
         name: "scribe",
         providerId: null,
+        providerIds: [],
         systemPromptOverride: null,
         toolAllowlist: [],
+        requiredCapabilities: [],
         temperature: null,
         maxTokens: null,
         params: { agent_profile_id: "agent-9" },
@@ -149,5 +157,74 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
         expect.objectContaining({ providerId: "prov-1", params: {} })
       )
     );
+  });
+
+  it("groups roles into built-in / generated / custom sections with badges", async () => {
+    injectIpcCommands({
+      listRoles: vi.fn().mockResolvedValue(
+        ok([
+          role({ id: "r1", name: "Coder", builtin: true, requiredCapabilities: ["reasoning"] }),
+          role({ id: "r2", name: "weekly-bot", generated: true }),
+          role({ id: "r3", name: "mine" }),
+        ]),
+      ),
+      listProviders: vi.fn().mockResolvedValue(ok([])),
+      listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+    } as never);
+    renderWithProviders(<RolesSection />);
+
+    expect(await screen.findByText("Built-in presets (1)")).toBeInTheDocument();
+    expect(screen.getByText("Generated (1)")).toBeInTheDocument();
+    expect(screen.getByText("Custom (1)")).toBeInTheDocument();
+    // Built-in roles expose no delete button.
+    expect(screen.queryByRole("button", { name: /^delete coder$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^delete mine$/i })).toBeInTheDocument();
+  });
+
+  it("restores presets via the seed command and reports the counts", async () => {
+    const seedBuiltinRoles = vi
+      .fn()
+      .mockResolvedValue(ok({ inserted: 11, updated: 0, skipped: 0 }));
+    // After invalidation the refetch shows the 11 seeded built-ins.
+    const presets = Array.from({ length: 11 }, (_, i) =>
+      role({ id: `preset-${i}`, name: `Preset ${i}`, builtin: true }),
+    );
+    injectIpcCommands({
+      listRoles: vi
+        .fn()
+        .mockResolvedValueOnce(ok([]))
+        .mockResolvedValueOnce(ok(presets)),
+      listProviders: vi.fn().mockResolvedValue(ok([])),
+      listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+      seedBuiltinRoles,
+    } as never);
+    renderWithProviders(<RolesSection />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /restore presets/i }));
+    await waitFor(() => expect(seedBuiltinRoles).toHaveBeenCalled());
+    // The seeded double surfaces 11 built-in presets in the grouped list.
+    expect(await screen.findByText(/Built-in presets \(11\)/)).toBeInTheDocument();
+  });
+
+  it("generates a role through the Role Director dialog", async () => {
+    const generateRole = vi.fn().mockResolvedValue(ok(role({ id: "r9", name: "周报助手", generated: true })));
+    injectIpcCommands({
+      listRoles: vi
+        .fn()
+        .mockResolvedValueOnce(ok([]))
+        .mockResolvedValueOnce(ok([role({ id: "r9", name: "周报助手", generated: true })])),
+      listProviders: vi.fn().mockResolvedValue(ok([])),
+      listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+      generateRole,
+    } as never);
+    renderWithProviders(<RolesSection />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /role director/i }));
+    fireEvent.change(await screen.findByRole("textbox", { name: /role director/i }), {
+      target: { value: "我要一个帮我写周报的角色" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+    await waitFor(() => expect(generateRole).toHaveBeenCalledWith("我要一个帮我写周报的角色"));
+    expect(await screen.findByText("周报助手")).toBeInTheDocument();
   });
 });

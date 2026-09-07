@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
+  CapabilityDto,
+  ModelEntryDto,
   ProviderDto,
   ProviderInput,
   ProviderProtocolDto,
@@ -38,6 +40,14 @@ const ROLE_LABEL_KEYS: Record<RoleKey, string> = {
   docs: "provider.roleDocs",
   plan: "provider.rolePlan",
 };
+
+/** Per-model capability badges (KiloCode-style Re/I/Vo/Vi). */
+const MODEL_CAPS: ReadonlyArray<{ key: CapabilityDto; short: string; cls: string; labelKey: string }> = [
+  { key: "reasoning", short: "Re", cls: "border-sky-500/60 text-sky-400", labelKey: "provider.capReasoning" },
+  { key: "image", short: "I", cls: "border-emerald-500/60 text-emerald-400", labelKey: "provider.capImage" },
+  { key: "voice", short: "Vo", cls: "border-amber-500/60 text-amber-400", labelKey: "provider.capVoice" },
+  { key: "video", short: "Vi", cls: "border-fuchsia-500/60 text-fuchsia-400", labelKey: "provider.capVideo" },
+];
 
 type TypeKey = "openai" | "anthropic" | "deepseek" | "ollama" | "custom";
 const TYPE_OPTIONS: ReadonlyArray<{ key: TypeKey; labelKey: string }> = [
@@ -92,7 +102,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [models, setModels] = useState<string[]>(settings?.models ?? []);
+  const [models, setModels] = useState<ModelEntryDto[]>(settings?.models ?? []);
   const [modelInput, setModelInput] = useState("");
   const [defaultModel, setDefaultModel] = useState<string>(settings?.defaultModel ?? "");
   const [temperature, setTemperature] = useState<number>(settings?.temperature ?? 0.7);
@@ -162,8 +172,31 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
 
   function addModel(): void {
     const id = modelInput.trim();
-    if (id.length > 0 && !models.includes(id)) setModels([...models, id]);
+    if (id.length > 0 && !models.some((m) => m.id === id)) {
+      // New models default to reasoning-capable (mirrors the backend
+      // normalization of legacy string model ids).
+      setModels([...models, { id, capabilities: ["reasoning"] }]);
+    }
     setModelInput("");
+  }
+
+  function removeModel(id: string): void {
+    setModels(models.filter((m) => m.id !== id));
+  }
+
+  function toggleModelCapability(id: string, cap: CapabilityDto): void {
+    setModels((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              capabilities: m.capabilities.includes(cap)
+                ? m.capabilities.filter((c) => c !== cap)
+                : [...m.capabilities, cap],
+            }
+          : m,
+      ),
+    );
   }
 
   function toggleRole(role: RoleKey): void {
@@ -305,7 +338,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                   protocol: protocolOf(typeKey),
                   baseUrl: baseUrl.trim(),
                   apiKey: apiKey.length > 0 ? apiKey : null,
-                  model: defaultModel.length > 0 ? defaultModel : (models[0] ?? null),
+                  model: defaultModel.length > 0 ? defaultModel : (models[0]?.id ?? null),
                 })
               }
               className="shrink-0 rounded border border-ink-muted/40 px-2 py-1 text-ink hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
@@ -324,41 +357,63 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
         )}
       </fieldset>
 
-      {/* Models */}
+      {/* Models: one row per model with capability badges (Re/I/Vo/Vi) */}
       <fieldset className="rounded border border-ink-muted/30 p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.models")}</legend>
-        <div className="flex flex-wrap items-center gap-1">
+        <ul className="flex flex-col gap-1">
           {models.map((model) => (
-            <span
-              key={model}
-              className="flex items-center gap-1 rounded bg-surface-overlay px-1.5 py-0.5 text-ink"
+            <li
+              key={model.id}
+              className="flex flex-wrap items-center gap-1.5 rounded bg-surface-overlay px-1.5 py-1 text-ink"
             >
-              {model}
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{model.id}</span>
+              <span className="flex items-center gap-1">
+                {MODEL_CAPS.map((cap) => {
+                  const active = model.capabilities.includes(cap.key);
+                  return (
+                    <button
+                      key={cap.key}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={`${cap.short} ${t(cap.labelKey)} ${model.id}`}
+                      title={t(cap.labelKey)}
+                      onClick={() => toggleModelCapability(model.id, cap.key)}
+                      className={`rounded border px-1 py-0.5 text-[10px] leading-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
+                        active
+                          ? cap.cls
+                          : "border-ink-muted/40 text-ink-muted opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      {cap.short}
+                    </button>
+                  );
+                })}
+              </span>
               <button
                 type="button"
-                aria-label={`${t("common.remove")} ${model}`}
-                onClick={() => setModels(models.filter((m) => m !== model))}
+                aria-label={`${t("common.remove")} ${model.id}`}
+                onClick={() => removeModel(model.id)}
                 className="text-ink-muted hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
               >
                 ×
               </button>
-            </span>
+            </li>
           ))}
-          <input
-            value={modelInput}
-            onChange={(e) => setModelInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addModel();
-              }
-            }}
-            onBlur={addModel}
-            placeholder={t("provider.addModelPlaceholder")}
-            aria-label={t("provider.addModelPlaceholder")}
-            className="w-40 border border-dashed border-ink-muted/60 bg-transparent px-1.5 py-0.5 text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
-          />
-        </div>
+        </ul>
+        <input
+          value={modelInput}
+          onChange={(e) => setModelInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addModel();
+            }
+          }}
+          onBlur={addModel}
+          placeholder={t("provider.addModelPlaceholder")}
+          aria-label={t("provider.addModelPlaceholder")}
+          className="mt-1 w-40 border border-dashed border-ink-muted/60 bg-transparent px-1.5 py-0.5 text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
+        />
         <label className="mt-2 flex w-48 flex-col gap-0.5 text-ink-muted">
           {t("provider.defaultModel")}
           <select
@@ -368,8 +423,8 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           >
             <option value="">{t("provider.defaultModelNone")}</option>
             {models.map((model) => (
-              <option key={model} value={model}>
-                {model}
+              <option key={model.id} value={model.id}>
+                {model.id}
               </option>
             ))}
           </select>

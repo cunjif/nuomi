@@ -25,6 +25,21 @@ import { listDir, nextId, tdState } from "./test-double-state";
 
 type CommandSet = typeof Commands;
 
+/** Preset role names mirrored from the backend catalog (deterministic double). */
+const PRESET_ROLE_NAMES = [
+  "Coder",
+  "Code Reviewer",
+  "Planner",
+  "Docs Writer",
+  "Test Engineer",
+  "Data Analyst",
+  "Translator",
+  "Ops Rescuer",
+  "Researcher",
+  "Creative Writer",
+  "Role Director",
+] as const;
+
 const ok = <T>(data: T): Result<T, never> => ({ status: "ok", data });
 const err = (code: string, message: string): Result<never, { generic: { code: string; message: string } }> => ({
   status: "error",
@@ -218,7 +233,10 @@ export function testDoubleCommands(): CommandSet {
     },
     async upsertProvider(provider: ProviderInput) {
       const settings = {
-        models: [...(provider.settings.models ?? [])],
+        models: (provider.settings.models ?? []).map((m) => ({
+          id: m.id,
+          capabilities: [...m.capabilities],
+        })),
         defaultModel: provider.settings.defaultModel ?? null,
         temperature: provider.settings.temperature ?? null,
         topP: provider.settings.topP ?? null,
@@ -338,8 +356,10 @@ export function testDoubleCommands(): CommandSet {
       const existing = tdState.roles.find((r) => r.name === role.name);
       if (existing) {
         existing.providerId = role.providerId;
+        existing.providerIds = [...(role.providerIds ?? [])];
         existing.systemPromptOverride = role.systemPromptOverride;
         existing.toolAllowlist = [...role.toolAllowlist];
+        existing.requiredCapabilities = [...(role.requiredCapabilities ?? [])];
         existing.temperature = role.temperature;
         existing.maxTokens = role.maxTokens;
         existing.params = role.params;
@@ -350,11 +370,17 @@ export function testDoubleCommands(): CommandSet {
         id: nextId("role"),
         name: role.name,
         providerId: role.providerId,
+        providerIds: [...(role.providerIds ?? [])],
         systemPromptOverride: role.systemPromptOverride,
         toolAllowlist: [...role.toolAllowlist],
+        requiredCapabilities: [...(role.requiredCapabilities ?? [])],
         temperature: role.temperature,
         maxTokens: role.maxTokens,
         params: role.params,
+        builtin: false,
+        generated: false,
+        ephemeral: false,
+        source: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -364,8 +390,111 @@ export function testDoubleCommands(): CommandSet {
     async deleteRole(roleId) {
       const idx = tdState.roles.findIndex((r) => r.id === roleId);
       if (idx < 0) return err("role.not_found", `role#${roleId} not found`);
+      const removed = tdState.roles[idx];
+      if (removed?.builtin) {
+        return err("role.builtin_protected", `role#${roleId} is built-in`);
+      }
       tdState.roles.splice(idx, 1);
       return ok(null);
+    },
+    async seedBuiltinRoles() {
+      // Deterministic double: the full preset catalog lands once.
+      const names = PRESET_ROLE_NAMES.filter(
+        (n) => !tdState.roles.some((r) => r.name === n),
+      );
+      const now = Date.now();
+      for (const name of names) {
+        tdState.roles.push({
+          id: nextId("role"),
+          name,
+          providerId: null,
+          providerIds: [],
+          systemPromptOverride: `Preset prompt for ${name}.`,
+          toolAllowlist: [],
+          requiredCapabilities: ["reasoning"],
+          temperature: null,
+          maxTokens: null,
+          params: { preset: true, description: `${name} preset role` },
+          builtin: true,
+          generated: false,
+          ephemeral: false,
+          source: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      return ok({ inserted: names.length, updated: 0, skipped: PRESET_ROLE_NAMES.length - names.length });
+    },
+    async generateRole(description) {
+      const trimmed = description.trim();
+      if (trimmed.length === 0) {
+        return err("role.director_invalid", "description must not be empty");
+      }
+      const now = Date.now();
+      const created: RoleDto = {
+        id: nextId("role"),
+        name: `directed-${tdState.roles.length + 1}`,
+        providerId: null,
+        providerIds: [],
+        systemPromptOverride: `Generated for: ${trimmed}`,
+        toolAllowlist: [],
+        requiredCapabilities: ["reasoning"],
+        temperature: null,
+        maxTokens: null,
+        params: { description: trimmed },
+        builtin: false,
+        generated: true,
+        ephemeral: false,
+        source: { description: trimmed, model: "openai_compatible", generatedAt: now },
+        createdAt: now,
+        updatedAt: now,
+      };
+      tdState.roles.push(created);
+      return ok({ ...created });
+    },
+    async getRoutingRules() {
+      return ok({ ...tdState.routingRules });
+    },
+    async setRoutingRules(rules) {
+      tdState.routingRules = {
+        preferLocal: rules.preferLocal ?? false,
+        capabilityOverrides: { ...(rules.capabilityOverrides ?? {}) },
+      };
+      return ok(null);
+    },
+    async routeCapability(request) {
+      const required = request.requiredCapabilities;
+      const covering = tdState.providers.filter((p) =>
+        required.every((cap) =>
+          p.settings.models?.some((m) => m.capabilities.includes(cap)),
+        ),
+      );
+      if (covering.length === 0 && tdState.roles.length === 0) {
+        return err("route.no_capability", `no provider covers: ${required.join(", ")}`);
+      }
+      if (covering.length === 0) {
+        return err("route.no_capability", `no provider covers: ${required.join(", ")}`);
+      }
+      const now = Date.now();
+      const role: RoleDto = {
+        id: nextId("temp-role"),
+        name: `temp-${required.join("-")}-ab12cd34`,
+        providerId: covering[0]?.id ?? null,
+        providerIds: covering.map((p) => p.id),
+        systemPromptOverride: null,
+        toolAllowlist: [],
+        requiredCapabilities: [...required],
+        temperature: null,
+        maxTokens: null,
+        params: {},
+        builtin: false,
+        generated: false,
+        ephemeral: true,
+        source: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return ok({ role, createdTemp: true });
     },
     async listTeams() {
       return ok([...tdState.teams]);
@@ -432,11 +561,17 @@ export function testDoubleCommands(): CommandSet {
             id: roleId,
             name: `auto-${roleId === AUTO_FORM_ROLE_IDS[0] ? "planner" : "worker"}`,
             providerId: null,
+            providerIds: [],
             systemPromptOverride: null,
             toolAllowlist: [],
+            requiredCapabilities: [],
             temperature: null,
             maxTokens: null,
             params: {},
+            builtin: false,
+            generated: false,
+            ephemeral: false,
+            source: null,
             createdAt: now,
             updatedAt: now,
           });
@@ -534,6 +669,10 @@ export function testDoubleCommands(): CommandSet {
       const integration = tdState.integrations.find((i) => i.id === integrationId);
       if (!integration) return err("integration.not_found", `integration#${integrationId} not found`);
       return ok({ ok: true, error: null });
+    },
+
+    async journalRollback(_seq) {
+      return ok(null);
     },
   };
   return cmds;

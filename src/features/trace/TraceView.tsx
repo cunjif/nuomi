@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -9,14 +9,45 @@ import { sessionChannel } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { useUiStore } from "../../lib/store/uiStore";
 import { HandoffChainView } from "./HandoffChain";
+import { JournalView } from "./JournalView";
 import { TimelineRow } from "./TimelineRow";
 import { WhiteBoardFlow } from "./WhiteBoardFlow";
 import { buildHandoffChain, buildTimeline, whiteboardNotes } from "./traceModel";
 
 const VIRTUALIZE_THRESHOLD = 100;
 
-/** U12 group-chat trace: timeline + handoff chain + whiteboard side stream. */
+type TraceTab = "trace" | "journal";
+
+/** U12 group-chat trace + Harness Journal: dual-tab audit surface. */
 export function TraceView(): ReactNode {
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<TraceTab>("trace");
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex gap-1 border-b border-ink-muted/30 px-3 pt-2" role="tablist">
+        {(["trace", "journal"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={
+              tab === key
+                ? "border-b-2 border-ink-accent px-3 py-1.5 text-xs font-semibold text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
+                : "border-b-2 border-transparent px-3 py-1.5 text-xs text-ink-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
+            }
+          >
+            {t(key === "trace" ? "trace.tabTrace" : "trace.tabJournal")}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">{tab === "trace" ? <TraceTimeline /> : <JournalView />}</div>
+    </div>
+  );
+}
+
+function TraceTimeline(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const sessionId = useUiStore((s) => s.selectedSessionId);

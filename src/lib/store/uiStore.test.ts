@@ -61,6 +61,35 @@ describe("uiStore theme state", () => {
   });
 });
 
+describe("uiStore activeArea navigation state (需求 5)", () => {
+  it("defaults to the chat area", () => {
+    useUiStore.setState({ activeArea: "chat" });
+    expect(useUiStore.getState().activeArea).toBe("chat");
+  });
+
+  it("setActiveArea flips between chat and editor", () => {
+    useUiStore.setState({ activeArea: "chat" });
+    useUiStore.getState().setActiveArea("editor");
+    expect(useUiStore.getState().activeArea).toBe("editor");
+    useUiStore.getState().setActiveArea("chat");
+    expect(useUiStore.getState().activeArea).toBe("chat");
+  });
+
+  it("openFile switches the main area to the editor", () => {
+    useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat" });
+    useUiStore.getState().openFile("src/main.rs");
+    expect(useUiStore.getState().activeArea).toBe("editor");
+    expect(useUiStore.getState().activeFile).toBe("src/main.rs");
+  });
+
+  it("selecting a session returns to the chat area", () => {
+    useUiStore.setState({ activeArea: "editor", selectedSessionId: null });
+    useUiStore.getState().selectSession("s1");
+    expect(useUiStore.getState().activeArea).toBe("chat");
+    expect(useUiStore.getState().selectedSessionId).toBe("s1");
+  });
+});
+
 describe("uiStore dirtyPaths tracking", () => {
   it("markDirty toggles a path and no-ops on redundant updates", () => {
     useUiStore.setState({ dirtyPaths: {} });
