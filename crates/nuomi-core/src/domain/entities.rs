@@ -41,9 +41,11 @@ pub enum ProviderProtocol {
 /// change; unknown params keys are preserved).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderSettings {
-    /// Model ids exposed by this endpoint.
-    #[serde(default)]
-    pub models: Vec<String>,
+    /// Model ids exposed by this endpoint, each with per-model capabilities.
+    /// Legacy string entries deserialize into `ModelEntry { capabilities:
+    /// [reasoning] }` (see [`deserialize_models`]).
+    #[serde(default, deserialize_with = "deserialize_models")]
+    pub models: Vec<ModelEntry>,
     #[serde(default)]
     pub default_model: Option<String>,
     #[serde(default)]
@@ -72,6 +74,90 @@ fn provider_enabled_default() -> bool {
     true
 }
 
+/// A system-level modality capability a model (and transitively a Role)
+/// may require. Serialized lowercase (`reasoning`, `image`, `voice`, `video`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Capability {
+    Reasoning,
+    Image,
+    Voice,
+    Video,
+}
+
+impl Capability {
+    pub const ALL: [Capability; 4] = [
+        Capability::Reasoning,
+        Capability::Image,
+        Capability::Voice,
+        Capability::Video,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Capability::Reasoning => "reasoning",
+            Capability::Image => "image",
+            Capability::Voice => "voice",
+            Capability::Video => "video",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Capability> {
+        match s {
+            "reasoning" => Some(Capability::Reasoning),
+            "image" => Some(Capability::Image),
+            "voice" => Some(Capability::Voice),
+            "video" => Some(Capability::Video),
+            _ => None,
+        }
+    }
+}
+
+/// One model exposed by a provider endpoint plus its per-model capabilities
+/// (KiloCode-style: each model is individually tagged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelEntry {
+    pub id: String,
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
+}
+
+impl ModelEntry {
+    pub fn with_caps(id: &str, caps: &[Capability]) -> Self {
+        Self {
+            id: id.to_string(),
+            capabilities: caps.to_vec(),
+        }
+    }
+}
+
+/// Back-compat wire form: old persisted settings stored models as plain id
+/// strings. New shape is the [`ModelEntry`] object; unknown string ids map to
+/// `ModelEntry { capabilities: [reasoning] }` (documented normalization).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ModelEntryRaw {
+    Entry(ModelEntry),
+    Id(String),
+}
+
+fn deserialize_models<'de, D>(deserializer: D) -> Result<Vec<ModelEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<ModelEntryRaw>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .map(|entry| match entry {
+            ModelEntryRaw::Entry(entry) => entry,
+            ModelEntryRaw::Id(id) => ModelEntry {
+                id,
+                capabilities: vec![Capability::Reasoning],
+            },
+        })
+        .collect())
+}
+
 impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
@@ -91,6 +177,11 @@ impl Default for ProviderSettings {
 }
 
 impl ProviderSettings {
+    /// Plain model ids in list order (display + default-model pickers).
+    pub fn model_ids(&self) -> Vec<String> {
+        self.models.iter().map(|m| m.id.clone()).collect()
+    }
+
     /// Extracts the `"settings"` key from a provider `params` object;
     /// missing/malformed payloads fall back to defaults.
     pub fn from_params(params: &serde_json::Value) -> Self {
@@ -140,20 +231,110 @@ pub struct ProviderConfig {
     pub updated_at: i64,
 }
 
-/// Behavior overlay on top of a provider.
+impl ProviderConfig {
+    /// System capability union of this endpoint: the union over every
+    /// configured model's capabilities, plus any legacy free-form
+    /// `capabilities` tag that names a system capability (back-compat with
+    /// pre-model-entries rows).
+    pub fn capability_union(&self) -> Vec<Capability> {
+        let settings = ProviderSettings::from_params(&self.params);
+        let mut caps: Vec<Capability> = settings
+            .models
+            .iter()
+            .flat_map(|m| m.capabilities.iter().copied())
+            .collect();
+        for tag in &self.capabilities {
+            if let Some(cap) = Capability::parse(tag) {
+                if !caps.contains(&cap) {
+                    caps.push(cap);
+                }
+            }
+        }
+        caps.sort();
+        caps.dedup();
+        caps
+    }
+
+    /// True when [`ProviderConfig::capability_union`] covers every requested
+    /// capability.
+    pub fn covers(&self, required: &[Capability]) -> bool {
+        let caps = self.capability_union();
+        required.iter().all(|c| caps.contains(c))
+    }
+
+    /// The `enabled` toggle from the persisted settings block.
+    pub fn enabled_setting(&self) -> bool {
+        ProviderSettings::from_params(&self.params).enabled
+    }
+}
+
+/// Behavior overlay on top of one or more providers
+/// (**Agent = Role + Provider**).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Role {
     pub id: String,
     pub name: String,
+    /// Legacy single-provider pin; kept in sync with `provider_ids` (first
+    /// entry wins) for pre-existing readers. `None` = unbound / CLI-bound.
     pub provider_id: Option<String>,
+    /// Multi-provider bindings (Agent = Role + Provider, migration 0010).
+    #[serde(default)]
+    pub provider_ids: Vec<String>,
     pub system_prompt_override: Option<String>,
     /// Tool ids this role may call; empty list = unrestricted.
     pub tool_allowlist: Vec<String>,
+    /// Modality capabilities this role requires from its bound providers;
+    /// enforced at bind time (`role.capability_mismatch`) and used by the
+    /// capability router (services/capability_router).
+    #[serde(default)]
+    pub required_capabilities: Vec<Capability>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub params: serde_json::Value,
+    /// Seeded from the built-in preset catalog (delete is refused).
+    #[serde(default)]
+    pub builtin: bool,
+    /// Produced by the Role Director LLM service (`source` records how).
+    #[serde(default)]
+    pub generated: bool,
+    /// Ephemeral temp role created by the capability router; GC'd after runs.
+    #[serde(default)]
+    pub ephemeral: bool,
+    /// Generation provenance for `generated` roles (description, model, ...).
+    #[serde(default)]
+    pub source: Option<serde_json::Value>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl Role {
+    /// Effective capability tags for routing: the typed
+    /// `required_capabilities` plus any legacy string tags stored under
+    /// `params.capabilities` (pre-0010 router convention).
+    pub fn capability_tags(&self) -> Vec<String> {
+        let mut tags: Vec<String> = self
+            .required_capabilities
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect();
+        let legacy = self
+            .params
+            .get("capabilities")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for tag in legacy {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        tags
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

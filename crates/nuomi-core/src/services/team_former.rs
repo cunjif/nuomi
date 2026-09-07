@@ -512,9 +512,11 @@ fn persist_formed_team(
                 let role = Role {
                     id: new_id(),
                     name: uniquify_name(base, &mut taken),
-                    provider_id,
+                    provider_id: provider_id.clone(),
+                    provider_ids: provider_id.into_iter().collect(),
                     system_prompt_override: member.system_prompt.clone(),
                     tool_allowlist: Vec::new(),
+                    required_capabilities: Vec::new(),
                     temperature: None,
                     max_tokens: None,
                     params: if kind == "cli_profile" {
@@ -522,6 +524,10 @@ fn persist_formed_team(
                     } else {
                         json!({})
                     },
+                    builtin: false,
+                    generated: false,
+                    ephemeral: false,
+                    source: None,
                     created_at: ts,
                     updated_at: ts,
                 };

@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::providers::{ChatRequest, LlmProvider};
 
+use super::journal::{audit, EvolutionJournal, JournalKind};
 use super::trajectory::TrajectorySummary;
 use super::EvolutionError;
 
@@ -41,11 +42,22 @@ prompt, propose an improved system prompt. Respond with ONLY a JSON object: \
 /// Drives one reflection round through an [`LlmProvider`].
 pub struct Reflector {
     provider: Arc<dyn LlmProvider>,
+    /// Optional Harness Journal: reflection triggers become audit entries.
+    journal: Option<Arc<EvolutionJournal>>,
 }
 
 impl Reflector {
     pub fn new(provider: Arc<dyn LlmProvider>) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            journal: None,
+        }
+    }
+
+    /// Attaches the Harness Journal for audit instrumentation.
+    pub fn with_journal(mut self, journal: Arc<EvolutionJournal>) -> Self {
+        self.journal = Some(journal);
+        self
     }
 
     pub async fn reflect(
@@ -55,6 +67,19 @@ impl Reflector {
         if input.trajectories.is_empty() {
             return Err(EvolutionError::NoTrajectories);
         }
+        audit(
+            &self.journal,
+            "system_prompt",
+            JournalKind::ReflectionTriggered,
+            "reflector",
+            format!("reflection over {} trajectories", input.trajectories.len()),
+            input
+                .trajectories
+                .iter()
+                .map(|t| t.session_id.clone())
+                .collect(),
+            serde_json::json!({ "trajectory_count": input.trajectories.len() }),
+        );
         let user_prompt = build_prompt(input);
         let request = ChatRequest::simple("evolution", REFLECTION_SYSTEM, &user_prompt);
         let response = self

@@ -73,6 +73,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0008_app_settings.sql"
         )),
     ),
+    (
+        10,
+        "0010_role_capabilities",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0010_role_capabilities.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

@@ -388,6 +388,51 @@ pub async fn delete_role(
     commands::impl_delete_role(&state, role_id).await
 }
 
+// ---------- role capability system (presets / director / routing) ----------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn seed_builtin_roles(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::SeedRolesDto, IpcError> {
+    commands::impl_seed_builtin_roles(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn generate_role(
+    state: tauri::State<'_, AppState>,
+    description: String,
+) -> Result<commands::RoleDto, IpcError> {
+    commands::impl_generate_role(&state, description).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_routing_rules(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::RoutingRulesDto, IpcError> {
+    commands::impl_get_routing_rules(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_routing_rules(
+    state: tauri::State<'_, AppState>,
+    rules: commands::RoutingRulesDto,
+) -> Result<(), IpcError> {
+    commands::impl_set_routing_rules(&state, rules).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn route_capability(
+    state: tauri::State<'_, AppState>,
+    request: commands::RouteRequestDto,
+) -> Result<commands::RouteResultDto, IpcError> {
+    commands::impl_route_capability(&state, request).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_teams(
@@ -498,4 +543,10 @@ pub async fn test_integration(
     integration_id: String,
 ) -> Result<commands::TestIntegrationDto, IpcError> {
     commands::impl_test_integration(&state, integration_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn journal_rollback(state: tauri::State<'_, AppState>, seq: u64) -> Result<(), IpcError> {
+    commands::impl_journal_rollback(&state, seq).await
 }

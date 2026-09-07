@@ -77,6 +77,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::list_roles,
         tauri_cmds::upsert_role,
         tauri_cmds::delete_role,
+        tauri_cmds::seed_builtin_roles,
+        tauri_cmds::generate_role,
+        tauri_cmds::get_routing_rules,
+        tauri_cmds::set_routing_rules,
+        tauri_cmds::route_capability,
+        tauri_cmds::journal_rollback,
         tauri_cmds::list_teams,
         tauri_cmds::upsert_team,
         tauri_cmds::delete_team,
@@ -180,8 +186,28 @@ async fn boot_and_wire(
             app.manage(runner);
             notifier::spawn(&state);
 
+            let seed_db = state.db_path.clone();
             let warm_db = state.db_path.clone();
             app.manage(state);
+
+            // First-launch preset seeding: idempotent upsert of the built-in
+            // role catalog. Off the critical path; failures are logged only.
+            tauri::async_runtime::spawn_blocking(move || {
+                match nuomi_core::store::Db::open(&seed_db) {
+                    Ok(mut db) => {
+                        match nuomi_core::services::presets::seed_builtin_roles(&mut db.0) {
+                            Ok(report) => tracing::info!(
+                                inserted = report.inserted,
+                                updated = report.updated,
+                                skipped = report.skipped,
+                                "preset roles seeded"
+                            ),
+                            Err(e) => tracing::warn!(error = %e, "preset role seeding failed"),
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "preset seeding db open failed"),
+                }
+            });
 
             if let Err(e) = app.emit(KERNEL_READY_EVENT, ()) {
                 tracing::warn!(error = %e, "failed to emit kernel-ready");

@@ -1,6 +1,7 @@
 //! Self-evolution: trajectory aggregation, GEPA-inspired reflection,
 //! prompt versioning and allowlisted online research (SPEC T11, AC12–AC14).
 
+pub mod journal;
 pub mod reflection;
 pub mod research;
 pub mod review;
@@ -8,6 +9,10 @@ pub mod scheduler;
 pub mod trajectory;
 pub mod versioning;
 
+pub use journal::{
+    audit, DriftConfig, DriftDetector, EvolutionJournal, JournalEntry, JournalFilter, JournalKind,
+    JournaledReviewGate, JOURNAL_KIND_PREFIX, JOURNAL_SINK_SESSION_ID,
+};
 pub use reflection::{PromptCandidate, ReflectionInput, Reflector};
 pub use research::{
     online_authorized, set_online_authorized, ResearchAllowlist, ResearchFetcher,
@@ -59,4 +64,13 @@ pub enum EvolutionError {
 
     #[error("nothing to roll back: the applied version had no prior active prompt")]
     NothingToRollBack,
+
+    #[error("journal entry #{0} is not an Applied entry")]
+    JournalNotApplied(u64),
+
+    #[error("journal data corruption: {0}")]
+    JournalCorrupt(String),
+
+    #[error("journal io error: {0}")]
+    JournalIo(#[from] std::io::Error),
 }

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{new_id, now_ms, PromptStatus, PromptVersion};
 use crate::store::{repos, Db, StoreError};
 
+use super::journal::{audit, EvolutionJournal, JournalKind};
 use super::reflection::PromptCandidate;
 use super::EvolutionError;
 
@@ -49,6 +50,9 @@ pub struct PromptVersionManager {
     db_path: Arc<str>,
     /// In-memory before/after snapshots of successful applies (newest last).
     snapshots: Arc<Mutex<Vec<ApplySnapshot>>>,
+    /// Optional Harness Journal: when set, every versioning action
+    /// (proposal, baseline, apply) lands as an immutable audit entry.
+    journal: Option<Arc<EvolutionJournal>>,
 }
 
 impl PromptVersionManager {
@@ -56,7 +60,14 @@ impl PromptVersionManager {
         Self {
             db_path: db_path.into(),
             snapshots: Arc::new(Mutex::new(Vec::new())),
+            journal: None,
         }
+    }
+
+    /// Attaches the Harness Journal for audit instrumentation.
+    pub fn with_journal(mut self, journal: Arc<EvolutionJournal>) -> Self {
+        self.journal = Some(journal);
+        self
     }
 
     async fn with_db<T: Send + 'static>(
@@ -81,28 +92,42 @@ impl PromptVersionManager {
         candidate: PromptCandidate,
     ) -> Result<PromptVersion, EvolutionError> {
         let plugin = plugin.to_string();
-        self.with_db(move |conn| {
-            let existing = repos::prompts::list_by_plugin(conn, &plugin)?;
-            let next = existing.iter().map(|v| v.version).max().unwrap_or(0) + 1;
-            let parent =
-                candidate
-                    .parent_version
-                    .or_else(|| if next > 1 { Some(next - 1) } else { None });
-            let version = PromptVersion {
-                id: new_id(),
-                plugin: plugin.clone(),
-                version: next,
-                status: PromptStatus::Candidate,
-                content: candidate.content,
-                diff_text: Some(candidate.diff_text),
-                parent_version: parent,
-                activated_at: None,
-                created_at: now_ms(),
-            };
-            repos::prompts::insert_candidate(conn, &version)?;
-            Ok(version)
-        })
-        .await
+        let audit_plugin = plugin.clone();
+        let version = self
+            .with_db(move |conn| {
+                let existing = repos::prompts::list_by_plugin(conn, &plugin)?;
+                let next = existing.iter().map(|v| v.version).max().unwrap_or(0) + 1;
+                let parent =
+                    candidate
+                        .parent_version
+                        .or_else(|| if next > 1 { Some(next - 1) } else { None });
+                let version = PromptVersion {
+                    id: new_id(),
+                    plugin: plugin.clone(),
+                    version: next,
+                    status: PromptStatus::Candidate,
+                    content: candidate.content,
+                    diff_text: Some(candidate.diff_text),
+                    parent_version: parent,
+                    activated_at: None,
+                    created_at: now_ms(),
+                };
+                repos::prompts::insert_candidate(conn, &version)?;
+                Ok(version)
+            })
+            .await?;
+        audit(
+            &self.journal,
+            &audit_plugin,
+            JournalKind::ProposalGenerated {
+                proposal_ref: version.id.clone(),
+            },
+            "versioning",
+            format!("candidate v{} stored for '{audit_plugin}'", version.version),
+            vec![version.id.clone()],
+            serde_json::json!({ "version": version }),
+        );
+        Ok(version)
     }
 
     pub async fn activate(&self, plugin: &str, version: i64) -> Result<(), EvolutionError> {
@@ -128,15 +153,35 @@ impl PromptVersionManager {
     /// active version has drifted since.
     pub async fn plan_baseline(&self, plugin: &str) -> Result<ApplyBaseline, EvolutionError> {
         let plugin = plugin.to_string();
-        self.with_db(move |conn| {
-            let active_id = match repos::prompts::get_active(conn, &plugin) {
-                Ok(active) => Some(active.id),
-                Err(StoreError::NotFound { .. }) => None,
-                Err(other) => return Err(other),
-            };
-            Ok(ApplyBaseline { plugin, active_id })
-        })
-        .await
+        let baseline = self
+            .with_db(move |conn| {
+                let active_id = match repos::prompts::get_active(conn, &plugin) {
+                    Ok(active) => Some(active.id),
+                    Err(StoreError::NotFound { .. }) => None,
+                    Err(other) => return Err(other),
+                };
+                Ok(ApplyBaseline { plugin, active_id })
+            })
+            .await?;
+        audit(
+            &self.journal,
+            &baseline.plugin,
+            JournalKind::BaselineCaptured {
+                digest: baseline
+                    .active_id
+                    .clone()
+                    .unwrap_or_else(|| "<none>".into()),
+            },
+            "versioning",
+            format!("apply baseline captured for '{}'", baseline.plugin),
+            baseline
+                .active_id
+                .clone()
+                .map(|id| vec![id])
+                .unwrap_or_default(),
+            serde_json::json!({ "plugin": baseline.plugin }),
+        );
+        Ok(baseline)
     }
 
     /// Applies a candidate version (activates it, retiring the previous
@@ -227,6 +272,25 @@ impl PromptVersionManager {
             before_id = ?snapshot.before.as_ref().map(|v| v.id.as_str()),
             after_id = %snapshot.after.id,
             "prompt candidate applied; before/after snapshot recorded"
+        );
+        // Audit entry with the full before/after snapshot in the payload —
+        // this is what time-travel rollback replays from.
+        let mut evidence = Vec::new();
+        if let Some(before) = &snapshot.before {
+            evidence.push(before.id.clone());
+        }
+        evidence.push(snapshot.after.id.clone());
+        audit(
+            &self.journal,
+            &snapshot.plugin,
+            JournalKind::Applied {
+                before_ref: snapshot.before.as_ref().map(|v| v.id.clone()),
+                after_ref: snapshot.after.id.clone(),
+            },
+            "versioning",
+            format!("applied v{} to '{plugin}'", snapshot.applied_version),
+            evidence,
+            serde_json::json!({ "snapshot": snapshot }),
         );
         Ok(snapshot)
     }

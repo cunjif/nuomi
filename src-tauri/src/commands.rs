@@ -23,7 +23,9 @@ use nuomi_core::evolution::research::{
 use nuomi_core::integrations::OutboundSink;
 use nuomi_core::orchestrator::OrchestratorError;
 use nuomi_core::plugins::approval_gate;
+use nuomi_core::services::capability_router::RouteOutcome;
 use nuomi_core::services::parse_schedule;
+use nuomi_core::services::SeedReport;
 use nuomi_core::services::{run_team as core_run_team, TeamRunOutcome};
 use nuomi_core::store::{migrations, repos, Db, StoreError};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -665,8 +667,10 @@ pub async fn impl_delete_schedule(state: &AppState, schedule_id: String) -> Resu
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSettingsDto {
+    /// Per-model entries with capability tags. Legacy string model ids are
+    /// normalized to `{ id, capabilities: ["reasoning"] }` by the entity.
     #[serde(default)]
-    pub models: Vec<String>,
+    pub models: Vec<ModelEntryDto>,
     #[serde(default)]
     pub default_model: Option<String>,
     #[serde(default)]
@@ -689,10 +693,81 @@ pub struct ProviderSettingsDto {
     pub enabled: bool,
 }
 
+/// One model exposed by a provider endpoint plus its capability tags
+/// (KiloCode-style per-model capabilities).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntryDto {
+    pub id: String,
+    pub capabilities: Vec<CapabilityDto>,
+}
+
+/// System modality capability (mirrors `nuomi_core::domain::Capability`).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    serde::Deserialize,
+    specta::Type,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CapabilityDto {
+    Reasoning,
+    Image,
+    Voice,
+    Video,
+}
+
+impl From<nuomi_core::domain::Capability> for CapabilityDto {
+    fn from(c: nuomi_core::domain::Capability) -> Self {
+        match c {
+            nuomi_core::domain::Capability::Reasoning => Self::Reasoning,
+            nuomi_core::domain::Capability::Image => Self::Image,
+            nuomi_core::domain::Capability::Voice => Self::Voice,
+            nuomi_core::domain::Capability::Video => Self::Video,
+        }
+    }
+}
+
+impl From<CapabilityDto> for nuomi_core::domain::Capability {
+    fn from(c: CapabilityDto) -> Self {
+        match c {
+            CapabilityDto::Reasoning => nuomi_core::domain::Capability::Reasoning,
+            CapabilityDto::Image => nuomi_core::domain::Capability::Image,
+            CapabilityDto::Voice => nuomi_core::domain::Capability::Voice,
+            CapabilityDto::Video => nuomi_core::domain::Capability::Video,
+        }
+    }
+}
+
+fn caps_to_dto(caps: &[nuomi_core::domain::Capability]) -> Vec<CapabilityDto> {
+    caps.iter().copied().map(CapabilityDto::from).collect()
+}
+
+fn caps_from_dto(caps: &[CapabilityDto]) -> Vec<nuomi_core::domain::Capability> {
+    caps.iter()
+        .copied()
+        .map(nuomi_core::domain::Capability::from)
+        .collect()
+}
+
 impl ProviderSettingsDto {
     fn from_entity(settings: nuomi_core::domain::entities::ProviderSettings) -> Self {
         Self {
-            models: settings.models,
+            models: settings
+                .models
+                .into_iter()
+                .map(|m| ModelEntryDto {
+                    id: m.id,
+                    capabilities: caps_to_dto(&m.capabilities),
+                })
+                .collect(),
             default_model: settings.default_model,
             temperature: settings.temperature,
             top_p: settings.top_p,
@@ -708,7 +783,14 @@ impl ProviderSettingsDto {
 
     fn into_entity(self) -> nuomi_core::domain::entities::ProviderSettings {
         nuomi_core::domain::entities::ProviderSettings {
-            models: self.models,
+            models: self
+                .models
+                .into_iter()
+                .map(|m| nuomi_core::domain::ModelEntry {
+                    id: m.id,
+                    capabilities: caps_from_dto(&m.capabilities),
+                })
+                .collect(),
             default_model: self.default_model,
             temperature: self.temperature,
             top_p: self.top_p,
@@ -1362,11 +1444,17 @@ pub struct RoleDto {
     pub id: String,
     pub name: String,
     pub provider_id: Option<String>,
+    pub provider_ids: Vec<String>,
     pub system_prompt_override: Option<String>,
     pub tool_allowlist: Vec<String>,
+    pub required_capabilities: Vec<CapabilityDto>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub params: serde_json::Value,
+    pub builtin: bool,
+    pub generated: bool,
+    pub ephemeral: bool,
+    pub source: serde_json::Value,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -1377,11 +1465,17 @@ impl From<Role> for RoleDto {
             id: r.id,
             name: r.name,
             provider_id: r.provider_id,
+            provider_ids: r.provider_ids,
             system_prompt_override: r.system_prompt_override,
             tool_allowlist: r.tool_allowlist,
+            required_capabilities: caps_to_dto(&r.required_capabilities),
             temperature: r.temperature,
             max_tokens: r.max_tokens,
             params: r.params,
+            builtin: r.builtin,
+            generated: r.generated,
+            ephemeral: r.ephemeral,
+            source: r.source.unwrap_or(serde_json::Value::Null),
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -1393,8 +1487,14 @@ impl From<Role> for RoleDto {
 pub struct RoleInput {
     pub name: String,
     pub provider_id: Option<String>,
+    /// Multi-provider bindings (Agent = Role + Provider); merged with
+    /// `provider_id` when both are supplied.
+    #[serde(default)]
+    pub provider_ids: Vec<String>,
     pub system_prompt_override: Option<String>,
     pub tool_allowlist: Vec<String>,
+    #[serde(default)]
+    pub required_capabilities: Vec<CapabilityDto>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     /// Free-form extras; the `agent_profile_id` key binds a CLI agent
@@ -1422,8 +1522,54 @@ pub async fn impl_list_roles(state: &AppState) -> Result<Vec<RoleDto>, IpcError>
     Ok(rows.into_iter().map(RoleDto::from).collect())
 }
 
+/// Validates that every bound provider's capability union covers the role's
+/// `required_capabilities` (`role.capability_mismatch` with the missing set
+/// otherwise).
+fn validate_role_provider_capabilities(
+    conn: &rusqlite::Connection,
+    role_name: &str,
+    provider_ids: &[String],
+    required: &[nuomi_core::domain::Capability],
+) -> Result<(), IpcError> {
+    for pid in provider_ids {
+        let provider = match repos::providers::get_provider(conn, pid) {
+            Ok(p) => p,
+            Err(StoreError::NotFound { .. }) => {
+                return Err(IpcError::new(
+                    "provider.not_found",
+                    format!("provider#{pid} not found"),
+                ))
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let missing: Vec<String> = required
+            .iter()
+            .filter(|c| !provider.capability_union().contains(c))
+            .map(|c| c.as_str().to_string())
+            .collect();
+        if !missing.is_empty() {
+            return Err(IpcError::with_details(
+                "role.capability_mismatch",
+                format!(
+                    "provider '{}' does not cover the capabilities required by role '{}': {}",
+                    provider.name,
+                    role_name,
+                    missing.join(", ")
+                ),
+                serde_json::json!({
+                    "providerId": pid,
+                    "missingCapabilities": missing,
+                }),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// `name` is the idempotency key: an existing role with the same name is
 /// updated in place (keeping its `id`/`created_at`), otherwise inserted.
+/// Builtin flags (`builtin`/`generated`/`ephemeral`) are system-owned and
+/// never settable from the input.
 pub async fn impl_upsert_role(state: &AppState, role: RoleInput) -> Result<RoleDto, IpcError> {
     role.validate()?;
     let path = state.db_path.clone();
@@ -1431,14 +1577,24 @@ pub async fn impl_upsert_role(state: &AppState, role: RoleInput) -> Result<RoleD
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
         let now = now_ms();
+        let mut provider_ids = role.provider_ids;
+        if let Some(pid) = role.provider_id.as_ref() {
+            if !provider_ids.contains(pid) {
+                provider_ids.insert(0, pid.clone());
+            }
+        }
+        let required = caps_from_dto(&role.required_capabilities);
+        validate_role_provider_capabilities(&db.0, role.name.trim(), &provider_ids, &required)?;
         let existing = repos::roles::list(&db.0)?
             .into_iter()
             .find(|r| r.name == role.name);
         match existing {
             Some(mut prev) => {
-                prev.provider_id = role.provider_id;
+                prev.provider_id = provider_ids.first().cloned();
+                prev.provider_ids = provider_ids;
                 prev.system_prompt_override = role.system_prompt_override;
                 prev.tool_allowlist = role.tool_allowlist;
+                prev.required_capabilities = required;
                 prev.temperature = role.temperature;
                 prev.max_tokens = role.max_tokens;
                 prev.params = role.params;
@@ -1450,12 +1606,18 @@ pub async fn impl_upsert_role(state: &AppState, role: RoleInput) -> Result<RoleD
                 let fresh = Role {
                     id: nuomi_core::domain::new_id(),
                     name: role.name,
-                    provider_id: role.provider_id,
+                    provider_id: provider_ids.first().cloned(),
+                    provider_ids,
                     system_prompt_override: role.system_prompt_override,
                     tool_allowlist: role.tool_allowlist,
+                    required_capabilities: required,
                     temperature: role.temperature,
                     max_tokens: role.max_tokens,
                     params: role.params,
+                    builtin: false,
+                    generated: false,
+                    ephemeral: false,
+                    source: None,
                     created_at: now,
                     updated_at: now,
                 };
@@ -1473,6 +1635,16 @@ pub async fn impl_delete_role(state: &AppState, role_id: String) -> Result<(), I
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
+        // Built-in preset roles are protected from deletion (disable/rebind
+        // instead); everything else deletes normally.
+        if let Ok(role) = repos::roles::get(&db.0, &role_id) {
+            if role.builtin {
+                return Err(IpcError::new(
+                    "role.builtin_protected",
+                    format!("role#{role_id} is a built-in preset and cannot be deleted"),
+                ));
+            }
+        }
         if !repos::roles::delete(&db.0, &role_id)? {
             return Err(IpcError::new(
                 "role.not_found",
@@ -1482,6 +1654,179 @@ pub async fn impl_delete_role(state: &AppState, role_id: String) -> Result<(), I
         Ok(())
     })
     .await?
+}
+
+// ---------- role capability system (presets / director / routing) ----------
+
+/// Outcome counts of a preset seeding pass.
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedRolesDto {
+    pub inserted: u64,
+    pub updated: u64,
+    pub skipped: u64,
+}
+
+/// Idempotently seeds the built-in preset roles ("restore presets").
+pub async fn impl_seed_builtin_roles(state: &AppState) -> Result<SeedRolesDto, IpcError> {
+    let path = state.db_path.clone();
+    let report = tokio::task::spawn_blocking(move || -> Result<SeedReport, IpcError> {
+        let mut db = Db::open(&path)?;
+        Ok(nuomi_core::services::presets::seed_builtin_roles(
+            &mut db.0,
+        )?)
+    })
+    .await??;
+    Ok(SeedRolesDto {
+        inserted: report.inserted as u64,
+        updated: report.updated as u64,
+        skipped: report.skipped as u64,
+    })
+}
+
+/// Role Director: LLM-generates a structured role from a plain-language
+/// description, validates it and persists it (`generated = true`).
+pub async fn impl_generate_role(
+    state: &AppState,
+    description: String,
+) -> Result<RoleDto, IpcError> {
+    if description.trim().is_empty() {
+        return Err(IpcError::new(
+            "role.director_invalid",
+            "description must not be empty",
+        ));
+    }
+    let role = nuomi_core::services::role_director::generate_role(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        Some(state.current_workspace()),
+        &description,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::services::role_director::RoleDirectorError::NoProvider => IpcError::new(
+            "role.no_provider",
+            "no provider available to generate a role",
+        ),
+        nuomi_core::services::role_director::RoleDirectorError::Rejected(msg) => {
+            IpcError::new("role.director_invalid", msg)
+        }
+        other => IpcError::new("role.director_failed", other.to_string()),
+    })?;
+    Ok(RoleDto::from(role))
+}
+
+/// Routing rules mirrored from `nuomi_core::services::RoutingRules`
+/// (persisted in `app_settings`).
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingRulesDto {
+    #[serde(default)]
+    pub prefer_local: bool,
+    #[serde(default)]
+    pub capability_overrides: BTreeMap<CapabilityDto, String>,
+}
+
+impl RoutingRulesDto {
+    fn into_entity(self) -> nuomi_core::services::RoutingRules {
+        nuomi_core::services::RoutingRules {
+            prefer_local: self.prefer_local,
+            capability_overrides: self
+                .capability_overrides
+                .into_iter()
+                .map(|(k, v)| (k.into(), v))
+                .collect(),
+        }
+    }
+
+    fn from_entity(rules: nuomi_core::services::RoutingRules) -> Self {
+        Self {
+            prefer_local: rules.prefer_local,
+            capability_overrides: rules
+                .capability_overrides
+                .into_iter()
+                .map(|(k, v)| (CapabilityDto::from(k), v))
+                .collect(),
+        }
+    }
+}
+
+pub async fn impl_get_routing_rules(state: &AppState) -> Result<RoutingRulesDto, IpcError> {
+    let path = state.db_path.clone();
+    let rules = tokio::task::spawn_blocking(move || -> Result<RoutingRulesDto, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        nuomi_core::services::capability_router::load_routing_rules(&db.0)
+            .map(RoutingRulesDto::from_entity)
+            .map_err(|e| IpcError::new("route.failed", e.to_string()))
+    })
+    .await??;
+    Ok(rules)
+}
+
+pub async fn impl_set_routing_rules(
+    state: &AppState,
+    rules: RoutingRulesDto,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        nuomi_core::services::capability_router::save_routing_rules(&db.0, &rules.into_entity())
+            .map_err(|e| IpcError::new("route.failed", e.to_string()))
+    })
+    .await?
+}
+
+/// A capability-routing probe: resolves a role for the required capability
+/// set (optionally creating + immediately cleaning an ephemeral temp role
+/// when `dryRun` is false and only a provider can serve).
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteRequestDto {
+    pub required_capabilities: Vec<CapabilityDto>,
+    pub prefer_role_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteResultDto {
+    pub role: RoleDto,
+    /// True when the router created an ephemeral temp role for the request.
+    pub created_temp: bool,
+}
+
+pub async fn impl_route_capability(
+    state: &AppState,
+    request: RouteRequestDto,
+) -> Result<RouteResultDto, IpcError> {
+    use nuomi_core::services::capability_router::{route, RouteRequest};
+    let path = state.db_path.clone();
+    let req = RouteRequest {
+        required_capabilities: caps_from_dto(&request.required_capabilities),
+        prefer_role_id: request.prefer_role_id,
+    };
+    let outcome = tokio::task::spawn_blocking(move || -> Result<RouteOutcome, IpcError> {
+        let mut db = Db::open(&path)?;
+        route(&mut db.0, &req).map_err(map_routing_error)
+    })
+    .await??;
+    Ok(RouteResultDto {
+        role: RoleDto::from(outcome.role),
+        created_temp: outcome.created_temp,
+    })
+}
+
+/// Maps capability-router failures onto stable IPC codes.
+fn map_routing_error(e: nuomi_core::services::RoutingError) -> IpcError {
+    match e {
+        nuomi_core::services::RoutingError::NoCapability(caps) => IpcError::with_details(
+            "route.no_capability",
+            format!("no provider/role covers capabilities: {caps}"),
+            serde_json::json!({ "requiredCapabilities": caps }),
+        ),
+        other => IpcError::new("route.failed", other.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
@@ -1982,7 +2327,13 @@ fn spawn_team_run(
                 TeamSettlement::Cancelled => {
                     transition_run(&db.0, &rid, current, RunEvent::Cancel).map(|_| ())
                 }
+            }?;
+            // Run-end GC: remove ephemeral capability-router temp roles
+            // (services::capability_router docs).
+            if let Err(e) = nuomi_core::services::capability_router::cleanup_expired_temps(&db.0) {
+                tracing::warn!(error = %e, run = %rid, "ephemeral role GC failed");
             }
+            Ok(())
         })
         .await;
         match settled {
@@ -2585,6 +2936,31 @@ pub async fn impl_set_workspace(state: &AppState, path: String) -> Result<Worksp
 fn workspace_persisted(state: &AppState) -> Result<bool, IpcError> {
     let db = Db::open(&state.db_path)?;
     Ok(repos::settings::get(&db.0, repos::settings::WORKSPACE_ROOT)?.is_some())
+}
+
+/// Time-travel rollback of a Harness Journal `Applied` entry. The journal is
+/// reloaded from its conventional root (`<db_parent>/evolution-journal`) and
+/// the before-snapshot carried by the entry is restored through the
+/// versioning manager — a fresh manager suffices because the snapshot travels
+/// inside the journal entry payload.
+pub async fn impl_journal_rollback(state: &AppState, seq: u64) -> Result<(), IpcError> {
+    use nuomi_core::evolution::journal::EvolutionJournal;
+    use nuomi_core::evolution::versioning::PromptVersionManager;
+
+    let db_path = state.db_path.clone();
+    let root = std::path::Path::new(&*db_path)
+        .parent()
+        .map(|p| p.join("evolution-journal"))
+        .unwrap_or_else(|| std::path::PathBuf::from("evolution-journal"));
+    let journal = tokio::task::spawn_blocking(move || EvolutionJournal::new(root, Some(db_path)))
+        .await
+        .map_err(IpcError::from)?;
+    let versions = PromptVersionManager::new(state.db_path.clone());
+    journal
+        .rollback_to(seq, &versions)
+        .await
+        .map(|_| ())
+        .map_err(|e| IpcError::new("journal.rollback_failed", e.to_string()))
 }
 
 #[cfg(test)]

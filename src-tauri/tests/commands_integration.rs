@@ -201,3 +201,107 @@ async fn approval_flow_via_commands() {
         other => panic!("expected approval requirement, got {other:?}"),
     }
 }
+
+// ---------- role capability system (presets / capability binding) ----------
+
+fn ipc_code(err: &nuomi_shell_lib::IpcError) -> &'static str {
+    match err {
+        nuomi_shell_lib::IpcError::Generic { code, .. } => code,
+    }
+}
+
+fn provider_input(
+    id: Option<String>,
+    caps: Vec<commands::CapabilityDto>,
+) -> commands::ProviderInput {
+    commands::ProviderInput {
+        id,
+        name: "vision-main".into(),
+        protocol: commands::ProviderProtocolDto::OpenAiCompatible,
+        base_url: "http://localhost:9/v1".into(),
+        capabilities: vec![],
+        is_master: false,
+        api_key: None,
+        settings: commands::ProviderSettingsDto {
+            models: vec![commands::ModelEntryDto {
+                id: "m-1".into(),
+                capabilities: caps,
+            }],
+            ..Default::default()
+        },
+    }
+}
+
+#[tokio::test]
+async fn role_capability_mismatch_and_preset_protection() {
+    let (state, _dir) = boot(vec![]).await;
+
+    // Provider carries reasoning only.
+    commands::impl_upsert_provider(
+        &state,
+        provider_input(None, vec![commands::CapabilityDto::Reasoning]),
+    )
+    .await
+    .unwrap();
+    let providers = commands::impl_list_providers(&state).await.unwrap();
+    let pid = providers.first().unwrap().id.clone();
+
+    // Image is required but not covered → role.capability_mismatch with the
+    // missing capability in details.
+    let err = commands::impl_upsert_role(
+        &state,
+        commands::RoleInput {
+            name: "vision".into(),
+            provider_id: Some(pid.clone()),
+            provider_ids: vec![pid.clone()],
+            system_prompt_override: None,
+            tool_allowlist: vec![],
+            required_capabilities: vec![
+                commands::CapabilityDto::Reasoning,
+                commands::CapabilityDto::Image,
+            ],
+            temperature: None,
+            max_tokens: None,
+            params: serde_json::json!({}),
+        },
+    )
+    .await
+    .expect_err("must reject uncovered capability");
+    assert_eq!(ipc_code(&err), "role.capability_mismatch");
+
+    // Matching capabilities are accepted; provider_id stays synced.
+    let role = commands::impl_upsert_role(
+        &state,
+        commands::RoleInput {
+            name: "thinker".into(),
+            provider_id: Some(pid.clone()),
+            provider_ids: vec![pid],
+            system_prompt_override: None,
+            tool_allowlist: vec![],
+            required_capabilities: vec![commands::CapabilityDto::Reasoning],
+            temperature: None,
+            max_tokens: None,
+            params: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(role.provider_ids.len(), 1);
+
+    // Preset seeding is idempotent; built-ins refuse deletion.
+    let first = commands::impl_seed_builtin_roles(&state).await.unwrap();
+    assert!(first.inserted > 0);
+    let again = commands::impl_seed_builtin_roles(&state).await.unwrap();
+    assert_eq!(again.inserted, 0);
+    assert_eq!(again.updated, first.inserted);
+
+    let roles = commands::impl_list_roles(&state).await.unwrap();
+    let builtin = roles.iter().find(|r| r.builtin).unwrap();
+    let err = commands::impl_delete_role(&state, builtin.id.clone())
+        .await
+        .expect_err("built-in roles are delete-protected");
+    assert_eq!(ipc_code(&err), "role.builtin_protected");
+
+    // User roles still delete normally.
+    commands::impl_delete_role(&state, role.id).await.unwrap();
+}

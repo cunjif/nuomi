@@ -221,7 +221,18 @@ pub async fn run_team(
                         .collect()
                 })
                 .unwrap_or_default();
-            let outcome = RouterExecutor::run(&input, &resolver, &wb, &required).await?;
+            // Capability-router fallback: when no member role matches the
+            // required capabilities, the DB-backed router may resolve (or
+            // ephemeral-create + auto-GC) a role from the provider catalog.
+            let fallback = super::capability_router::DbCapabilityFallback::new(db_path.clone());
+            let outcome = RouterExecutor::run_with_fallback(
+                &input,
+                &resolver,
+                &wb,
+                &required,
+                Some(&fallback),
+            )
+            .await?;
             Ok(TeamRunOutcome {
                 final_output: outcome.output,
                 converged: true,

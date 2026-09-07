@@ -5,9 +5,10 @@ pub mod run_state;
 pub mod status;
 
 pub use entities::{
-    AgentProfile, Approval, ApprovalDecision, CliFlavor, EventRecord, Integration, IntegrationKind,
-    MemoryEntry, PromptStatus, PromptVersion, ProviderConfig, ProviderProtocol, Role, Run,
-    Schedule, Session, Task, TaskStatus, Team, TeamTopology, WhiteBoardNote,
+    AgentProfile, Approval, ApprovalDecision, Capability, CliFlavor, EventRecord, Integration,
+    IntegrationKind, MemoryEntry, ModelEntry, PromptStatus, PromptVersion, ProviderConfig,
+    ProviderProtocol, Role, Run, Schedule, Session, Task, TaskStatus, Team, TeamTopology,
+    WhiteBoardNote,
 };
 pub use run_state::{
     ApprovalOutcome, GenerationalRun, LandingError, LandingEvent, LandingPhase, LandingRecord,

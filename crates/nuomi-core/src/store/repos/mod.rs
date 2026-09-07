@@ -4,6 +4,7 @@ pub mod agent_profiles;
 pub mod change_log;
 pub mod events;
 pub mod integrations;
+pub mod journal;
 pub mod memory;
 pub mod prompts;
 pub mod providers;

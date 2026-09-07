@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::plugins::MemoryService;
 
+use super::journal::{audit, EvolutionJournal, JournalKind};
 use super::research::{online_authorized, ResearchReportEntry, ResearchScheduler};
 
 /// Default per-target cooldown window for automatic evolution triggers
@@ -82,6 +83,9 @@ pub struct PeriodicResearch {
     /// behavior. When set, automatic ticks inside the window are skipped
     /// and the skip is logged.
     cooldown: Option<Arc<CooldownGate>>,
+    /// Optional Harness Journal: authorized automatic ticks land as
+    /// `ReflectionTriggered` audit entries (actor `scheduler`).
+    journal: Option<Arc<EvolutionJournal>>,
     cancel: CancellationToken,
 }
 
@@ -98,6 +102,7 @@ impl PeriodicResearch {
             interval,
             topic: topic.into(),
             cooldown: None,
+            journal: None,
             cancel: CancellationToken::new(),
         }
     }
@@ -106,6 +111,12 @@ impl PeriodicResearch {
     /// skipped (with a logged reason) instead of fetching.
     pub fn with_cooldown(mut self, cooldown: CooldownGate) -> Self {
         self.cooldown = Some(Arc::new(cooldown));
+        self
+    }
+
+    /// Attaches the Harness Journal for trigger auditing.
+    pub fn with_audit_journal(mut self, journal: Arc<EvolutionJournal>) -> Self {
+        self.journal = Some(journal);
         self
     }
 
@@ -126,6 +137,7 @@ impl PeriodicResearch {
         let interval = self.interval;
         let topic = self.topic.clone();
         let cooldown = self.cooldown.clone();
+        let journal = self.journal.clone();
         let cancel = self.cancel.clone();
 
         tokio::spawn(async move {
@@ -143,7 +155,17 @@ impl PeriodicResearch {
                         // window and log the skip reason when throttled.
                         if let Some(gate) = &cooldown {
                             match gate.check(&topic, false) {
-                                CooldownDecision::Allow => {}
+                                CooldownDecision::Allow => {
+                                    audit(
+                                        &journal,
+                                        super::journal::EVOLUTION_DOMAIN,
+                                        JournalKind::ReflectionTriggered,
+                                        "scheduler",
+                                        format!("periodic evolution tick for '{topic}'"),
+                                        vec![topic.clone()],
+                                        serde_json::json!({ "topic": topic }),
+                                    );
+                                }
                                 CooldownDecision::Skip { remaining } => {
                                     tracing::info!(
                                         target = %topic,
