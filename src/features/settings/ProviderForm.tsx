@@ -597,7 +597,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           <button
             type="submit"
             disabled={saveDisabled}
-            className="rounded bg-ink-accent px-3 py-1 text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+            className="pixel-fill-accent px-3 py-1 text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
           >
             {t("common.save")}
           </button>

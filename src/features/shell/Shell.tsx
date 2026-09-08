@@ -14,9 +14,9 @@ import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { AreaNav } from "./AreaNav";
-import { EditorArea, EditorToolbar } from "./EditorArea";
+import { EditorArea } from "./EditorArea";
 import { LeftRail } from "./LeftRail";
-import { TopBar } from "./TopBar";
+import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
 
 type WorkspaceInfo = { root: string; configured: boolean };
@@ -110,6 +110,7 @@ export function Shell(): ReactNode {
   const view = useUiStore((s) => s.view);
   const activeArea = useUiStore((s) => s.activeArea);
   useGlobalNavShortcuts();
+  useGlobalPaletteShortcuts();
   const queryClient = useQueryClient();
   // Kernel boot lifecycle as observed through events; the workspace query
   // poll below is the fallback signal when an event is missed.
@@ -186,23 +187,20 @@ export function Shell(): ReactNode {
 
   return (
     <div className="flex h-screen flex-col bg-surface text-ink">
-      <TopBar />
+      <AreaNav />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* VSCode-style nav strip: centered tabs, editor workspace actions
-          right-aligned (only while the editor area is active). */}
-          <AreaNav right={activeArea === "editor" ? <EditorToolbar /> : undefined} />
-          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            {/* Mutually exclusive surfaces (需求 5): the editor occupies the
-            same area as the conversation view; opening a file flips
-            activeArea, Alt+H flips it back. */}
-            <ErrorBoundary key={activeArea === "editor" ? "editor" : view}>
-              {activeArea === "editor" ? <EditorArea /> : renderView(view)}
-            </ErrorBoundary>
-          </main>
-        </div>
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          {/* Mutually exclusive surfaces (需求 5): the editor occupies the
+          same area as the conversation view; opening a file flips
+          activeArea, Alt+H flips it back. */}
+          <ErrorBoundary key={activeArea === "editor" ? "editor" : view}>
+            {activeArea === "editor" ? <EditorArea /> : renderView(view)}
+          </ErrorBoundary>
+        </main>
       </div>
+      {/* Global palette overlay (Ctrl+P / Ctrl+Shift+P / Ctrl+F). */}
+      <QuickOpen />
     </div>
   );
 }

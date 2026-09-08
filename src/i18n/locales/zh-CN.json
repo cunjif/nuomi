@@ -47,7 +47,11 @@
     "navSettings": "设置",
     "connected": "已连接",
     "disconnected": "连接断开",
-    "checking": "连接中…"
+    "checking": "连接中…",
+    "appTitle": "nuomi · 糯米",
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "close": "关闭"
   },
   "theme": {
     "toggle": "切换主题",
@@ -414,20 +418,13 @@
     "saveHint": "Ctrl+S 保存",
     "openFileHint": "从左侧文件树打开一个文件开始编辑",
     "outline": "大纲",
+    "viewWysiwyg": "所见即所得",
+    "viewSource": "源码",
     "extensions": "扩展",
     "extPanelTitle": "编辑器扩展",
     "extPanelHint": "禁用的扩展不参与加载；启用状态保存在本机。",
     "extEnabled": "启用",
     "extDisabled": "停用",
-    "indexButton": "索引此代码库",
-    "indexStarted": "代码库索引已启动",
-    "indexUnavailable": "当前后端没有索引命令：请在 MCP 配置 codebase-memory-mcp 后由 Agent 执行 index_repository",
-    "annotations": "注释",
-    "annotationPanelTitle": "代码注释",
-    "annotationLine": "行号",
-    "annotationText": "注释内容",
-    "annotationAdd": "添加注释",
-    "annotationEmpty": "暂无注释。输入行号与内容添加；也可在编辑器中按 Alt+F1 打开本面板。",
     "previewBinaryUnsupported": "该文件类型需要二进制读取支持，当前 IPC 仅支持文本读取",
     "ext": {
       "outlineSymbols": "符号大纲（正则）",
@@ -439,18 +436,9 @@
       "codebaseIndex": "代码库索引"
     },
     "hover": {
-      "definedAt": "定义于第 {{line}} 行",
-      "annotation": "注释",
-      "kind_function": "函数",
-      "kind_class": "类",
-      "kind_struct": "结构体",
-      "kind_enum": "枚举",
-      "kind_trait": "Trait",
-      "kind_impl": "实现",
-      "kind_interface": "接口",
-      "kind_type": "类型",
-      "kind_method": "方法",
-      "kind_heading": "标题"
+      "declaredIn": "声明于 **{{container}}** · `{{location}}`",
+      "declaredInPath": "声明于 `{{location}}`",
+      "refs": "{{count}} 处引用"
     },
     "office": {
       "kind": "文件类型",
@@ -465,6 +453,11 @@
       "copyPath": "复制路径",
       "copied": "路径已复制",
       "copyFailed": "复制失败"
+    },
+    "nav": {
+      "gotoDefinition": "转到定义",
+      "findReferences": "查找引用",
+      "noReferences": "未找到引用"
     }
   },
   "tab": {
@@ -480,6 +473,20 @@
     "save": "保存 (Ctrl+S)",
     "loadingFile": "加载文件中…"
   },
+  "palette": {
+    "filePlaceholder": "查找工作区文件…",
+    "commandPlaceholder": "输入命令…",
+    "noResults": "没有匹配结果",
+    "hint": "↑↓ 选择 · Enter 确认 · Esc 关闭",
+    "cmd": {
+      "gotoFile": "转到文件…",
+      "commandPalette": "命令面板",
+      "toggleTheme": "切换深浅色主题",
+      "gotoChat": "转到对话",
+      "gotoEditor": "转到文件编辑",
+      "closeFile": "关闭当前文件"
+    }
+  },
   "workspace": {
     "setupTitle": "设置工作区",
     "setupDescription": "选择编辑器与 Agent 的沙箱根目录，目录之外的文件不可访问。",
@@ -487,7 +494,13 @@
     "confirm": "确认",
     "switchWorkspace": "切换工作区",
     "current": "工作区",
-    "setupFailed": "设置工作区失败"
+    "setupFailed": "设置工作区失败",
+    "currentDir": "当前工作目录",
+    "newDir": "新的工作目录",
+    "choose": "选择",
+    "save": "保存",
+    "switched": "已切换工作区",
+    "pickUnavailable": "目录选择器不可用，请手动输入路径"
   },
   "capability": {
     "reasoning": "推理",

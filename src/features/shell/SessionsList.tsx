@@ -44,7 +44,7 @@ export function SessionsList(): ReactNode {
           type="button"
           onClick={() => createMut.mutate()}
           disabled={createMut.isPending}
-          className="rounded bg-ink-accent px-2 py-0.5 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+          className="pixel-fill-accent px-2 py-0.5 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
         >
           {t("sessions.newSession")}
         </button>

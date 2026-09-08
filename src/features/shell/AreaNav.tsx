@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ipc } from "../../lib/ipc/client";
 import { useUiStore, type ActiveArea } from "../../lib/store/uiStore";
 
 const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> = [
@@ -23,43 +27,128 @@ const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> 
   },
 ];
 
+/** True inside a real Tauri webview; jsdom / plain browser hides controls. */
+function hasTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+
 /**
- * Central main-area navigation (需求 5): 对话 | 文件编辑 toggle. The two
- * surfaces are mutually exclusive — clicking a tab (or opening a workspace
- * file) flips uiStore.activeArea.
- *
- * `right` hosts an optional context toolbar slot (VSCode-style: the editor
- * workspace actions share the nav strip, right-aligned) without disturbing
- * the centered tabs.
+ * Window control buttons (minimize / maximize / close) for the custom
+ * title bar — only rendered under the Tauri runtime. Buttons must NOT
+ * carry data-tauri-drag-region (drag region lives on the row around them).
  */
-export function AreaNav({ right }: { right?: ReactNode }): ReactNode {
+function WindowControls(): ReactNode {
+  const { t } = useTranslation();
+  const win = useMemo(() => getCurrentWindow(), []);
+  const base =
+    "flex h-9 w-11 items-center justify-center text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
+  return (
+    <div className="ml-auto flex items-stretch self-stretch">
+      <button type="button" aria-label={t("shell.minimize")} onClick={() => void win.minimize()} className={base}>
+        —
+      </button>
+      <button type="button" aria-label={t("shell.maximize")} onClick={() => void win.toggleMaximize()} className={base}>
+        ▢
+      </button>
+      <button
+        type="button"
+        aria-label={t("shell.close")}
+        onClick={() => void win.close()}
+        className={`${base} hover:bg-state-danger hover:text-surface`}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Custom window title bar merged with the area nav (用户 ASCII 布局): the
+ * native frame is disabled (tauri.conf.json decorations:false), so this
+ * header owns dragging, the window buttons and everything the old top strip
+ * had.
+ *
+ * Dragging: the Tauri window plugin injects a document-level mousedown
+ * handler (tauri/src/window/scripts/drag.js) that walks the event path for
+ * `data-tauri-drag-region`. Values: bare/"true" = only direct hits on that
+ * element, "deep" = any non-clickable descendant (BUTTON/A/INPUT/label/
+ * summary/[role=tab|button|…] still block it), "false" = opt out. This row
+ * needs "deep": the absolutely-positioned tab list covers it, so a bare
+ * attribute would almost never be the direct mousedown target and the window
+ * would not move. Double-click → internal_toggle_maximize is handled by the
+ * same script. Requires capability core:window:allow-start-dragging.
+ *
+ *   row 1: [N] nuomi · 糯米   [对话] [文件编辑]   — ▢ ✕
+ *   row 2:                                    (●) 已连接
+ *
+ * The two main surfaces are mutually exclusive — clicking a tab (or opening
+ * a workspace file) flips uiStore.activeArea. Under vitest / plain browser
+ * the window buttons are simply absent and the strip behaves as before.
+ */
+export function AreaNav(): ReactNode {
   const { t } = useTranslation();
   const activeArea = useUiStore((s) => s.activeArea);
   const setActiveArea = useUiStore((s) => s.setActiveArea);
+  // Connection probe doubles as the sessions poll seed (shared query key).
+  const probe = useQuery({ queryKey: ["sessions"], queryFn: ipc.listSessions, staleTime: 10_000 });
+  const status = probe.isPending ? "checking" : probe.isError ? "disconnected" : "connected";
+  const color =
+    status === "connected" ? "bg-state-ok" : status === "disconnected" ? "bg-state-danger" : "bg-state-warn";
+  const tauriReady = hasTauriRuntime();
+
   return (
-    <div
-      role="tablist"
-      aria-label={t("nav.areaLabel")}
-      className="relative flex h-9 shrink-0 items-center justify-center gap-1 border-b border-ink-muted/30 bg-surface-raised px-3"
-    >
-      {AREA_TABS.map((tab) => (
-        <button
-          key={tab.area}
-          type="button"
-          role="tab"
-          aria-selected={activeArea === tab.area}
-          onClick={() => setActiveArea(tab.area)}
-          className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs focus-visible:ring-2 focus-visible:ring-ink-accent ${
-            activeArea === tab.area ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
-          }`}
+    <header className="shrink-0 select-none border-b border-ink-muted/30 bg-surface-raised">
+      {/* "deep" = every non-clickable descendant drags (tabs / window buttons
+      stay clickable). A bare attr would mean "this element only". */}
+      <div data-tauri-drag-region="deep" className="relative flex h-9 items-center pl-2 pr-0">
+        {/* Brand + app icon (part of the drag region). */}
+        <div className="flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className="flex size-5 items-center justify-center rounded border border-ink-muted/50 bg-surface-overlay text-[10px] font-bold text-ink-accent"
+          >
+            N
+          </span>
+          <span className="text-xs font-semibold">{t("shell.appTitle")}</span>
+        </div>
+        {/* Area tabs centered on the title row. */}
+        <div
+          role="tablist"
+          aria-label={t("nav.areaLabel")}
+          className="absolute inset-x-0 flex justify-center gap-1"
         >
-          {tab.icon}
-          {t(tab.labelKey)}
-        </button>
-      ))}
-      {right !== undefined && (
-        <div className="absolute inset-y-0 right-2 flex items-center gap-1">{right}</div>
-      )}
-    </div>
+          {AREA_TABS.map((tab) => (
+            <button
+              key={tab.area}
+              type="button"
+              role="tab"
+              aria-selected={activeArea === tab.area}
+              onClick={() => setActiveArea(tab.area)}
+              className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs focus-visible:ring-2 focus-visible:ring-ink-accent ${
+                activeArea === tab.area ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
+              }`}
+            >
+              {tab.icon}
+              {t(tab.labelKey)}
+            </button>
+          ))}
+        </div>
+        {/* Window controls right (Tauri only); drag filler keeps ml-auto
+        spacing when controls are hidden (browser/tests). */}
+        {tauriReady ? (
+          <WindowControls />
+        ) : (
+          <span className="ml-auto h-full w-8" aria-hidden="true" />
+        )}
+      </div>
+      {/* Row 2: IPC connection health, right-aligned (用户 ASCII). */}
+      <div className="flex justify-end px-3 pb-1">
+        <span className="flex items-center gap-2 text-xs text-ink-muted" role="status">
+          <span aria-hidden="true" className={`inline-block size-2 rounded-full ${color}`} />
+          {t(`shell.${status}`)}
+        </span>
+      </div>
+    </header>
   );
 }

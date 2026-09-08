@@ -77,7 +77,7 @@ export function SensitiveToolsEditor(): ReactNode {
           type="button"
           disabled={saveMut.isPending}
           onClick={() => saveMut.mutate()}
-          className="rounded bg-ink-accent px-3 py-1 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+          className="pixel-fill-accent px-3 py-1 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
         >
           {t("common.save")}
         </button>

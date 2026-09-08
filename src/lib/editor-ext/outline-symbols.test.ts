@@ -63,6 +63,96 @@ describe("outline-symbols — regex extraction per language", () => {
     ]);
   });
 
+  it("extracts java classes, methods, constructors — and skips control flow", () => {
+    const src = [
+      "package com.example;",
+      "",
+      "/** Domain entity. */",
+      "public class Greeter {",
+      "    /**",
+      "     * Greets a person by name.",
+      "     */",
+      "    public String greet(String name) {",
+      "        if (name == null) {",
+      "            return \"hi\";",
+      "        }",
+      "        return \"hello \" + name;",
+      "    }",
+      "",
+      "    public Greeter() {",
+      "    }",
+      "",
+      "    @Override",
+      "    public synchronized List<String> findAll(User u) throws Exception {",
+      "        for (int i = 0; i < 10; i++) {",
+      "            while (ready) {",
+      "                switch (mode) {",
+      "                    default: break;",
+      "                }",
+      "            }",
+      "        }",
+      "        return new Foo() {",
+      "            public String toString() { return \"x\"; }",
+      "        };",
+      "    }",
+      "}",
+      "public interface Repo {",
+      "}",
+      "public enum Mode { A, B }",
+      "public record Point(int x, int y) {",
+      "}",
+    ].join("\n");
+    const syms = extractSymbols("java", src);
+    expect(syms.map((s) => `${s.kind}:${s.name}`)).toEqual([
+      "class:Greeter",
+      "method:greet",
+      "method:Greeter",
+      "method:findAll",
+      "method:toString",
+      "interface:Repo",
+      "enum:Mode",
+      "class:Point",
+    ]);
+  });
+
+  it("extracts go funcs and type decls", () => {
+    const src = [
+      "func Serve() {",
+      "}",
+      "func (s *Server) Start(ctx context.Context) error {",
+      "    return nil",
+      "}",
+      "type Config struct {",
+      "}",
+      "type Store interface {",
+      "}",
+    ].join("\n");
+    const syms = extractSymbols("go", src);
+    expect(syms.map((s) => `${s.kind}:${s.name}`)).toEqual([
+      "function:Serve",
+      "function:Start",
+      "struct:Config",
+      "interface:Store",
+    ]);
+  });
+
+  it("extracts c function definitions but not calls or prototypes", () => {
+    const src = [
+      "int main(void) {",
+      "    return helper(1);",
+      "}",
+      "static char *read_file(const char *path) {",
+      "    if (path == NULL) {",
+      "        return NULL;",
+      "    }",
+      "    return NULL;",
+      "}",
+      "int helper(int n);",
+    ].join("\n");
+    const syms = extractSymbols("c", src);
+    expect(syms.map((s) => `${s.kind}:${s.name}`)).toEqual(["function:main", "function:read_file"]);
+  });
+
   it("extracts markdown headings with level detail", () => {
     const src = "# Title\n\ntext\n\n## Section A\n### Sub 1";
     const syms = extractSymbols("markdown", src);

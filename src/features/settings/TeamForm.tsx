@@ -157,7 +157,7 @@ export function TeamForm(): ReactNode {
       <button
         type="submit"
         disabled={saveMut.isPending}
-        className="mt-2 rounded bg-ink-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+        className="mt-2 pixel-fill-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
       >
         {saveMut.isPending ? t("settings.teams.saving") : t("settings.teams.save")}
       </button>

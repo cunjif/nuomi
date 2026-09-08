@@ -1,43 +1,24 @@
 /**
- * Builtin Markdown preview: WYSIWYG split view (Monaco left, rendered HTML
- * right) for .md files. Rendering uses `marked` (tiny, no React dep) plus a
- * small DOM-based sanitizer — workspace files can come from agents, so
- * scripts/handlers/JS URLs are stripped before injecting HTML.
+ * Builtin Markdown extension: two surfaces for .md files —
+ * - WYSIWYG editor (Typora-style single pane, registered via
+ *   registerWysiwygEditor; wins over Monaco when active);
+ * - WYSIWYG-free split preview (Monaco left, rendered HTML right) for source
+ *   mode. Rendering uses `marked` (tiny, no React dep) plus a small
+ *   DOM-based sanitizer — workspace files can come from agents, so
+ *   scripts/handlers/JS URLs are stripped before injecting HTML.
  */
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { marked } from "marked";
 import type { EditorExtContext, EditorPreviewComponent } from "../types";
+import { sanitizeMarkdownHtml } from "./sanitize";
+import { WysiwygMarkdownEditor } from "./wysiwyg-markdown";
 
 export const EXT_ID = "builtin.preview-markdown";
 
 const MD_RE = /\.md$/i;
 
 marked.setOptions({ gfm: true, breaks: true });
-
-/**
- * Minimal allowlist-style sanitizer (no external dep): drops executable
- * elements/attributes from marked's HTML output. Good enough for a desktop
- * preview; a stricter DOMPurify-based pipeline can arrive as a third-party
- * editor extension later.
- */
-export function sanitizeMarkdownHtml(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  for (const el of [...doc.body.querySelectorAll("script, style, iframe, object, embed, link, meta")]) {
-    el.remove();
-  }
-  for (const el of [...doc.body.querySelectorAll("*")]) {
-    for (const attr of [...el.attributes]) {
-      const name = attr.name.toLowerCase();
-      if (name.startsWith("on")) {
-        el.removeAttribute(attr.name);
-      } else if ((name === "href" || name === "src") && /^\s*javascript:/i.test(attr.value)) {
-        el.removeAttribute(attr.name);
-      }
-    }
-  }
-  return doc.body.innerHTML;
-}
 
 const MarkdownPreview: EditorPreviewComponent = ({ content }: { path: string; content: string }): ReactNode => {
   const html = useMemo(() => {
@@ -63,6 +44,11 @@ export const previewMarkdownExtension = {
       matcher: (path) => MD_RE.test(path),
       component: MarkdownPreview,
     });
+    ctx.registerWysiwygEditor({
+      matcher: (path) => MD_RE.test(path),
+      component: WysiwygMarkdownEditor,
+    });
     ctx.reportCapability("preview.markdown");
+    ctx.reportCapability("wysiwyg.markdown");
   },
 } as const;

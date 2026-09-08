@@ -204,7 +204,7 @@ export function ChatInput({ disabled, pending, commandContext, onSubmit }: ChatI
       <button
         type="submit"
         disabled={disabled || pending || value.trim().length === 0}
-        className="rounded bg-ink-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+        className="pixel-fill-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
       >
         {pending ? t("chat.running") : t("chat.send")}
       </button>

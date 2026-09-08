@@ -47,7 +47,11 @@
     "navSettings": "Settings",
     "connected": "Connected",
     "disconnected": "Disconnected",
-    "checking": "Connecting…"
+    "checking": "Connecting…",
+    "appTitle": "nuomi · 糯米",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "close": "Close"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -409,20 +413,13 @@
     "saveHint": "Ctrl+S to save",
     "openFileHint": "Open a file from the tree to start editing",
     "outline": "Outline",
+    "viewWysiwyg": "WYSIWYG",
+    "viewSource": "Source",
     "extensions": "Extensions",
     "extPanelTitle": "Editor extensions",
     "extPanelHint": "Disabled extensions do not load; the toggle is stored locally.",
     "extEnabled": "On",
     "extDisabled": "Off",
-    "indexButton": "Index this codebase",
-    "indexStarted": "Codebase indexing started",
-    "indexUnavailable": "No index command in the backend yet: configure codebase-memory-mcp via MCP and let the Agent run index_repository",
-    "annotations": "Annotations",
-    "annotationPanelTitle": "Code annotations",
-    "annotationLine": "Line",
-    "annotationText": "Annotation",
-    "annotationAdd": "Add annotation",
-    "annotationEmpty": "No annotations yet. Enter a line and text here, or press Alt+F1 in the editor to open this panel.",
     "previewBinaryUnsupported": "This file type needs binary read support; the current IPC is text-only",
     "ext": {
       "outlineSymbols": "Symbol outline (regex)",
@@ -434,18 +431,9 @@
       "codebaseIndex": "Codebase index"
     },
     "hover": {
-      "definedAt": "defined at line {{line}}",
-      "annotation": "Annotation",
-      "kind_function": "function",
-      "kind_class": "class",
-      "kind_struct": "struct",
-      "kind_enum": "enum",
-      "kind_trait": "trait",
-      "kind_impl": "impl",
-      "kind_interface": "interface",
-      "kind_type": "type",
-      "kind_method": "method",
-      "kind_heading": "heading"
+      "declaredIn": "Declared in **{{container}}** · `{{location}}`",
+      "declaredInPath": "Declared in `{{location}}`",
+      "refs": "{{count}} references"
     },
     "office": {
       "kind": "Type",
@@ -460,6 +448,11 @@
       "copyPath": "Copy path",
       "copied": "Path copied",
       "copyFailed": "Copy failed"
+    },
+    "nav": {
+      "gotoDefinition": "Go to Definition",
+      "findReferences": "Find References",
+      "noReferences": "No references found"
     }
   },
   "tab": {
@@ -475,6 +468,20 @@
     "save": "Save (Ctrl+S)",
     "loadingFile": "Loading file…"
   },
+  "palette": {
+    "filePlaceholder": "Find a workspace file…",
+    "commandPlaceholder": "Type a command…",
+    "noResults": "No matching results",
+    "hint": "↑↓ navigate · Enter select · Esc close",
+    "cmd": {
+      "gotoFile": "Go to File…",
+      "commandPalette": "Command Palette",
+      "toggleTheme": "Toggle Color Theme",
+      "gotoChat": "Go to Chat",
+      "gotoEditor": "Go to Editor",
+      "closeFile": "Close Current File"
+    }
+  },
   "workspace": {
     "setupTitle": "Set up your workspace",
     "setupDescription": "Choose the sandbox root directory for the editor and agents. Files outside this directory are not accessible.",
@@ -482,7 +489,13 @@
     "confirm": "Confirm",
     "switchWorkspace": "Switch workspace",
     "current": "Workspace",
-    "setupFailed": "Failed to set workspace"
+    "setupFailed": "Failed to set workspace",
+    "currentDir": "Current directory",
+    "newDir": "New directory",
+    "choose": "Browse…",
+    "save": "Save",
+    "switched": "Workspace switched",
+    "pickUnavailable": "Directory picker unavailable — type the path manually"
   },
   "capability": {
     "reasoning": "Reasoning",

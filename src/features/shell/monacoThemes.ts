@@ -24,9 +24,10 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
   inherit: true,
   rules: [],
   colors: {
-    "editor.background": "#262b33",
-    "editorGutter.background": "#262b33",
-    "editor.lineHighlightBackground": "#2f3540",
+    // Hand-drawn blackboard palette: raised panel is #0d0d0d (global.css).
+    "editor.background": "#0d0d0d",
+    "editorGutter.background": "#0d0d0d",
+    "editor.lineHighlightBackground": "#161616",
   },
 };
 

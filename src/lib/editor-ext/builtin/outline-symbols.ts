@@ -18,6 +18,14 @@ interface Rule {
 }
 
 /** Per-language regex rules. Groups: 1 = name. Languages are Monaco ids. */
+const C_LIKE_RULES: Rule[] = [
+  // Conservative function-definition shape only: a return type word before
+  // the name rules out `if (` / `while (` / `for (`; `;` excludes prototypes.
+  // `::` allowed for out-of-class C++ method definitions.
+  { kind: "function", re: /^\s*(?:[\w*&]+\s+)+\*?&?([\w:]+)\s*\([^;{}]*\)\s*\{/ },
+  { kind: "struct", re: /^\s*(?:typedef\s+)?struct\s+(\w+)/ },
+];
+
 const RULES: Record<string, Rule[]> = {
   javascript: [
     { kind: "function", re: /^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)/ },
@@ -44,6 +52,29 @@ const RULES: Record<string, Rule[]> = {
     { kind: "function", re: /^\s*(?:async\s+)?def\s+(\w+)/ },
     { kind: "class", re: /^\s*class\s+(\w+)/ },
   ],
+  // Java: modifiers before the keyword, method/constructor declarations with
+  // a body. The method rule requires a return type (so `if (` / `while (`/
+  // bare statements never match); the constructor rule requires a
+  // capitalized name (Java convention) for the same reason.
+  java: [
+    { kind: "class", re: /^\s*(?:(?:public|protected|private|abstract|final|sealed|non-sealed|static)\s+)*class\s+(\w+)/ },
+    { kind: "interface", re: /^\s*(?:(?:public|protected|private|sealed|non-sealed)\s+)*interface\s+(\w+)/ },
+    { kind: "enum", re: /^\s*(?:(?:public|protected|private)\s+)*enum\s+(\w+)/ },
+    { kind: "class", re: /^\s*(?:(?:public|protected|private|final|sealed|non-sealed)\s+)*record\s+(\w+)/ },
+    {
+      kind: "method",
+      re: /^\s*(?!return\b|new\b|throw\b|else\b)(?:(?:public|protected|private|static|final|abstract|synchronized|native|default|strictfp)\s+)*(?:<[^<>]+>\s*)?[\w$][\w$<>\[\],\s.?]*?\s+(\w+)\s*\([^;{}]*\)\s*(?:throws\s+[\w$,.\s]+)?\s*\{/,
+    },
+    { kind: "method", re: /^\s*(?:(?:public|protected|private)\s+)?[A-Z]\w*\s*\([^;{}]*\)\s*(?:throws\s+[\w$,.\s]+)?\s*\{/ },
+  ],
+  go: [
+    { kind: "function", re: /^\s*func\s+(?:\([^)]*\)\s*)?(\w+)/ },
+    { kind: "struct", re: /^\s*type\s+(\w+)\s+struct\s*\{/ },
+    { kind: "interface", re: /^\s*type\s+(\w+)\s+interface\s*\{/ },
+  ],
+  // C/C++ share the conservative C-like rules.
+  c: C_LIKE_RULES,
+  cpp: C_LIKE_RULES,
   markdown: [{ kind: "heading", re: /^(#{1,6})\s+(.*)$/ }],
 };
 

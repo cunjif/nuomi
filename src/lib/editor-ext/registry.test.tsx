@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as Monaco from "monaco-editor";
 import { stubLocalStorage } from "../../test/stubStorage";
 import {
+  attachMonacoProviders,
   getRegisteredEditorExtensions,
   isEditorExtensionEnabled,
   findPreviewForPath,
@@ -95,6 +97,31 @@ describe("editor extension registry — enable/disable filtering", () => {
     expect(getOutlineProviders()).toHaveLength(0);
     expect(getToolbarActions()).toHaveLength(0);
     expect(getOverlays()).toHaveLength(0);
+  });
+});
+
+describe("editor extension registry — editor-ready binding", () => {
+  it("binds every mounted editor instance, not only the first", () => {
+    const bound: Monaco.editor.IStandaloneCodeEditor[] = [];
+    registerEditorExtension({
+      id: "builtin.ready",
+      titleI18nKey: "editor.ext.ready",
+      contribute: (ctx) =>
+        ctx.registerEditorReady((_monaco, editor) => {
+          bound.push(editor);
+        }),
+    });
+    ensureEditorExtensionsActivated();
+
+    // EditorArea remounts MonacoTab per open file (key={path}), so each
+    // switch creates a NEW instance that needs its own F12/Alt+F1 bindings.
+    const editorA = {} as Monaco.editor.IStandaloneCodeEditor;
+    const editorB = {} as Monaco.editor.IStandaloneCodeEditor;
+    const monaco = {} as typeof Monaco;
+    attachMonacoProviders(monaco, editorA);
+    attachMonacoProviders(monaco, editorB);
+    attachMonacoProviders(monaco, editorA); // same instance again: no rebind
+    expect(bound).toEqual([editorA, editorB]);
   });
 });
 

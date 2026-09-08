@@ -30,4 +30,8 @@ session*.md
 
 # Local docs (not for repo)
 principle.md
+code-review-*.md
 .codebuddy/
+
+# Third-party agent scratch dirs
+.codeartsdoer/

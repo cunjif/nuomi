@@ -58,6 +58,46 @@ export interface EditorPreviewProps {
 
 export type EditorPreviewComponent = (props: EditorPreviewProps) => ReactNode;
 
+/**
+ * A WYSIWYG editor stands in for Monaco entirely (Typora-style single pane).
+ * Unlike previews it owns edits: every DOM change must be round-tripped back
+ * to markdown through `onChange` so the tab's draft/save pipeline (Ctrl+S)
+ * keeps working unchanged.
+ */
+export interface EditorWysiwygProps {
+  path: string;
+  /** Current file text (draft-aware: parent re-renders with our own onChange output). */
+  content: string;
+  onChange: (next: string) => void;
+  /**
+   * Imperative API handed to the host once the editor surface is ready;
+   * called with `null` when the surface unmounts so the host never keeps a
+   * dangling handle to a dead component.
+   */
+  onReady?: (api: EditorWysiwygApi | null) => void;
+  /**
+   * Extra controls rendered on the format toolbar row's right end (view
+   * toggles / outline / save live on the same line as B/I/H1… per 用户布局).
+   */
+  toolbarExtra?: ReactNode;
+  /**
+   * When provided, the format toolbar renders into this container (portal)
+   * instead of inline — lets the host span the toolbar across side panels.
+   * `undefined` = inline toolbar (default); `null` = host row not mounted yet.
+   */
+  toolbarContainer?: HTMLElement | null;
+}
+
+export type EditorWysiwygComponent = (props: EditorWysiwygProps) => ReactNode;
+
+/**
+ * Host-side control surface (outline navigation et al). `line` is 0-based,
+ * mirroring the LSP positions used by SymbolProvider.
+ */
+export interface EditorWysiwygApi {
+  revealLine(line: number): void;
+}
+
 /** Toolbar button contributed into the editor top bar; self-contained component. */
 export interface EditorToolbarAction {
   id: string;
@@ -83,6 +123,7 @@ export interface EditorExtContext {
   readonly editor: Monaco.editor.IStandaloneCodeEditor | null;
   registerHoverProvider(language: string, provider: Monaco.languages.HoverProvider): void;
   registerDefinitionProvider(language: string, provider: Monaco.languages.DefinitionProvider): void;
+  registerReferenceProvider(language: string, provider: Monaco.languages.ReferenceProvider): void;
   registerDocumentFormattingEditProvider(
     language: string,
     provider: Monaco.languages.DocumentFormattingEditProvider,
@@ -97,6 +138,11 @@ export interface EditorExtContext {
     mode: EditorPreviewMode;
     matcher: (path: string) => boolean;
     component: EditorPreviewComponent;
+  }): void;
+  /** Register a Typora-style WYSIWYG editor for matching files (wins over previews/Monaco). */
+  registerWysiwygEditor(options: {
+    matcher: (path: string) => boolean;
+    component: EditorWysiwygComponent;
   }): void;
   registerOutline(provider: SymbolProvider): void;
   registerToolbarAction(action: EditorToolbarAction): void;

@@ -205,9 +205,9 @@ const PAIRS: ContrastPair[] = [
   { name: "border: ink-muted vs surface-raised", threshold: UI_MIN, rationale: "AsyncBoundary.tsx:38 retry · Spinner.tsx:9 · MonacoTab.tsx:68", fg: (t) => t.inkMuted, bg: (t) => t.surfaceRaised },
   { name: "border: ok vs surface-overlay", threshold: UI_MIN, rationale: "Toaster.tsx:20 success edge", fg: (t) => t.ok, bg: (t) => t.surfaceOverlay },
   { name: "border: danger vs surface-overlay", threshold: UI_MIN, rationale: "Toaster.tsx:19 error edge", fg: (t) => t.danger, bg: (t) => t.surfaceOverlay },
-  { name: "dot: ok vs surface-raised", threshold: UI_MIN, rationale: "TopBar.tsx:12 connected", fg: (t) => t.ok, bg: (t) => t.surfaceRaised },
-  { name: "dot: warn vs surface-raised", threshold: UI_MIN, rationale: "TopBar.tsx:12 connecting", fg: (t) => t.warn, bg: (t) => t.surfaceRaised },
-  { name: "dot: danger vs surface-raised", threshold: UI_MIN, rationale: "TopBar.tsx:12 disconnected", fg: (t) => t.danger, bg: (t) => t.surfaceRaised },
+  { name: "dot: ok vs surface-raised", threshold: UI_MIN, rationale: "AreaNav.tsx status dot connected", fg: (t) => t.ok, bg: (t) => t.surfaceRaised },
+  { name: "dot: warn vs surface-raised", threshold: UI_MIN, rationale: "AreaNav.tsx status dot connecting", fg: (t) => t.warn, bg: (t) => t.surfaceRaised },
+  { name: "dot: danger vs surface-raised", threshold: UI_MIN, rationale: "AreaNav.tsx status dot disconnected", fg: (t) => t.danger, bg: (t) => t.surfaceRaised },
   { name: "ring/border: accent vs surface-raised", threshold: UI_MIN, rationale: "BoardColumn.tsx:44 drag-over · focus rings", fg: (t) => t.accent, bg: (t) => t.surfaceRaised },
   { name: "ring: accent vs surface", threshold: UI_MIN, rationale: "focus-visible rings on page bg", fg: (t) => t.accent, bg: (t) => t.surface },
 ];

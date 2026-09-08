@@ -15,7 +15,8 @@
         "title": "nuomi · 糯米",
         "width": 1400,
         "height": 900,
-        "theme": "Dark"
+        "theme": "Dark",
+        "decorations": false
       }
     ],
     "security": {

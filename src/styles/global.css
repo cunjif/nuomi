@@ -17,16 +17,20 @@
   --nuomi-ok: #166a2a;
   --nuomi-warn: #8a6508;
   --nuomi-danger: #c92a2a;
+  /* Minimal rail (screenshot ref): near-invisible track, gray rounded thumb. */
+  --nuomi-scrollbar: #c3c7cf;
+  --nuomi-scrollbar-hover: #9aa1ad;
 }
 
 .dark {
-  /* Near-black app frame (#0b0c0e) → panel (#141518) → field (#1b1d21),
-     hairline family around #26282c via ink-muted alpha borders. */
-  --nuomi-surface: #0b0c0e;
-  --nuomi-surface-raised: #141518;
-  --nuomi-surface-overlay: #1b1d21;
-  --nuomi-scrim: rgba(0, 0, 0, 0.55);
-  --nuomi-ink: #e6e6e6;
+  /* Hand-drawn blackboard theme: pure-black app frame (#000) → raised panel
+     (#0d0d0d) → field (#141414); strokes and text stay near-white, fills get
+     pixel-block texture via the .pixel-fill-* utilities below. */
+  --nuomi-surface: #000000;
+  --nuomi-surface-raised: #0d0d0d;
+  --nuomi-surface-overlay: #141414;
+  --nuomi-scrim: rgba(0, 0, 0, 0.6);
+  --nuomi-ink: #e8e8e8;
   --nuomi-ink-muted: #9aa3ad;
   /* Brightest blue that keeps every pairing in themeContrast.test.ts ≥ 4.5:1
      (the design's raw #3b82f6 fails the accent/20 badge pair at 3.86:1). */
@@ -34,8 +38,200 @@
   --nuomi-ok: #9ece6a;
   --nuomi-warn: #e0af68;
   --nuomi-danger: #f7768e;
+  --nuomi-scrollbar: #3a3d42;
+  --nuomi-scrollbar-hover: #565b63;
 }
 
-body {
-  @apply bg-surface text-ink font-sans antialiased;
+/* ── Scrollbars (参考截图: minimal dark rail) ────────────────────────────
+   Firefox: thin + color pair. Chromium: 8px rail, transparent track, rounded
+   thumb with padding-box clip so it floats inside the 8px gutter. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nuomi-scrollbar) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--nuomi-scrollbar);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--nuomi-scrollbar-hover);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+  }
+
+  /* Hand-drawn line-art base (线稿手绘风): interactive elements get the
+     classic wobbly "sketch" border radius. Tailwind rounded* utilities on
+     individual elements still win (they render later in the cascade). */
+  button,
+  [role="button"] {
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  }
+  input,
+  textarea,
+  select {
+    border-radius: 155px 12px 155px 12px / 12px 155px 12px 155px;
+  }
+
+  ::selection {
+    background: var(--nuomi-accent);
+    color: #000000;
+  }
+}
+
+/* Landing highlight for workspace-index jumps (F12 / references panel). */
+.jump-flash {
+  background: color-mix(in srgb, var(--nuomi-accent) 28%, transparent);
+}
+
+@layer components {
+  /* Explicit sketch-styled button (used by editor toolbar / tab header). */
+  .sketch-btn {
+    border: 1px solid var(--nuomi-ink-muted);
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+    background: transparent;
+  }
+  .sketch-btn:hover {
+    background: var(--nuomi-surface-overlay);
+    color: var(--nuomi-ink);
+  }
+
+  /* Dashed-sketch outline for floating panels/cards. */
+  .sketch-panel {
+    border: 1px solid var(--nuomi-ink-muted);
+    border-radius: 12px 255px 15px 225px / 225px 15px 255px 12px;
+  }
+
+  /* Pixel-block fills (像素填充色): hard-edged 4px checker over the solid
+     token color. The speckle lightens rather than darkens, so WCAG pairs
+     guarded on the solid color keep or improve their ratios. */
+  .pixel-fill-accent {
+    background-color: var(--nuomi-accent);
+    background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.18) 0% 25%, transparent 0% 50%);
+    background-size: 4px 4px;
+  }
+  .pixel-fill-ok {
+    background-color: var(--nuomi-ok);
+    background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.18) 0% 25%, transparent 0% 50%);
+    background-size: 4px 4px;
+  }
+  .pixel-fill-warn {
+    background-color: var(--nuomi-warn);
+    background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.18) 0% 25%, transparent 0% 50%);
+    background-size: 4px 4px;
+  }
+  .pixel-fill-danger {
+    background-color: var(--nuomi-danger);
+    background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.18) 0% 25%, transparent 0% 50%);
+    background-size: 4px 4px;
+  }
+}
+
+/* ── WYSIWYG markdown (Typora-style pane) ──────────────────────────────── */
+.md-wysiwyg {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.md-wysiwyg .mdw-block {
+  min-height: 1.4em;
+}
+.md-wysiwyg .mdw-spacer {
+  height: 0.6em;
+}
+/* Focused block = raw markdown source (Typora reveals the source line). */
+.md-wysiwyg .mdw-source {
+  display: block;
+  width: 100%;
+  min-height: 1.4em;
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--nuomi-accent);
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  padding: 0 0 0 0.5em;
+  margin: 0.25em 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+.md-wysiwyg :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0.8em 0 0.4em;
+}
+.md-wysiwyg h1 {
+  font-size: 1.5em;
+  border-bottom: 1px dashed var(--nuomi-ink-muted);
+}
+.md-wysiwyg h2 {
+  font-size: 1.25em;
+}
+.md-wysiwyg h3 {
+  font-size: 1.1em;
+}
+.md-wysiwyg p {
+  margin: 0.25em 0;
+}
+.md-wysiwyg a {
+  color: var(--nuomi-accent);
+  text-decoration: underline;
+}
+.md-wysiwyg blockquote {
+  border-left: 3px solid var(--nuomi-ink-muted);
+  padding-left: 0.75em;
+  color: var(--nuomi-ink-muted);
+  margin: 0.5em 0;
+}
+.md-wysiwyg :is(ul, ol) {
+  padding-left: 1.5em;
+  margin: 0.25em 0;
+}
+.md-wysiwyg code {
+  font-family: var(--font-mono, monospace);
+  background: var(--nuomi-surface-overlay);
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+  font-size: 0.9em;
+}
+.md-wysiwyg pre {
+  background: var(--nuomi-surface-overlay);
+  border: 1px dashed var(--nuomi-ink-muted);
+  border-radius: 4px;
+  padding: 0.75em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.md-wysiwyg pre code {
+  background: transparent;
+  padding: 0;
+}
+.md-wysiwyg table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.md-wysiwyg :is(td, th) {
+  border: 1px dashed var(--nuomi-ink-muted);
+  padding: 0.25em 0.5em;
+}
+.md-wysiwyg hr {
+  border: none;
+  border-top: 1px dashed var(--nuomi-ink-muted);
+  margin: 1em 0;
 }

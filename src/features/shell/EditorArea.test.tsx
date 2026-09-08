@@ -1,12 +1,11 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { tdSeedFiles } from "../../lib/ipc/test-double";
 import { tdState } from "../../lib/ipc/test-double-state";
 import { renderWithProviders } from "../../test/helpers";
 import { Toaster } from "../../components/ui/Toaster";
 import { useUiStore } from "../../lib/store/uiStore";
-import { AreaNav } from "./AreaNav";
-import { EditorArea, EditorToolbar } from "./EditorArea";
+import { EditorArea } from "./EditorArea";
 
 // Monaco never loads in jsdom — stand in with a plain textarea
 // (same mock isolation as MonacoTab.test).
@@ -39,6 +38,10 @@ describe("EditorArea — editor dirty flow", () => {
 
     const tab = await screen.findByRole("tab", { name: "README.md" });
     expect(tab).toHaveAttribute("title", "README.md");
+    // .md files open in Typora-style WYSIWYG by default (需求: markdown 所见即所得).
+    await screen.findByTestId("wysiwyg-editor");
+    // Switch to source mode for the classic Monaco dirty/save flow.
+    fireEvent.click(screen.getByRole("button", { name: "源码" }));
     // Status bar: recognized language id + save hint (zh-CN default resources).
     expect(screen.getByText("markdown")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+S 保存")).toBeInTheDocument();
@@ -86,19 +89,18 @@ describe("EditorArea — editor dirty flow", () => {
   });
 });
 
-describe("EditorArea — workspace title bar", () => {
-  /** The toolbar lives in the AreaNav strip's right slot (VSCode-style). */
+describe("EditorArea — workspace sidebar toolbar", () => {
+  /** The workspace toolbar lives at the top of the explorer sidebar (用户截图). */
   function renderWithToolbar(): void {
     renderWithProviders(
       <>
-        <AreaNav right={<EditorToolbar />} />
         <EditorArea />
         <Toaster />
       </>,
     );
   }
 
-  it("shows the current workspace root in the nav strip toolbar", async () => {
+  it("shows the current workspace root in the sidebar toolbar", async () => {
     tdState.workspaceRoot = "D:\\projects\\demo";
     renderWithToolbar();
 
@@ -106,22 +108,54 @@ describe("EditorArea — workspace title bar", () => {
     expect(label).toHaveAttribute("title", "D:\\projects\\demo");
   });
 
-  it("opens the switch dialog and persists the new root on confirm", async () => {
+  it("opens the switch dialog and persists the new root on save", async () => {
+    tdState.workspaceRoot = "C:\\workspace";
     renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
-    const input = await screen.findByLabelText("工作区目录");
+    // Modal per 用户 SVG: readonly current dir row + new dir input + 选择.
+    const dialog = await screen.findByRole("dialog", { name: "切换工作区" });
+    // The current root appears twice (readonly row + toolbar label) — the
+    // readonly one lives inside the dialog.
+    expect(within(dialog).getByText("C:\\workspace")).toBeInTheDocument();
+    const input = screen.getByLabelText("新的工作目录");
     expect(input).toHaveValue("C:\\workspace");
 
     fireEvent.change(input, { target: { value: "E:\\next" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(tdState.workspaceRoot).toBe("E:\\next");
       expect(tdState.workspaceConfigured).toBe(true);
     });
     // The dialog closes after a successful switch; the toolbar shows the new root.
-    await waitFor(() => expect(screen.queryByLabelText("工作区目录")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "切换工作区" })).toBeNull());
     expect(await screen.findByText("E:\\next")).toBeInTheDocument();
+  });
+
+  it("取消 closes the dialog without persisting", async () => {
+    tdState.workspaceRoot = "C:\\workspace";
+    renderWithToolbar();
+
+    fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
+    fireEvent.change(await screen.findByLabelText("新的工作目录"), { target: { value: "E:\\nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "切换工作区" })).toBeNull());
+    expect(tdState.workspaceRoot).toBe("C:\\workspace");
+  });
+
+  it("选择 fills the input from the OS folder picker", async () => {
+    const pickOpen = vi.fn().mockResolvedValue("D:\\picked\\dir");
+    vi.doMock("@tauri-apps/plugin-dialog", () => ({ open: pickOpen }));
+    tdState.workspaceRoot = "C:\\workspace";
+    renderWithToolbar();
+
+    fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择" }));
+
+    await waitFor(() => expect(screen.getByLabelText("新的工作目录")).toHaveValue("D:\\picked\\dir"));
+    expect(pickOpen).toHaveBeenCalledWith({ directory: true, multiple: false, title: "选择" });
+    vi.doUnmock("@tauri-apps/plugin-dialog");
   });
 });

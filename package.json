@@ -21,6 +21,7 @@
     "@tanstack/react-query": "^5.51.0",
     "@tanstack/react-virtual": "^3.14.10",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
     "i18next": "^26.4.0",
     "marked": "^18.0.11",
     "monaco-editor": "^0.56.0",

@@ -35,7 +35,9 @@ export function LeftRail(): ReactNode {
             }}
             aria-current={view === item.view ? "page" : undefined}
             className={`rounded px-3 py-1.5 text-left text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
-              view === item.view ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
+              view === item.view
+                ? "bg-surface-overlay text-ink-accent ring-1 ring-inset ring-ink-muted/40"
+                : "text-ink-muted hover:bg-surface-overlay"
             }`}
           >
             {t(item.labelKey)}

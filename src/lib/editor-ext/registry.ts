@@ -15,6 +15,7 @@ import type {
   EditorPreviewComponent,
   EditorPreviewMode,
   EditorToolbarAction,
+  EditorWysiwygComponent,
   SymbolProvider,
 } from "./types";
 import { registerCommand } from "../commands/registry";
@@ -25,7 +26,7 @@ const ENABLED_PREFIX = "nuomi.editorExt.enabled.";
 interface QueuedMonacoProvider {
   extId: string;
   language: string;
-  kind: "hover" | "definition" | "formatting";
+  kind: "hover" | "definition" | "reference" | "formatting";
   // Monaco provider interfaces are structural; kept loose here because the
   // queue is flushed against the real Monaco namespace only.
   provider: unknown;
@@ -34,7 +35,13 @@ interface QueuedMonacoProvider {
 interface QueuedEditorReady {
   extId: string;
   cb: (monaco: typeof Monaco, editor: Monaco.editor.IStandaloneCodeEditor) => void;
-  done: boolean;
+  /**
+   * Editors this callback was already bound to. Per-instance (not global)
+   * because EditorArea remounts MonacoTab per open file (key={activeFile}),
+   * i.e. every file switch creates a NEW editor that needs its own
+   * addCommand/addAction bindings. Weak so disposed instances can be GC'd.
+   */
+  bound: WeakSet<Monaco.editor.IStandaloneCodeEditor>;
 }
 
 interface Contributed<T> {
@@ -50,6 +57,10 @@ const previews: Contributed<{
   component: EditorPreviewComponent;
 }>[] = [];
 const outlines: Contributed<SymbolProvider>[] = [];
+const wysiwygEditors: Contributed<{
+  matcher: (path: string) => boolean;
+  component: EditorWysiwygComponent;
+}>[] = [];
 const toolbarActions: Contributed<EditorToolbarAction>[] = [];
 const overlays: Contributed<EditorOverlay>[] = [];
 const capabilities = new Set<string>();
@@ -150,14 +161,20 @@ function makeContext(extId: string, monaco: typeof Monaco | null, editor: Monaco
     registerDefinitionProvider(language, provider) {
       monacoQueue.push({ extId, language, kind: "definition", provider });
     },
+    registerReferenceProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "reference", provider });
+    },
     registerDocumentFormattingEditProvider(language, provider) {
       monacoQueue.push({ extId, language, kind: "formatting", provider });
     },
     registerEditorReady(cb) {
-      readyQueue.push({ extId, cb, done: false });
+      readyQueue.push({ extId, cb, bound: new WeakSet() });
     },
     registerPreview(options) {
       previews.push({ extId, item: options });
+    },
+    registerWysiwygEditor(options) {
+      wysiwygEditors.push({ extId, item: options });
     },
     registerOutline(provider) {
       outlines.push({ extId, item: provider });
@@ -195,14 +212,18 @@ export function attachMonacoProviders(
     if (!isExtEnabled(q.extId)) continue;
     if (q.kind === "hover") monaco.languages.registerHoverProvider(q.language, q.provider as Monaco.languages.HoverProvider);
     else if (q.kind === "definition") monaco.languages.registerDefinitionProvider(q.language, q.provider as Monaco.languages.DefinitionProvider);
+    else if (q.kind === "reference") monaco.languages.registerReferenceProvider(q.language, q.provider as Monaco.languages.ReferenceProvider);
     else monaco.languages.registerDocumentFormattingEditProvider(q.language, q.provider as Monaco.languages.DocumentFormattingEditProvider);
   }
   flushedCount = monacoQueue.length;
+  // Editor-ready callbacks bind per instance (F12/Alt+F1 live on the
+  // editor, not on the monaco namespace), so re-run them for every new
+  // editor while skipping instances already bound.
   for (const r of readyQueue) {
-    if (r.done || !isExtEnabled(r.extId)) continue;
-    if (editor !== null) {
+    if (!isExtEnabled(r.extId)) continue;
+    if (editor !== null && !r.bound.has(editor)) {
+      r.bound.add(editor);
       r.cb(monaco, editor);
-      r.done = true;
     }
   }
 }
@@ -227,6 +248,20 @@ export function getOutlineProviders(): SymbolProvider[] {
   return outlines.filter((o) => isExtEnabled(o.extId)).map((o) => o.item);
 }
 
+export interface ActiveWysiwygEditor {
+  extId: string;
+  component: EditorWysiwygComponent;
+}
+
+/** First enabled WYSIWYG editor whose matcher accepts the path, if any. */
+export function findWysiwygEditorForPath(path: string): ActiveWysiwygEditor | null {
+  for (const w of wysiwygEditors) {
+    if (!isExtEnabled(w.extId) || !w.item.matcher(path)) continue;
+    return { extId: w.extId, component: w.item.component };
+  }
+  return null;
+}
+
 export function getToolbarActions(): Array<{ extId: string; action: EditorToolbarAction }> {
   return toolbarActions.filter((t) => isExtEnabled(t.extId)).map((t) => ({ extId: t.extId, action: t.item }));
 }
@@ -245,6 +280,7 @@ export function resetEditorExtensionsForTest(): void {
   activated.clear();
   previews.length = 0;
   outlines.length = 0;
+  wysiwygEditors.length = 0;
   toolbarActions.length = 0;
   overlays.length = 0;
   capabilities.clear();

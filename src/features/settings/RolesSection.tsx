@@ -176,7 +176,7 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
             type="button"
             disabled={generateMut.isPending || description.trim().length === 0}
             onClick={() => generateMut.mutate(description.trim())}
-            className="rounded bg-ink-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+            className="pixel-fill-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
           >
             {generateMut.isPending ? t("settings.roles.directorGenerating") : t("settings.roles.directorGenerate")}
           </button>

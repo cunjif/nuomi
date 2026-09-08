@@ -260,6 +260,8 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // OS folder picker for the 切换工作区 dialog (WorkspaceDialog.tsx).
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

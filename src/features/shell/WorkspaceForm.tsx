@@ -71,7 +71,7 @@ export function WorkspaceForm({
         <button
           type="submit"
           disabled={switchMut.isPending}
-          className="rounded bg-ink-accent px-3 py-1 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+          className="pixel-fill-accent px-3 py-1 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
         >
           {t("workspace.confirm")}
         </button>

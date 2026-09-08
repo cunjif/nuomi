@@ -63,7 +63,7 @@ export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
       <button
         type="submit"
         disabled={createMut.isPending}
-        className="rounded bg-ink-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+        className="pixel-fill-accent px-3 py-1.5 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
       >
         {t("common.create")}
       </button>
