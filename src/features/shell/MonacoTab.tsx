@@ -18,7 +18,7 @@ import { useTheme } from "../../lib/store/useTheme";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
 import { consumePendingJump, registerActiveEditor, updateFileIndex } from "../../lib/editor-ext/indexer/workspace-index";
-import { NUOMI_MONACO_DARK, NUOMI_MONACO_LIGHT, defineNuomiThemes } from "./monacoThemes";
+import { defineNuomiThemes, monacoThemeFor } from "./monacoThemes";
 import { languageForPath } from "./editorLanguage";
 
 // Self-hosted Monaco: bundle the editor locally instead of the default CDN
@@ -301,7 +301,7 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
             saveRef.current();
           });
         }}
-        theme={theme === "dark" ? NUOMI_MONACO_DARK : NUOMI_MONACO_LIGHT}
+        theme={monacoThemeFor(theme)}
         value={value}
         path={path}
         onChange={(v) => {

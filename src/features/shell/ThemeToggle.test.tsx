@@ -7,29 +7,32 @@ import { ThemeToggle } from "./ThemeToggle";
 
 beforeEach(() => {
   stubLocalStorage();
+  document.documentElement.classList.remove("dark");
+  delete document.documentElement.dataset.theme;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ThemeToggle — left-rail dark/light switch", () => {
-  it("clicking flips the root class, persists, and swaps the icon aria-label", () => {
-    useUiStore.setState({ theme: "dark" });
+describe("ThemeToggle — four-theme selector", () => {
+  it("selecting a theme sets data-theme, toggles .dark for the dark family, and persists", () => {
+    useUiStore.setState({ theme: "chalkboard-dark" });
     document.documentElement.classList.add("dark");
+    document.documentElement.dataset.theme = "chalkboard-dark";
     renderWithProviders(<ThemeToggle />);
 
-    // Dark → next stop is light (aria announces the target theme).
-    const button = screen.getByRole("button", { name: "亮色" });
-    expect(button).toHaveAttribute("title", "切换主题");
-    fireEvent.click(button);
+    // Open the selector via its <summary>, then pick Paper Light (light family).
+    fireEvent.click(document.querySelector("summary") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: /纸质亮/ }));
+    expect(document.documentElement.dataset.theme).toBe("paper-light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("paper-light");
 
-    // Icon aria swapped with the theme.
-    fireEvent.click(screen.getByRole("button", { name: "暗色" }));
+    // Panel stays open; pick High Contrast (dark family keeps .dark).
+    fireEvent.click(screen.getByRole("button", { name: /高对比/ }));
+    expect(document.documentElement.dataset.theme).toBe("high-contrast");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
-    screen.getByRole("button", { name: "亮色" });
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("high-contrast");
   });
 });

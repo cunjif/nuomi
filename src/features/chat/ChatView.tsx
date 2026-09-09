@@ -20,13 +20,13 @@ export function ChatView(): ReactNode {
   const sessionId = useUiStore((s) => s.selectedSessionId);
   const navigate = useUiStore((s) => s.setView);
   const selectSession = useUiStore((s) => s.selectSession);
-  const { toggleTheme } = useTheme();
+  const { cycleTheme } = useTheme();
   const stream = useSessionStream(sessionId);
   const [finalText, setFinalText] = useState<string | null>(null);
 
   const commandContext = useMemo<CommandContext>(
-    () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme, toast, t }),
-    [sessionId, qc, navigate, selectSession, toggleTheme, t],
+    () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
+    [sessionId, qc, navigate, selectSession, cycleTheme, t],
   );
 
   const submitMut = useMutation({

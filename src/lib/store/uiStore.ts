@@ -13,26 +13,53 @@ export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler
  */
 export type ActiveArea = "chat" | "editor";
 
-export type Theme = "dark" | "light";
+/**
+ * The four hand-drawn themes (review §9.2). `paper-light`/`grid-notebook` are
+ * the light family (no `.dark` class); `chalkboard-dark`/`high-contrast` are
+ * the dark family and toggle `.dark` on <html> so legacy `.dark`-scoped rules
+ * still apply.
+ */
+export type Theme = "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
+
+/** Stable display/cycle order for the 4 themes (review §9.2). */
+export const THEME_ORDER: ReadonlyArray<Theme> = [
+  "paper-light",
+  "grid-notebook",
+  "chalkboard-dark",
+  "high-contrast",
+];
+
+/** Next theme when cycling (used by the legacy toggle affordance + command palette). */
+export function nextTheme(theme: Theme): Theme {
+  const idx = THEME_ORDER.indexOf(theme);
+  return THEME_ORDER[(idx + 1) % THEME_ORDER.length] ?? theme;
+}
 
 /** localStorage key shared with the FOUC-prevention inline script in index.html. */
 export const THEME_STORAGE_KEY = "nuomi.theme";
 
 /**
  * Resolution order: stored preference → prefers-color-scheme → dark fallback.
- * Must stay in lockstep with the inline script in index.html (FOUC defense).
+ * Legacy `"light"`/`"dark"` values stored before the 4-theme migration are
+ * mapped forward (review §9.6). Must stay in lockstep with the inline script
+ * in index.html (FOUC defense).
  */
 export function resolveInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
+    if (stored === "paper-light" || stored === "grid-notebook" || stored === "chalkboard-dark" || stored === "high-contrast") {
+      return stored;
+    }
+    // Backward-compatible migration of the old two-value scheme.
+    if (stored === "light") return "paper-light";
+    if (stored === "dark") return "chalkboard-dark";
   } catch {
     // Storage unavailable (private mode / jsdom restrictions) — fall through.
   }
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: light)").matches) {
-    return "light";
+    return "paper-light";
   }
-  return "dark";
+  return "chalkboard-dark";
 }
 
 interface UiState {

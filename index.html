@@ -7,15 +7,29 @@
     <script>
       // FOUC defense: resolve the theme before first paint. Priority must stay
       // in lockstep with resolveInitialTheme() in src/lib/store/uiStore.ts:
-      // localStorage("nuomi.theme") -> prefers-color-scheme -> dark.
+      // localStorage("nuomi.theme") -> prefers-color-scheme -> chalkboard-dark.
       (function () {
         try {
           var stored = localStorage.getItem("nuomi.theme");
           var prefersLight =
             typeof window.matchMedia === "function" &&
             window.matchMedia("(prefers-color-scheme: light)").matches;
-          var theme = stored === "light" || stored === "dark" ? stored : prefersLight ? "light" : "dark";
-          if (theme === "dark") document.documentElement.classList.add("dark");
+          var theme =
+            stored === "paper-light" || stored === "grid-notebook" ||
+            stored === "chalkboard-dark" || stored === "high-contrast"
+              ? stored
+              : stored === "light"
+                ? "paper-light"
+                : stored === "dark"
+                  ? "chalkboard-dark"
+                  : prefersLight
+                    ? "paper-light"
+                    : "chalkboard-dark";
+          var root = document.documentElement;
+          root.dataset.theme = theme;
+          if (theme === "chalkboard-dark" || theme === "high-contrast") {
+            root.classList.add("dark");
+          }
         } catch (e) {
           // Storage unavailable — keep UA default (light vars on :root).
         }

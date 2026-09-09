@@ -17,47 +17,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("resolveInitialTheme — localStorage → prefers-color-scheme → dark", () => {
-  it("uses a valid stored value", () => {
+describe("resolveInitialTheme — localStorage → prefers-color-scheme → chalkboard-dark", () => {
+  it("migrates a legacy stored value forward", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "light");
     stubMatchMedia(false);
-    expect(resolveInitialTheme()).toBe("light");
+    expect(resolveInitialTheme()).toBe("paper-light");
   });
 
   it("stored value wins over prefers-color-scheme", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "dark");
     stubMatchMedia(true);
-    expect(resolveInitialTheme()).toBe("dark");
+    expect(resolveInitialTheme()).toBe("chalkboard-dark");
   });
 
   it("falls back to prefers light when nothing is stored", () => {
     stubMatchMedia(true);
-    expect(resolveInitialTheme()).toBe("light");
+    expect(resolveInitialTheme()).toBe("paper-light");
   });
 
   it("falls back to dark when OS does not prefer light", () => {
     stubMatchMedia(false);
-    expect(resolveInitialTheme()).toBe("dark");
+    expect(resolveInitialTheme()).toBe("chalkboard-dark");
   });
 
   it("ignores invalid stored values and keeps the chain intact", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "sepia");
     stubMatchMedia(true);
-    expect(resolveInitialTheme()).toBe("light");
+    expect(resolveInitialTheme()).toBe("paper-light");
   });
 });
 
 describe("uiStore theme state", () => {
   it("setTheme flips state without side effects (persistence/DOM live in useTheme)", () => {
-    useUiStore.setState({ theme: "dark" });
-    useUiStore.getState().setTheme("light");
-    expect(useUiStore.getState().theme).toBe("light");
+    useUiStore.setState({ theme: "chalkboard-dark" });
+    useUiStore.getState().setTheme("paper-light");
+    expect(useUiStore.getState().theme).toBe("paper-light");
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
   });
 
   it("initial store theme follows resolveInitialTheme", () => {
     useUiStore.setState({ theme: resolveInitialTheme() });
-    expect(useUiStore.getState().theme).toBe("dark");
+    expect(useUiStore.getState().theme).toBe("chalkboard-dark");
   });
 });
 

@@ -56,8 +56,10 @@
   },
   "theme": {
     "toggle": "切换主题",
-    "dark": "暗色",
-    "light": "亮色"
+    "paperLight": "纸质亮",
+    "gridNotebook": "方格本",
+    "chalkboardDark": "黑板暗",
+    "highContrast": "高对比"
   },
   "sessions": {
     "heading": "会话",
@@ -95,7 +97,7 @@
       "description": "列出全部命令"
     },
     "theme": {
-      "description": "切换暗色/亮色主题"
+      "description": "更改界面主题"
     },
     "unknown": "未知命令 /{{name}}，相近命令：{{suggestions}}",
     "unknownNone": "未知命令 /{{name}}",

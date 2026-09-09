@@ -31,7 +31,7 @@ beforeEach(() => {
   // leak a registration into the next one.
   registerActiveEditor(null, () => {});
   usePaletteStore.setState({ mode: null });
-  useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", theme: "dark", dirtyPaths: {} });
+  useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", theme: "chalkboard-dark", dirtyPaths: {} });
   localStorage.removeItem(THEME_STORAGE_KEY);
 });
 
@@ -86,8 +86,8 @@ describe("QuickOpen — Ctrl+Shift+P command palette", () => {
 
     const toggle = screen.getByRole("option", { name: "切换深浅色主题" });
     fireEvent.click(toggle);
-    expect(useUiStore.getState().theme).toBe("light");
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    expect(useUiStore.getState().theme).toBe("high-contrast");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("high-contrast");
     expect(screen.queryByTestId("quick-open")).toBeNull();
   });
 

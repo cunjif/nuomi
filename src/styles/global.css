@@ -49,6 +49,57 @@
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='c'><feTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/></filter><rect width='100%' height='100%' filter='url(%23c)'/></svg>");
 }
 
+/* ── 4-theme hand-drawn system (review §9) ───────────────────────────────
+   :root = paper-light (default, light), .dark = chalkboard-dark (dark family).
+   The two extra themes below extend the matrix; :root/.dark are kept so the
+   legacy class toggle and the contrast guard's baseline blocks stay valid.
+   Every palette is constrained by src/styles/themeContrast.test.ts (WCAG). */
+
+/* Grid notebook — engineer-flavoured light: blue ruled grid over a near-white
+   surface. Token colors mirror the light palette, so contrast pairs are unchanged. */
+[data-theme="grid-notebook"] {
+  --nuomi-surface: #f8f9fa;
+  --nuomi-surface-raised: #ffffff;
+  --nuomi-surface-overlay: #eceef2;
+  --nuomi-scrim: rgba(15, 23, 42, 0.35);
+  --nuomi-ink: #1f2430;
+  --nuomi-ink-muted: #5b6572;
+  --nuomi-accent: #3150cb;
+  --nuomi-ok: #166a2a;
+  --nuomi-warn: #8a6508;
+  --nuomi-danger: #c92a2a;
+  --nuomi-scrollbar: #c3c7cf;
+  --nuomi-scrollbar-hover: #9aa1ad;
+  /* 24px blue ruling (review §4.2.2). */
+  --nuomi-grid-texture:
+    linear-gradient(rgba(49, 80, 203, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49, 80, 203, 0.08) 1px, transparent 1px);
+}
+[data-theme="grid-notebook"] body {
+  background-image: var(--nuomi-grid-texture);
+  background-size: 24px 24px;
+}
+
+/* High-contrast — accessibility / bright environments: pure black + white with
+   a yellow accent. No texture (decorative noise hurts legibility here). */
+[data-theme="high-contrast"] {
+  --nuomi-surface: #000000;
+  --nuomi-surface-raised: #0a0a0a;
+  --nuomi-surface-overlay: #141414;
+  --nuomi-scrim: rgba(0, 0, 0, 0.75);
+  --nuomi-ink: #ffffff;
+  --nuomi-ink-muted: #cccccc;
+  --nuomi-accent: #ffff00;
+  --nuomi-ok: #00ff00;
+  --nuomi-warn: #ffff00;
+  --nuomi-danger: #ff0000;
+  --nuomi-scrollbar: #565b63;
+  --nuomi-scrollbar-hover: #9aa1ad;
+}
+[data-theme="high-contrast"] body {
+  background-image: none;
+}
+
 /* ── Scrollbars (参考截图: minimal dark rail) ────────────────────────────
    Firefox: thin + color pair. Chromium: 8px rail, transparent track, rounded
    thumb with padding-box clip so it floats inside the 8px gutter. */

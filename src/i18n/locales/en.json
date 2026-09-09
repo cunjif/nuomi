@@ -55,9 +55,11 @@
     "windowControlFailed": "Window control failed"
   },
   "theme": {
-    "toggle": "Toggle theme",
-    "dark": "Dark",
-    "light": "Light"
+    "toggle": "Change theme",
+    "paperLight": "Paper Light",
+    "gridNotebook": "Grid Notebook",
+    "chalkboardDark": "Chalkboard Dark",
+    "highContrast": "High Contrast"
   },
   "sessions": {
     "heading": "Sessions",
@@ -95,7 +97,7 @@
       "description": "List all available commands"
     },
     "theme": {
-      "description": "Toggle dark/light theme"
+      "description": "Change the UI theme"
     },
     "unknown": "Unknown command /{{name}}. Closest: {{suggestions}}",
     "unknownNone": "Unknown command /{{name}}",

@@ -62,9 +62,12 @@ type ResolvedTheme = {
 };
 
 function extractBlock(css: string, selector: string): string {
-  const match = new RegExp(`${selector.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css);
+  // Escape every regex-special char so attribute selectors like
+  // [data-theme="grid-notebook"] parse correctly.
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css);
   if (match === null || match[1] === undefined) {
-    throw new Error(`global.css: expected a \`${selector}\` block defining the ${selector === ":root" ? "light" : "dark"} palette`);
+    throw new Error(`global.css: expected a \`${selector}\` block defining a palette`);
   }
   return match[1];
 }
@@ -212,16 +215,23 @@ const PAIRS: ContrastPair[] = [
   { name: "ring: accent vs surface", threshold: UI_MIN, rationale: "focus-visible rings on page bg", fg: (t) => t.accent, bg: (t) => t.surface },
 ];
 
-const THEMES: ReadonlyArray<{ name: "light" | "dark"; selector: string }> = [
-  { name: "light", selector: ":root" },
-  { name: "dark", selector: ".dark" },
+const THEMES: ReadonlyArray<{
+  name: "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
+  selector: string;
+}> = [
+  { name: "paper-light", selector: ":root" },
+  { name: "grid-notebook", selector: '[data-theme="grid-notebook"]' },
+  { name: "chalkboard-dark", selector: ".dark" },
+  { name: "high-contrast", selector: '[data-theme="high-contrast"]' },
 ];
 
 describe("theme contrast guard (WCAG via parsed global.css palettes)", () => {
   const cssPromise = readGlobalCss();
   const resolvedByTheme = new Map<string, ResolvedTheme>();
 
-  async function paletteOf(name: "light" | "dark"): Promise<ResolvedTheme> {
+  async function paletteOf(
+    name: "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast",
+  ): Promise<ResolvedTheme> {
     const cached = resolvedByTheme.get(name);
     if (cached !== undefined) return cached;
     const theme = THEMES.find((t) => t.name === name);

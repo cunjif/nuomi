@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { listWorkspaceFiles, triggerActiveEditorFind } from "../../lib/editor-ext/indexer/workspace-index";
 import { registerPaletteCommand, usePaletteCommands, type PaletteCommand } from "../../lib/commands/palette";
 import { usePaletteStore } from "../../lib/store/paletteStore";
-import { THEME_STORAGE_KEY, useUiStore } from "../../lib/store/uiStore";
+import { THEME_STORAGE_KEY, nextTheme, useUiStore } from "../../lib/store/uiStore";
 
 const MAX_RESULTS = 50;
 
@@ -26,11 +26,14 @@ type PaletteItem = { kind: "file"; path: string } | { kind: "command"; cmd: Pale
 
 // ── builtin commands ─────────────────────────────────────────────────────
 
-/** useTheme-free theme toggle (runs outside React render/hook context). */
+/** useTheme-free theme cycle (runs outside React render/hook context). */
 function toggleTheme(): void {
-  const next = useUiStore.getState().theme === "dark" ? "light" : "dark";
+  const current = useUiStore.getState().theme;
+  const next = nextTheme(current);
   useUiStore.getState().setTheme(next);
-  document.documentElement.classList.toggle("dark", next === "dark");
+  const root = document.documentElement;
+  root.dataset.theme = next;
+  root.classList.toggle("dark", next === "chalkboard-dark" || next === "high-contrast");
   try {
     localStorage.setItem(THEME_STORAGE_KEY, next);
   } catch {

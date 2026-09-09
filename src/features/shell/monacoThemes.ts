@@ -1,25 +1,32 @@
 /**
  * Monaco themes matched to the nuomi design tokens so the editor canvas
- * blends with its container (surface-raised in both palettes). Type-only
- * import keeps the real monaco kernel out of tests and cold start.
+ * blends with its container. Four definitions mirror the hand-drawn theme
+ * matrix (review §9); `monacoThemeFor` picks the right one by app theme.
+ * Type-only import keeps the real monaco kernel out of tests and cold start.
  */
 import type * as monaco from "monaco-editor";
+import type { Theme } from "../../lib/store/uiStore";
 
-export const NUOMI_MONACO_LIGHT = "nuomi-light";
-export const NUOMI_MONACO_DARK = "nuomi-dark";
+export const NUOMI_MONACO_PAPER = "nuomi-paper-light";
+export const NUOMI_MONACO_GRID = "nuomi-grid-notebook";
+export const NUOMI_MONACO_CHALK = "nuomi-chalkboard-dark";
+export const NUOMI_MONACO_HIGH = "nuomi-high-contrast";
 
-const lightTheme: monaco.editor.IStandaloneThemeData = {
+const paperLight: monaco.editor.IStandaloneThemeData = {
   base: "vs",
   inherit: true,
   rules: [],
-  colors: {
-    "editor.background": "#ffffff",
-    "editorGutter.background": "#ffffff",
-    "editor.lineHighlightBackground": "#e8eaef",
-  },
+  colors: { "editor.background": "#ffffff", "editorGutter.background": "#ffffff", "editor.lineHighlightBackground": "#eceef2" },
 };
 
-const darkTheme: monaco.editor.IStandaloneThemeData = {
+const gridNotebook: monaco.editor.IStandaloneThemeData = {
+  base: "vs",
+  inherit: true,
+  rules: [],
+  colors: { "editor.background": "#ffffff", "editorGutter.background": "#ffffff", "editor.lineHighlightBackground": "#eceef2" },
+};
+
+const chalkboardDark: monaco.editor.IStandaloneThemeData = {
   base: "vs-dark",
   inherit: true,
   rules: [],
@@ -31,8 +38,35 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
   },
 };
 
-/** Register both palettes once before the editor mounts. */
-export function defineNuomiThemes(monaco: typeof import("monaco-editor")): void {
-  monaco.editor.defineTheme(NUOMI_MONACO_LIGHT, lightTheme);
-  monaco.editor.defineTheme(NUOMI_MONACO_DARK, darkTheme);
+const highContrast: monaco.editor.IStandaloneThemeData = {
+  base: "vs-dark",
+  inherit: true,
+  rules: [],
+  colors: {
+    "editor.background": "#0a0a0a",
+    "editorGutter.background": "#0a0a0a",
+    "editor.lineHighlightBackground": "#1a1a1a",
+  },
+};
+
+/** Register all four palettes once before the editor mounts. */
+export function defineNuomiThemes(m: typeof import("monaco-editor")): void {
+  m.editor.defineTheme(NUOMI_MONACO_PAPER, paperLight);
+  m.editor.defineTheme(NUOMI_MONACO_GRID, gridNotebook);
+  m.editor.defineTheme(NUOMI_MONACO_CHALK, chalkboardDark);
+  m.editor.defineTheme(NUOMI_MONACO_HIGH, highContrast);
+}
+
+/** Map the active app theme to its Monaco theme name. */
+export function monacoThemeFor(theme: Theme): string {
+  switch (theme) {
+    case "paper-light":
+      return NUOMI_MONACO_PAPER;
+    case "grid-notebook":
+      return NUOMI_MONACO_GRID;
+    case "chalkboard-dark":
+      return NUOMI_MONACO_CHALK;
+    case "high-contrast":
+      return NUOMI_MONACO_HIGH;
+  }
 }
