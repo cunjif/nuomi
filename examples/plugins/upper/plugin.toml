@@ -1,0 +1,34 @@
+# Example nuomi plugin: "upper" — tool + hook + event subscription.
+# Copy this directory into .nuomi/plugins/ (or point NUOMI_PLUGIN_PATH here).
+# Docs: docs/plugins/plugin-format.md
+
+id = "upper"
+name = "Uppercase Tools"
+version = "0.1.0"
+api_version = 1
+description = "Demo plugin: upper tool, post_tool_call logger hook, session event tap"
+authors = ["nuomi examples"]
+license = "MIT"
+
+# Python 3 variant. Switch to the Node variant with: entry = ["node", "plugin.cjs"]
+# (.cjs so it loads as CommonJS even inside workspaces whose package.json sets "type": "module")
+entry = ["python3", "plugin.py"]
+
+[permissions]
+fs.read = []
+fs.write = []
+network = []
+shell = false
+
+[[tools]]
+name = "upper"
+description = "Uppercase the given text"
+input = { type = "object", properties = { text = { type = "string" } }, required = ["text"] }
+timeout_ms = 10000
+
+[[hooks]]
+point = "post_tool_call"
+order = 100
+
+[[events]]
+topic = "session.*"
