@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useDroppable } from "@dnd-kit/core";
 import type { TaskDto } from "../../lib/ipc/bindings.gen";
 import { TaskCard } from "./TaskCard";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { statusLabelKey, type TaskStatus } from "./taskStatuses";
 
 interface BoardColumnProps {
@@ -71,7 +72,7 @@ export function BoardColumn({
                   aria-label={t("common.cancel")}
                   className="rounded px-1 py-0.5 text-[10px] text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
                 >
-                  ×
+                  <Icon name="close" size={12} />
                 </button>
               </>
             ) : (

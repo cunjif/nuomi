@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDraggable } from "@dnd-kit/core";
 import type { TaskDto } from "../../lib/ipc/bindings.gen";
 import { Spinner } from "../../components/ui/Spinner";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { ipc } from "../../lib/ipc/client";
 import { statusLabelKey, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
 
@@ -69,7 +70,7 @@ export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, on
         onPointerDown={(e) => e.stopPropagation()}
         className="absolute right-1 top-1 rounded px-1.5 text-ink-muted hover:bg-surface focus-visible:ring-2 focus-visible:ring-ink-accent"
       >
-        ⋯
+        <Icon name="more" size={16} />
       </button>
       {menuOpen && (
         <ul className="absolute right-0 top-6 z-10 w-40 rounded border border-ink-muted/40 bg-surface-raised py-1 shadow-lg">

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { ipc } from "../../lib/ipc/client";
 import { useUiStore } from "../../lib/store/uiStore";
 
@@ -33,7 +34,7 @@ export function RunDrawer(): ReactNode {
             aria-label={t("common.close")}
             className="rounded px-2 text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
           >
-            ×
+            <Icon name="close" size={16} />
           </button>
         </div>
         <AsyncBoundary

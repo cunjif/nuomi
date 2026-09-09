@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { useUiStore } from "../../lib/store/uiStore";
 
 /** Open-file tab strip: dirty files show a dot and close via a two-step confirm. */
@@ -73,7 +74,7 @@ export function FileTabs(): ReactNode {
                 aria-label={`${t("common.close")} ${path}`}
                 className="px-1 py-1 text-ink-muted hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
               >
-                ×
+                <Icon name="close" size={12} />
               </button>
             )}
           </div>

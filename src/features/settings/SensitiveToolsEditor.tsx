@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { describeError } from "../../i18n";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 
@@ -42,7 +43,7 @@ export function SensitiveToolsEditor(): ReactNode {
               onClick={() => setPatterns((p) => p.filter((x) => x !== pattern))}
               className="text-ink-muted hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
             >
-              ×
+              <Icon name="close" size={14} />
             </button>
           </li>
         ))}

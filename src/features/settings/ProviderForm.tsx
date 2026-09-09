@@ -11,6 +11,7 @@ import type {
   TestProviderConnectionInput,
 } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { IpcCommandError, ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 
@@ -509,7 +510,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                 onClick={() => removeModel(model.id)}
                 className="text-ink-muted hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
               >
-                ×
+                <Icon name="close" size={14} />
               </button>
             </li>
           ))}

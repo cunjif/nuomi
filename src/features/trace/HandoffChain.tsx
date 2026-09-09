@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Icon } from "../../components/ui/Icon/Icon";
 import type { HandoffChain as ChainModel } from "./traceModel";
 
 interface HandoffChainViewProps {
@@ -15,8 +16,9 @@ export function HandoffChainView({ chain }: HandoffChainViewProps): ReactNode {
         {t("trace.handoffHeading")}
       </h3>
       {chain.cycle && (
-        <p role="alert" className="mb-1 rounded border border-state-danger px-2 py-1 text-xs text-state-danger">
-          ⚠ {t("trace.cycleWarning")}
+        <p role="alert" className="mb-1 flex items-center gap-1.5 rounded border border-state-danger px-2 py-1 text-xs text-state-danger">
+          <Icon name="warning" size={14} />
+          {t("trace.cycleWarning")}
         </p>
       )}
       {chain.edges.length === 0 ? (
@@ -27,7 +29,7 @@ export function HandoffChainView({ chain }: HandoffChainViewProps): ReactNode {
             <li key={`${edge.from}-${edge.to}-${i}`} className="flex items-center gap-1">
               <span className="text-ink-accent">{edge.from}</span>
               <span aria-hidden="true" className="text-ink-muted">
-                →
+                <Icon name="arrow-right" size={14} />
               </span>
               <span>{edge.to}</span>
             </li>

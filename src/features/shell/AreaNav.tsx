@@ -6,26 +6,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore, type ActiveArea } from "../../lib/store/uiStore";
+import { Icon } from "../../components/ui/Icon/Icon";
 
 const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> = [
-  {
-    area: "chat",
-    labelKey: "nav.chat",
-    icon: (
-      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor">
-        <path d="M2 2h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6l-3.6 3a.5.5 0 0 1-.8-.4V3a1 1 0 0 1 .4-.9Z" />
-      </svg>
-    ),
-  },
-  {
-    area: "editor",
-    labelKey: "nav.editor",
-    icon: (
-      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor">
-        <path d="M3 1h7l4 4v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1Zm7 1v3h3Z" />
-      </svg>
-    ),
-  },
+  { area: "chat", labelKey: "nav.chat", icon: <Icon name="chat" size={12} /> },
+  { area: "editor", labelKey: "nav.editor", icon: <Icon name="file" size={12} /> },
 ];
 
 /** True inside a real Tauri webview; jsdom / plain browser hides controls. */
@@ -52,10 +37,10 @@ function WindowControls(): ReactNode {
   return (
     <div className="ml-auto flex items-stretch self-stretch">
       <button type="button" aria-label={t("shell.minimize")} onClick={() => run(() => win.minimize())} className={base}>
-        —
+        <Icon name="minimize" size={14} />
       </button>
       <button type="button" aria-label={t("shell.maximize")} onClick={() => run(() => win.toggleMaximize())} className={base}>
-        ▢
+        <Icon name="maximize" size={14} />
       </button>
       <button
         type="button"
@@ -63,7 +48,7 @@ function WindowControls(): ReactNode {
         onClick={() => run(() => win.close())}
         className={`${base} hover:bg-state-danger hover:text-surface`}
       >
-        ✕
+        <Icon name="close" size={14} />
       </button>
     </div>
   );
