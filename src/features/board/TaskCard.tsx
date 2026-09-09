@@ -42,7 +42,7 @@ export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, on
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`relative rounded border border-ink-muted/40 bg-surface-overlay p-2 ${
+      className={`sketch-card sketch-shadow-sm relative bg-surface-overlay p-2 ${
         isDragging ? "opacity-50" : ""
       }`}
     >
@@ -73,7 +73,7 @@ export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, on
         <Icon name="more" size={16} />
       </button>
       {menuOpen && (
-        <ul className="absolute right-0 top-6 z-10 w-40 rounded border border-ink-muted/40 bg-surface-raised py-1 shadow-lg">
+        <ul className="sketch-card sketch-shadow-md absolute right-0 top-6 z-10 w-40 bg-surface-raised py-1">
           {TASK_STATUSES.filter((s) => s !== task.status).map((status) => (
             <li key={status}>
               <button

@@ -7,6 +7,7 @@ import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { TeamMemberPicker } from "./TeamMemberPicker";
+import { fieldClass as field } from "../../components/ui/Field";
 
 const TOPOLOGY_LABEL_KEYS: Record<TeamTopologyDto, string> = {
   pipeline: "settings.teams.topologyPipeline",
@@ -63,8 +64,6 @@ export function TeamForm(): ReactNode {
     },
   });
 
-  const field =
-    "rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent";
 
   const toggleMember = (roleId: string): void => {
     setMemberIds((prev) =>
@@ -108,7 +107,7 @@ export function TeamForm(): ReactNode {
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.teams.name")}
-          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} w-40`} />
+          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} bg-surface text-sm w-40`} />
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.teams.topology")}
@@ -120,7 +119,7 @@ export function TeamForm(): ReactNode {
                 setTopology(value);
               }
             }}
-            className={field}
+            className={`${field} bg-surface text-sm`}
           >
             {(Object.keys(TOPOLOGY_LABEL_KEYS) as TeamTopologyDto[]).map((top) => (
               <option key={top} value={top}>
@@ -141,7 +140,7 @@ export function TeamForm(): ReactNode {
                 const parsed = Number.parseInt(e.target.value, 10);
                 setMaxRounds(Number.isNaN(parsed) ? 1 : parsed);
               }}
-              className={`${field} w-20`}
+              className={`${field} bg-surface text-sm w-20`}
             />
           </label>
         )}

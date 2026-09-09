@@ -41,8 +41,8 @@ export function BoardColumn({
     <section
       ref={setNodeRef}
       aria-label={t(statusLabelKey(status))}
-      className={`flex min-h-0 flex-col rounded border ${
-        isOver ? "border-ink-accent bg-surface-raised" : "border-ink-muted/30 bg-surface"
+      className={`sketch-card flex min-h-0 flex-col ${
+        isOver ? "border-ink-accent bg-surface-raised" : "bg-surface"
       }`}
     >
       <div className="flex shrink-0 items-center justify-between gap-1 px-2 py-1.5">

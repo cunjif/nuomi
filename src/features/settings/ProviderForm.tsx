@@ -12,6 +12,7 @@ import type {
 } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
 import { Icon } from "../../components/ui/Icon/Icon";
+import { fieldClass as field } from "../../components/ui/Field";
 import { IpcCommandError, ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 
@@ -70,8 +71,6 @@ function numberOrNull(raw: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-const field =
-  "w-full rounded border border-ink-muted/40 bg-surface-overlay px-2 py-1 text-xs text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent";
 
 interface ProviderFormProps {
   /** `null` creates a new provider; otherwise edits the row in place. */
@@ -316,7 +315,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
             <select
               value={typeKey}
               onChange={(e) => handleTypeChange(e.target.value as TypeKey)}
-              className={field}
+              className={`${field} w-full bg-surface-overlay text-xs`}
             >
               {TYPE_OPTIONS.map((option) => (
                 <option key={option.key} value={option.key}>
@@ -331,7 +330,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              className={field}
+              className={`${field} w-full bg-surface-overlay text-xs`}
             />
           </label>
           <label className="col-span-2 flex flex-col gap-0.5 text-ink-muted">
@@ -342,7 +341,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
               onChange={(e) => setBaseUrl(e.target.value)}
               required
               placeholder="https://api.example.com/v1"
-              className={field}
+              className={`${field} w-full bg-surface-overlay text-xs`}
             />
           </label>
           <label className="col-span-2 flex flex-col gap-0.5 text-ink-muted">
@@ -351,7 +350,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
               value={proxy}
               onChange={(e) => setProxy(e.target.value)}
               placeholder="http://127.0.0.1:7890"
-              className={field}
+              className={`${field} w-full bg-surface-overlay text-xs`}
             />
             <span className="text-[10px]">{t("provider.proxyHint")}</span>
           </label>
@@ -365,7 +364,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                   onChange={(e) => setApiKey(e.target.value)}
                   autoComplete="off"
                   placeholder={provider?.hasKey ? t("provider.hasKeyStored") : undefined}
-                  className={field}
+                  className={`${field} w-full bg-surface-overlay text-xs`}
                 />
                 <button
                   type="button"
@@ -534,7 +533,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           <select
             value={defaultModel}
             onChange={(e) => setDefaultModel(e.target.value)}
-            className={field}
+            className={`${field} w-full bg-surface-overlay text-xs`}
           >
             <option value="">{t("provider.defaultModelNone")}</option>
             {models.map((model) => (
@@ -597,7 +596,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                 min={1}
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(e.target.value)}
-                className={field}
+                className={`${field} w-full bg-surface-overlay text-xs`}
               />
             </label>
             <label className="flex flex-col gap-0.5 text-ink-muted">
@@ -607,7 +606,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                 min={1}
                 value={timeoutSecs}
                 onChange={(e) => setTimeoutSecs(e.target.value)}
-                className={field}
+                className={`${field} w-full bg-surface-overlay text-xs`}
               />
             </label>
             <label className="flex flex-col gap-0.5 text-ink-muted">
@@ -617,7 +616,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                 min={0}
                 value={retry}
                 onChange={(e) => setRetry(e.target.value)}
-                className={field}
+                className={`${field} w-full bg-surface-overlay text-xs`}
               />
             </label>
             <label className="flex flex-col gap-0.5 text-ink-muted">
@@ -627,7 +626,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                 min={1}
                 value={maxConcurrency}
                 onChange={(e) => setMaxConcurrency(e.target.value)}
-                className={field}
+                className={`${field} w-full bg-surface-overlay text-xs`}
               />
             </label>
           </div>

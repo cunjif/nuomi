@@ -6,6 +6,7 @@ import type { IntegrationInput, IntegrationKindDto } from "../../lib/ipc/binding
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { fieldClass as field } from "../../components/ui/Field";
 
 /** Fixed trigger-topic whitelist offered by the form (SPEC bots-telemetry-m1 D8). */
 export const INTEGRATION_EVENT_TOPICS: readonly string[] = [
@@ -50,8 +51,6 @@ export function IntegrationForm(): ReactNode {
     },
   });
 
-  const field =
-    "rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent";
 
   return (
     <form
@@ -75,7 +74,7 @@ export function IntegrationForm(): ReactNode {
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.integrations.name")}
-          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} w-40`} />
+          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} bg-surface text-sm w-40`} />
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.integrations.kind")}
@@ -85,7 +84,7 @@ export function IntegrationForm(): ReactNode {
               const next = e.target.value;
               if (next === "feishu_bot" || next === "qq_webhook" || next === "telemetry") setKind(next);
             }}
-            className={field}
+            className={`${field} bg-surface text-sm`}
           >
             {KINDS.map((k) => (
               <option key={k.value} value={k.value}>
@@ -102,7 +101,7 @@ export function IntegrationForm(): ReactNode {
             required
             placeholder={t("settings.integrations.webhookUrlPlaceholder")}
             spellCheck={false}
-            className={`${field} font-mono`}
+            className={`${field} bg-surface text-sm font-mono`}
           />
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
@@ -112,7 +111,7 @@ export function IntegrationForm(): ReactNode {
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
             autoComplete="new-password"
-            className={`${field} w-48 font-mono`}
+            className={`${field} bg-surface text-sm w-48 font-mono`}
           />
         </label>
         <label className="flex items-center gap-1 pb-1 text-xs text-ink-muted">

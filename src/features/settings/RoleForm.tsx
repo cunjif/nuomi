@@ -6,6 +6,7 @@ import type { CapabilityDto, JsonValue, RoleInput } from "../../lib/ipc/bindings
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { fieldClass as field } from "../../components/ui/Field";
 
 /** Binding mode of the role form: unbound ("默认"), provider or CLI agent profile. */
 export type BindingMode = "none" | "provider" | "cli";
@@ -59,8 +60,6 @@ export function RoleForm(): ReactNode {
     },
   });
 
-  const field =
-    "rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent";
 
   return (
     <form
@@ -95,7 +94,7 @@ export function RoleForm(): ReactNode {
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.roles.name")}
-          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} w-40`} />
+          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} bg-surface text-sm w-40`} />
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.roles.bindingMode")}
@@ -105,7 +104,7 @@ export function RoleForm(): ReactNode {
               const mode = e.target.value;
               if (mode === "provider" || mode === "cli" || mode === "none") setBindingMode(mode);
             }}
-            className={field}
+            className={`${field} bg-surface text-sm`}
           >
             <option value="none">{t("settings.roles.bindingNone")}</option>
             <option value="provider">{t("settings.roles.bindingProvider")}</option>
@@ -119,7 +118,7 @@ export function RoleForm(): ReactNode {
               value={providerId}
               onChange={(e) => setProviderId(e.target.value)}
               required
-              className={`${field} w-44`}
+              className={`${field} bg-surface text-sm w-44`}
             >
               <option value="" disabled>
                 {t("settings.roles.providerTarget")}
@@ -139,7 +138,7 @@ export function RoleForm(): ReactNode {
               value={agentProfileId}
               onChange={(e) => setAgentProfileId(e.target.value)}
               required
-              className={`${field} w-44`}
+              className={`${field} bg-surface text-sm w-44`}
             >
               <option value="" disabled>
                 {t("settings.roles.agentProfileTarget")}
@@ -190,7 +189,7 @@ export function RoleForm(): ReactNode {
           onChange={(e) => setSystemPromptOverride(e.target.value)}
           rows={3}
           spellCheck={false}
-          className={`${field} font-mono`}
+          className={`${field} bg-surface text-sm font-mono`}
         />
       </label>
       <button

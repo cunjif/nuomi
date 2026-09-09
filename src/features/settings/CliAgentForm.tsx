@@ -6,6 +6,7 @@ import type { AgentProfileInput, CliFlavorDto } from "../../lib/ipc/bindings.gen
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { fieldClass as field } from "../../components/ui/Field";
 
 /** One trimmed, non-empty line per argument; blank lines are skipped. */
 export function parseArgs(text: string): string[] {
@@ -70,8 +71,6 @@ export function CliAgentForm(): ReactNode {
     },
   });
 
-  const field =
-    "rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent";
 
   return (
     <form
@@ -97,14 +96,14 @@ export function CliAgentForm(): ReactNode {
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.cliAgents.name")}
-          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} w-40`} />
+          <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} bg-surface text-sm w-40`} />
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.cliAgents.flavor")}
           <select
             value={flavor}
             onChange={(e) => setFlavor(e.target.value as CliFlavorDto)}
-            className={field}
+            className={`${field} bg-surface text-sm`}
           >
             {FLAVORS.map((f) => (
               <option key={f.value} value={f.value}>
@@ -115,7 +114,7 @@ export function CliAgentForm(): ReactNode {
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.cliAgents.command")}
-          <input value={command} onChange={(e) => setCommand(e.target.value)} required className={`${field} w-56 font-mono`} />
+          <input value={command} onChange={(e) => setCommand(e.target.value)} required className={`${field} bg-surface text-sm w-56 font-mono`} />
         </label>
         <label className="flex items-center gap-1 pb-1 text-xs text-ink-muted">
           <input
@@ -132,7 +131,7 @@ export function CliAgentForm(): ReactNode {
             value={workingDir}
             onChange={(e) => setWorkingDir(e.target.value)}
             placeholder="C:\work\project"
-            className={`${field} w-56 font-mono`}
+            className={`${field} bg-surface text-sm w-56 font-mono`}
           />
         </label>
       </div>
@@ -144,7 +143,7 @@ export function CliAgentForm(): ReactNode {
             onChange={(e) => setArgsText(e.target.value)}
             rows={3}
             spellCheck={false}
-            className={`${field} font-mono`}
+            className={`${field} bg-surface text-sm font-mono`}
           />
         </label>
         <label className="flex min-w-48 flex-1 flex-col gap-0.5 text-xs text-ink-muted">
@@ -157,7 +156,7 @@ export function CliAgentForm(): ReactNode {
             }}
             rows={3}
             spellCheck={false}
-            className={`${field} font-mono`}
+            className={`${field} bg-surface text-sm font-mono`}
           />
           {envIgnored > 0 && (
             <span role="alert" className="text-[10px] text-state-warn">
