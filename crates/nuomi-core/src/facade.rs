@@ -12,10 +12,13 @@ use serde_json::json;
 use tokio::sync::Mutex;
 
 use crate::domain::{new_id, now_ms, EventRecord, ProviderProtocol, Session};
-use crate::harness::Context;
+use crate::harness::sideload::{
+    apply_to_report, scan, BootReport, LoadOutcome, SideloadedPlugin, Tolerant,
+};
+use crate::harness::{Context, HarnessError, Kernel};
 use crate::plugins::{
-    DeltaCallback, HookRegistry, LoopConfig, LoopEngine, LoopRunResult, MemoryService,
-    SystemPromptService, ToolRegistry,
+    DeltaCallback, HookRegistry, HooksPlugin, LoopConfig, LoopEngine, LoopRunResult, MemoryPlugin,
+    MemoryService, SystemPromptPlugin, SystemPromptService, ToolRegistry, ToolsPlugin,
 };
 use crate::providers::{
     AnthropicCompatibleClient, ChatMessage, ChatResponse, FakeLlm, LlmProvider, MessageRole,
@@ -55,6 +58,9 @@ pub enum ProviderSource {
 pub struct NuomiConfig {
     pub db_path: PathBuf,
     pub provider: ProviderSource,
+    /// Additional plugin side-load directories (ADR 0009), searched after
+    /// `NUOMI_PLUGIN_PATH` and before the user config dir. Empty = defaults.
+    pub plugin_paths: Vec<PathBuf>,
 }
 
 impl NuomiConfig {
@@ -62,6 +68,7 @@ impl NuomiConfig {
         Self {
             db_path,
             provider: ProviderSource::Endpoint(endpoint),
+            plugin_paths: Vec::new(),
         }
     }
 
@@ -71,7 +78,14 @@ impl NuomiConfig {
         Self {
             db_path,
             provider: ProviderSource::Fake(script),
+            plugin_paths: Vec::new(),
         }
+    }
+
+    /// Sets additional plugin side-load directories (ADR 0009).
+    pub fn with_plugin_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.plugin_paths = paths;
+        self
     }
 }
 
@@ -95,9 +109,16 @@ pub struct NuomiKernel {
     model: String,
     provider: Arc<dyn LlmProvider>,
     ctx: Context,
+    /// The live Kernel holding every registered plugin (built-ins + side-
+    /// loaded). Kept alive for the whole NuomiKernel lifetime: dropping it
+    /// would tear down side-loaded plugin processes. `shutdown()` runs the
+    /// reverse-order dispose (graceful NPP shutdown included).
+    kernel: Mutex<Kernel>,
     tools: Arc<ToolRegistry>,
     hooks: Arc<HookRegistry>,
     memory: MemoryService,
+    /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
+    boot_report: BootReport,
     delta_cb: Option<DeltaCallback>,
     state: Mutex<SessionState>,
 }
@@ -146,22 +167,80 @@ impl NuomiKernel {
             ProviderSource::Fake(script) => Arc::new(FakeLlm::new("fake", script)),
         };
 
-        let ctx = Context::default();
-        let system_prompt = SystemPromptService::with_store(db_path.clone(), DEFAULT_SYSTEM_PROMPT);
-        ctx.register_service("system_prompt", "", Arc::new(system_prompt))
-            .await?;
-        let memory = MemoryService::new(db_path.clone());
-        ctx.register_service("memory", "", Arc::new(memory.clone()))
-            .await?;
+        // The Kernel is the production boot path (ADR 0009 §6): built-ins and
+        // side-loaded plugins share one init→start→dispose lifecycle. The
+        // facade keeps driving the run loop itself (it needs the run result
+        // and delta callbacks synchronously), but every service is born and
+        // resolved through the kernel's Context.
+        let mut kernel = Kernel::new(Context::default());
+        let ctx = kernel.context().clone();
+        kernel.register(Arc::new(ToolsPlugin::default()))?;
+        kernel.register(Arc::new(HooksPlugin::new(Arc::new(HookRegistry::new()))))?;
+        kernel.register(Arc::new(SystemPromptPlugin::new(
+            SystemPromptService::with_store(db_path.clone(), DEFAULT_SYSTEM_PROMPT),
+        )))?;
+        kernel.register(Arc::new(MemoryPlugin::new(db_path.clone())))?;
+
+        // Side-loaded third-party plugins (ADR 0009). Failures are recorded
+        // into the boot report and never abort boot (Tolerant adapter).
+        let mut boot_report = BootReport::default();
+        let outcomes = scan(&config.plugin_paths);
+        apply_to_report(&outcomes, &mut boot_report);
+        let report_handle = Arc::new(std::sync::Mutex::new(BootReport::default()));
+        for outcome in outcomes {
+            if let LoadOutcome::Loaded { dir, manifest, .. } = outcome {
+                let plugin = Arc::new(SideloadedPlugin::new(*manifest, dir.clone()));
+                let tolerant = Arc::new(Tolerant::new(
+                    plugin,
+                    dir.display().to_string(),
+                    Arc::clone(&report_handle),
+                ));
+                if let Err(e) = kernel.register(tolerant) {
+                    boot_report.record_failed(dir.display().to_string(), e.to_string());
+                }
+            }
+        }
+
+        kernel.boot().await?;
+        // Merge what Tolerant recorded during boot (init/start outcomes).
+        if let Ok(booted) = report_handle.try_lock() {
+            boot_report.loaded.extend(booted.loaded.iter().cloned());
+            boot_report.skipped.extend(booted.skipped.iter().cloned());
+            boot_report.failed.extend(booted.failed.iter().cloned());
+        }
+        boot_report.log_summary();
+
+        // The registries the run loop needs are now Context-owned services
+        // (qualifier == service name — the shared convention, ADR 0009 §6).
+        let missing = |name: &str| {
+            CoreError::from(HarnessError::ServiceNotFound {
+                name: name.to_string(),
+            })
+        };
+        let tools = ctx
+            .service::<ToolRegistry>("tools")
+            .await
+            .ok_or_else(|| missing("tools"))?;
+        let hooks = ctx
+            .service::<HookRegistry>("hooks")
+            .await
+            .ok_or_else(|| missing("hooks"))?;
+        let memory = (*ctx
+            .service::<MemoryService>("memory")
+            .await
+            .ok_or_else(|| missing("memory"))?)
+        .clone();
 
         Ok(Self {
             db_path,
             model,
             provider,
             ctx,
-            tools: Arc::new(ToolRegistry::new()),
-            hooks: Arc::new(HookRegistry::new()),
+            kernel: Mutex::new(kernel),
+            tools,
+            hooks,
             memory,
+            boot_report,
             delta_cb: None,
             state: Mutex::new(SessionState {
                 session_id,
@@ -169,6 +248,18 @@ impl NuomiKernel {
                 delta_seq: Arc::new(AtomicU64::new(0)),
             }),
         })
+    }
+
+    /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
+    pub fn boot_report(&self) -> &BootReport {
+        &self.boot_report
+    }
+
+    /// Graceful teardown: disposes started plugins in reverse order (side-
+    /// loaded plugins get the NPP `shutdown` handshake before their process
+    /// is killed). Errors are collected, never panic.
+    pub async fn shutdown(&self) -> Vec<HarnessError> {
+        self.kernel.lock().await.shutdown().await
     }
 
     /// Installs a streaming delta observer (CLI stdout echo).

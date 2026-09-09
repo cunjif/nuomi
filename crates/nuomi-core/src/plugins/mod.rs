@@ -15,6 +15,6 @@ pub use approval_gate::{
 };
 pub use hooks::{HookDecision, HookPoint, HookRegistry, HooksPlugin};
 pub use loop_engine::{DeltaCallback, LoopConfig, LoopEngine, LoopRunResult};
-pub use memory::MemoryService;
-pub use system_prompt::SystemPromptService;
+pub use memory::{MemoryPlugin, MemoryService};
+pub use system_prompt::{SystemPromptPlugin, SystemPromptService};
 pub use tools::{ToolRegistry, ToolsPlugin};

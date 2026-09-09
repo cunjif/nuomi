@@ -95,11 +95,13 @@ pub fn scan(extra_paths: &[PathBuf]) -> Vec<LoadOutcome> {
     outcomes
 }
 
-/// Applies scan results to a report (helper so callers share the wording).
+/// Applies scan results to a report. Only scan-level problems go in here —
+/// `Loaded` entries are recorded by the kernel adapter ([`super::Tolerant`])
+/// once boot actually succeeded, so `loaded` means "running", not "parsed".
 pub fn apply_to_report(outcomes: &[LoadOutcome], report: &mut BootReport) {
     for outcome in outcomes {
         match outcome {
-            LoadOutcome::Loaded { manifest, .. } => report.record_loaded(manifest.id.clone()),
+            LoadOutcome::Loaded { .. } => {}
             LoadOutcome::Skipped { dir, reason } => {
                 report.record_skipped(dir.display().to_string(), reason.clone())
             }
@@ -117,7 +119,12 @@ fn collect_candidates(dir: &Path) -> Result<Vec<PathBuf>, String> {
     if dir.join("plugin.toml").is_file() {
         return Ok(vec![dir.to_path_buf()]);
     }
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("unscannable: {e}"))?;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // A missing location is the normal cold-start case, not an error.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("unscannable: {e}")),
+    };
     let mut candidates = Vec::new();
     for entry in entries.flatten() {
         let sub = entry.path();

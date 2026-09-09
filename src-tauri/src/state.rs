@@ -116,6 +116,9 @@ impl AppState {
         let kernel = NuomiKernel::boot(NuomiConfig {
             db_path: db_path.clone(),
             provider,
+            // Plugin side-load dirs default to env + user config (ADR 0009);
+            // the desktop shell adds no extra paths of its own.
+            plugin_paths: Vec::new(),
         })
         .await?;
         let kernel_boot_ms = boot_started.elapsed().as_millis() as u64;
