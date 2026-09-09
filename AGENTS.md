@@ -45,13 +45,15 @@ nuomi/
 ├─ crates/                    # ★ Rust 核心 workspace（内核优先阶段的主战场）→ owner: core-engineer
 │  ├─ nuomi-core/             #   业务逻辑 lib（唯一实现，供 cli 与未来 tauri 壳共享）
 │  │  ├─ src/domain/          #   领域实体 + 运行状态机 entities + run state machine（单一事实源）
-│  │  ├─ src/harness/         #   插件内核 kernel · plugin registry · context · event bus
+│  │  ├─ src/harness/         #   插件内核 kernel · plugin registry · context · event bus · sideload (第三方插件 NPP, ADR 0009)
 │  │  ├─ src/providers/       #   Provider 客户端与 Master-Slave 编排 (OpenAICompatible/AnthropicCompatible)
 │  │  ├─ src/orchestrator/    #   Role/Team 执行器：Pipeline · Router · 群聊(Selector+Handoff) · WhiteBoard
 │  │  ├─ src/store/           #   SQLite repositories + migrations runner
 │  │  └─ src/evolution/       #   Self-Evolution：轨迹聚合 · prompt 版本化 · 白名单联网调研
-│  └─ nuomi-cli/              #   headless 验收入口 bin：run / resume / REPL → owner: bridge-engineer
+│  └─ nuomi-cli/              #   headless 验收入口 bin：run / resume / REPL / plugin list → owner: bridge-engineer
 ├─ migrations/                # NNN__name.sql 只增不改 append-only（随 nuomi-core 打包）
+├─ examples/plugins/          # 第三方插件示例（upper: 工具+钩子+事件, Python/Node, ADR 0009）
+├─ docs/plugins/              # 插件开发文档（manifest 格式 / NPP 协议 / 入门教程）
 ├─ src-tauri/                 # （UI 里程碑回归时启用）Tauri 薄壳 bin，依赖 nuomi-core → owner: bridge-engineer
 ├─ src/                       # （UI 里程碑回归时启用）React 前端 frontend → owner: ui-engineer
 │  ├─ features/<domain>/      #   board · runs · agents · approvals · scheduler · settings

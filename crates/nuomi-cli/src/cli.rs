@@ -21,6 +21,7 @@ USAGE:
   nuomi run \"<task>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
   nuomi resume <session-id> \"<new input>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
   nuomi repl   [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
+  nuomi plugin list
 
 REPL commands: /new  /sessions  /resume <session-id>  /exit
 API key is read from the NUOMI_API_KEY environment variable.";
@@ -48,6 +49,9 @@ pub enum Command {
     Repl {
         opts: CliOptions,
     },
+    /// `nuomi plugin list` — scan side-load dirs and print what would load
+    /// (ADR 0009). Pure disk read: no database, no provider, no boot.
+    PluginList,
 }
 
 /// Parses argv (without the program name). Returns `Err(usage)` on anything
@@ -87,6 +91,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
             opts,
         }),
         "repl" if positionals.is_empty() => Ok(Command::Repl { opts }),
+        "plugin" if positionals == vec!["list"] => Ok(Command::PluginList),
         _ => Err(USAGE.to_string()),
     }
 }
@@ -196,6 +201,74 @@ pub async fn execute(cmd: Command) -> anyhow::Result<i32> {
             }
         }
         Command::Repl { opts } => repl_interactive(boot_kernel(&opts).await?).await,
+        Command::PluginList => {
+            print_plugin_list();
+            Ok(0)
+        }
+    }
+}
+
+/// `nuomi plugin list` — scans the side-load directories (env / user config /
+/// workspace) and prints what boot would load, skip or fail on, including the
+/// declared permission surface (ADR 0009). Pure disk read, no boot.
+fn print_plugin_list() {
+    use nuomi_core::harness::sideload::{scan, LoadOutcome};
+    let outcomes = scan(&[]);
+    let mut loaded = 0usize;
+    for outcome in &outcomes {
+        match outcome {
+            LoadOutcome::Loaded {
+                source,
+                dir,
+                manifest,
+            } => {
+                loaded += 1;
+                println!(
+                    "loaded   {} {} (api v{}) [{}]",
+                    manifest.id,
+                    manifest.version,
+                    manifest.api_version,
+                    source.label()
+                );
+                println!("  dir: {}", dir.display());
+                let p = &manifest.permissions;
+                println!(
+                    "  permissions: fs.read {:?} | fs.write {:?} | network {:?} | shell {}",
+                    p.fs.read, p.fs.write, p.network, p.shell
+                );
+                if !manifest.tools.is_empty() {
+                    let names: Vec<String> = manifest
+                        .tools
+                        .iter()
+                        .map(|t| format!("{}.{}", manifest.id, t.name))
+                        .collect();
+                    println!("  tools: {}", names.join(", "));
+                }
+                if !manifest.hooks.is_empty() {
+                    let points: Vec<&str> =
+                        manifest.hooks.iter().map(|h| h.point.as_str()).collect();
+                    println!("  hooks: {}", points.join(", "));
+                }
+                if !manifest.events.is_empty() {
+                    let topics: Vec<&str> =
+                        manifest.events.iter().map(|e| e.topic.as_str()).collect();
+                    println!("  events: {}", topics.join(", "));
+                }
+            }
+            LoadOutcome::Skipped { dir, reason } => {
+                println!("skipped  {} — {reason}", dir.display());
+            }
+            LoadOutcome::Failed { dir, reason } => {
+                println!("failed   {} — {reason}", dir.display());
+            }
+        }
+    }
+    if outcomes.is_empty() {
+        println!("no plugins found");
+        println!("install into .nuomi/plugins/ (workspace), the user config dir,");
+        println!("or list directories in NUOMI_PLUGIN_PATH — see docs/plugins/");
+    } else {
+        println!("{loaded} plugin(s) would load at boot");
     }
 }
 
