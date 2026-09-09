@@ -50,6 +50,10 @@ const TOKEN_VARS = [
   "ok",
   "warn",
   "danger",
+  "cap-re",
+  "cap-i",
+  "cap-vo",
+  "cap-vi",
 ] as const;
 type TokenVar = (typeof TOKEN_VARS)[number];
 // resolveTheme stores vars camelCased via `toCamel` (surface-raised →
@@ -182,6 +186,12 @@ const PAIRS: ContrastPair[] = [
   { name: "text: danger on surface-raised", threshold: TEXT_MIN, rationale: "TaskCard.tsx:150 menu · ApprovalRow.tsx:33 deny", fg: (t) => t.danger, bg: (t) => t.surfaceRaised },
   { name: "text: danger on surface-overlay", threshold: TEXT_MIN, rationale: "IntegrationsSection.tsx:88 hover", fg: (t) => t.danger, bg: (t) => t.surfaceOverlay },
   { name: "text: warn on surface", threshold: TEXT_MIN, rationale: "RunDrawer.tsx:52 running status · TimelineRow.tsx:44", fg: (t) => t.warn, bg: (t) => t.surface },
+  { name: "text: ok on surface-raised", threshold: TEXT_MIN, rationale: "Badge.tsx ok tone (10px scribble text)", fg: (t) => t.ok, bg: (t) => t.surfaceRaised },
+  { name: "text: warn on surface-raised", threshold: TEXT_MIN, rationale: "Badge.tsx warn tone (10px scribble text)", fg: (t) => t.warn, bg: (t) => t.surfaceRaised },
+  { name: "text: cap-re on surface-raised", threshold: TEXT_MIN, rationale: "ProviderForm.tsx:495 · RolesSection.tsx:55 Re badge", fg: (t) => t.capRe, bg: (t) => t.surfaceRaised },
+  { name: "text: cap-i on surface-raised", threshold: TEXT_MIN, rationale: "ProviderForm.tsx:496 · RolesSection.tsx:56 I badge", fg: (t) => t.capI, bg: (t) => t.surfaceRaised },
+  { name: "text: cap-vo on surface-raised", threshold: TEXT_MIN, rationale: "ProviderForm.tsx:497 · RolesSection.tsx:57 Vo badge", fg: (t) => t.capVo, bg: (t) => t.surfaceRaised },
+  { name: "text: cap-vi on surface-raised", threshold: TEXT_MIN, rationale: "ProviderForm.tsx:498 · RolesSection.tsx:58 Vi badge", fg: (t) => t.capVi, bg: (t) => t.surfaceRaised },
   {
     name: "badge: accent on accent/20 over surface-raised",
     threshold: TEXT_MIN,

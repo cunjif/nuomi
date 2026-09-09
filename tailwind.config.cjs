@@ -22,6 +22,14 @@ module.exports = {
           warn: "var(--nuomi-warn, #e0af68)",
           danger: "var(--nuomi-danger, #f7768e)",
         },
+        // Capability badge ink (KiloCode-style Re/I/Vo/Vi) — token, not raw
+        // palette, so all four themes pick a legible variant (review §10).
+        cap: {
+          re: "var(--nuomi-cap-re, #0369a1)",
+          i: "var(--nuomi-cap-i, #047857)",
+          vo: "var(--nuomi-cap-vo, #a16207)",
+          vi: "var(--nuomi-cap-vi, #86198f)",
+        },
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],

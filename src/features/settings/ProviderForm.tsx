@@ -34,12 +34,12 @@ export function providerAvatarStyle(name: string): { backgroundColor: string } {
   return { backgroundColor: `hsl(${220 + (hash % 80)} 55% 45% / 0.35)` };
 }
 
-/** Per-model capability badges (KiloCode-style Re/I/Vo/Vi). */
+/** Per-model capability badges (KiloCode-style Re/I/Vo/Vi) — token ink. */
 const MODEL_CAPS: ReadonlyArray<{ key: CapabilityDto; short: string; cls: string; labelKey: string }> = [
-  { key: "reasoning", short: "Re", cls: "border-sky-500/60 text-sky-400", labelKey: "provider.capReasoning" },
-  { key: "image", short: "I", cls: "border-emerald-500/60 text-emerald-400", labelKey: "provider.capImage" },
-  { key: "voice", short: "Vo", cls: "border-amber-500/60 text-amber-400", labelKey: "provider.capVoice" },
-  { key: "video", short: "Vi", cls: "border-fuchsia-500/60 text-fuchsia-400", labelKey: "provider.capVideo" },
+  { key: "reasoning", short: "Re", cls: "border-cap-re text-cap-re", labelKey: "provider.capReasoning" },
+  { key: "image", short: "I", cls: "border-cap-i text-cap-i", labelKey: "provider.capImage" },
+  { key: "voice", short: "Vo", cls: "border-cap-vo text-cap-vo", labelKey: "provider.capVoice" },
+  { key: "video", short: "Vi", cls: "border-cap-vi text-cap-vi", labelKey: "provider.capVideo" },
 ];
 
 type TypeKey = "openai" | "anthropic" | "deepseek" | "ollama" | "custom";
@@ -492,7 +492,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                       aria-label={`${cap.short} ${t(cap.labelKey)} ${model.id}`}
                       title={t(cap.labelKey)}
                       onClick={() => toggleModelCapability(model.id, cap.key)}
-                      className={`rounded border px-1 py-0.5 text-[10px] leading-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
+                      className={`rounded border border-dashed px-1 py-0.5 font-scribble text-[10px] leading-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
                         active
                           ? cap.cls
                           : "border-ink-muted/40 text-ink-muted opacity-60 hover:opacity-100"

@@ -38,10 +38,10 @@ function BindingBadge({ role, providerNames, profileNames }: BindingBadgeProps):
 
 /** Small capability badges (Re/I/Vo/Vi) for a role's required capabilities. */
 const CAP_BADGES: ReadonlyArray<{ key: CapabilityDto; short: string; cls: string }> = [
-  { key: "reasoning", short: "Re", cls: "border-sky-500/60 text-sky-400" },
-  { key: "image", short: "I", cls: "border-emerald-500/60 text-emerald-400" },
-  { key: "voice", short: "Vo", cls: "border-amber-500/60 text-amber-400" },
-  { key: "video", short: "Vi", cls: "border-fuchsia-500/60 text-fuchsia-400" },
+  { key: "reasoning", short: "Re", cls: "border-cap-re text-cap-re" },
+  { key: "image", short: "I", cls: "border-cap-i text-cap-i" },
+  { key: "voice", short: "Vo", cls: "border-cap-vo text-cap-vo" },
+  { key: "video", short: "Vi", cls: "border-cap-vi text-cap-vi" },
 ];
 
 function CapabilityBadges({ role }: { role: RoleDto }): ReactNode {
@@ -52,7 +52,7 @@ function CapabilityBadges({ role }: { role: RoleDto }): ReactNode {
         <span
           key={c.key}
           title={c.key}
-          className={`rounded border px-1 py-0.5 text-[10px] leading-none ${c.cls}`}
+          className={`rounded border border-dashed px-1 py-0.5 font-scribble text-[10px] leading-none ${c.cls}`}
         >
           {c.short}
         </span>
