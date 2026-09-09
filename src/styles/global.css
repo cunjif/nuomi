@@ -269,6 +269,31 @@
   .sketch-input:focus {
     border: 1.5px solid var(--nuomi-accent);
   }
+
+  /* Binder holes down the left rail — the notebook metaphor (review §11.1).
+     Surface-colored punches on the raised rail; purely decorative. */
+  .binder-holes {
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      var(--nuomi-surface) 0 2.5px,
+      transparent 3px
+    );
+    background-size: 100% 28px;
+    background-position: 0 14px;
+    background-repeat: repeat-y;
+  }
+
+  /* Sticky note with torn top/bottom edges (review §11.1). clip-path cuts
+     irregular bites; padding keeps text clear of the ragged rim. */
+  .torn-note {
+    background-color: var(--nuomi-surface-raised);
+    clip-path: polygon(
+      0% 6%, 7% 2%, 16% 5%, 26% 2%, 36% 6%, 46% 2%, 55% 5%, 64% 2%,
+      73% 5%, 82% 2%, 91% 6%, 100% 3%,
+      100% 94%, 93% 98%, 84% 95%, 74% 98%, 64% 95%, 54% 98%, 44% 95%,
+      34% 98%, 24% 95%, 14% 98%, 6% 96%, 0% 98%
+    );
+  }
 }
 
 /* ── WYSIWYG markdown (Typora-style pane) ──────────────────────────────── */
@@ -378,5 +403,25 @@
   .animate-draw-in {
     opacity: 1;
     transform: none;
+  }
+  /* Micro-interactions too: hover lifts and focus transitions resolve
+     instantly instead of sliding (review §8.3). */
+  button,
+  [role="button"],
+  a,
+  input,
+  select,
+  textarea,
+  summary {
+    transition-duration: 0ms;
+  }
+}
+
+/* Print: paper texture and chalk dust are screen-only decoration — keep
+   toner on the content (review §4.2). */
+@media print {
+  body,
+  .dark body {
+    background-image: none;
   }
 }

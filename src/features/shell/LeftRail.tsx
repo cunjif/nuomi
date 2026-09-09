@@ -23,8 +23,9 @@ export function LeftRail(): ReactNode {
   const setActiveArea = useUiStore((s) => s.setActiveArea);
   const { t } = useTranslation();
   return (
-    <nav aria-label={t("shell.appName")} className="flex w-56 shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised">
-      <div className="flex flex-col p-2">
+    <nav aria-label={t("shell.appName")} className="relative flex w-56 shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised">
+      <span aria-hidden="true" className="binder-holes pointer-events-none absolute inset-y-0 left-0 w-3" />
+      <div className="flex flex-col py-2 pl-5 pr-2">
         {NAV_ITEMS.map((item) => (
           <button
             key={item.view}

@@ -20,7 +20,7 @@ export function WhiteBoardFlow({ notes }: WhiteBoardFlowProps): ReactNode {
           {notes.map((note) => (
             <li
               key={note.seq}
-              className="sketch-card rotate-[-0.4deg] border-state-warn/60 bg-surface-raised p-2 font-note-hand text-xs text-ink"
+              className="torn-note rotate-[-0.4deg] p-2 font-note-hand text-xs text-ink"
             >
               {note.body}
             </li>
