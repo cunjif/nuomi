@@ -46,7 +46,7 @@ export function BoardColumn({
       }`}
     >
       <div className="flex shrink-0 items-center justify-between gap-1 px-2 py-1.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        <h3 className="text-title-hand text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {t(statusLabelKey(status))}
         </h3>
         <span className="flex items-center gap-1">

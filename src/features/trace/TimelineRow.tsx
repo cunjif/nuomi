@@ -12,15 +12,17 @@ export function TimelineRow({ entry, speakerFallback }: TimelineRowProps): React
   const { t } = useTranslation();
   if (entry.kind === "speech") {
     return (
-      <div className="px-3 py-1">
-        <p className="text-xs font-semibold text-ink-accent">{entry.speaker || speakerFallback}</p>
+      <div className="animate-draw-in px-3 py-1">
+        <span className="mb-0.5 inline-block rounded-full border border-dashed border-ink-accent/60 px-1.5 font-scribble text-xs leading-tight text-ink-accent">
+          {entry.speaker || speakerFallback}
+        </span>
         <p className="whitespace-pre-wrap break-words text-sm text-ink">{entry.content}</p>
       </div>
     );
   }
   if (entry.kind === "tool") {
     return (
-      <details className="sketch-card mx-3 my-1 bg-surface-raised text-sm">
+      <details className="sketch-card animate-draw-in mx-3 my-1 bg-surface-raised text-sm">
         <summary className="cursor-pointer px-3 py-1.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent">
           {t("chat.toolCall")}
           <span className="ml-2 font-mono text-ink-accent">{entry.tool}</span>
@@ -31,7 +33,7 @@ export function TimelineRow({ entry, speakerFallback }: TimelineRowProps): React
   }
   if (entry.kind === "tool_result") {
     return (
-      <details className="sketch-card mx-3 my-1 bg-surface-raised text-sm">
+      <details className="sketch-card animate-draw-in mx-3 my-1 bg-surface-raised text-sm">
         <summary className="cursor-pointer px-3 py-1.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent">
           {t("chat.toolResult")}
         </summary>
@@ -40,7 +42,7 @@ export function TimelineRow({ entry, speakerFallback }: TimelineRowProps): React
     );
   }
   return (
-    <div className="mx-3 my-1 rounded border border-state-warn/50 bg-surface-raised p-2">
+    <div className="sketch-card animate-draw-in mx-3 my-1 border-state-warn/60 bg-surface-raised p-2">
       <p className="text-xs font-semibold text-state-warn">{t("trace.whiteboardHeading")}</p>
       <p className="whitespace-pre-wrap break-words text-sm text-ink">{entry.body}</p>
     </div>

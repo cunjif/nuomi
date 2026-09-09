@@ -6,17 +6,22 @@
    src/styles/themeContrast.test.ts — run `pnpm test` after tuning tokens. */
 
 :root {
-  /* Light theme (default per html:not(.dark)) */
-  --nuomi-surface: #f5f6f8;
-  --nuomi-surface-raised: #ffffff;
-  --nuomi-surface-overlay: #e8eaef;
+  /* Light theme (default per html:not(.dark)) — kraft-paper tone per review
+     §9.4 (米白牛皮纸). Accent is the review's 棕红 #c2410c darkened to #9c3f0a:
+     the raw value fails the accent/20 badge pair at ~3.8:1 (same reason the
+     dark theme's blue was tuned — themeContrast.test.ts is the judge). */
+  --nuomi-surface: #f4efe1;
+  --nuomi-surface-raised: #fffdf5;
+  --nuomi-surface-overlay: #eee8d9;
   --nuomi-scrim: rgba(15, 23, 42, 0.35);
-  --nuomi-ink: #1f2430;
-  --nuomi-ink-muted: #5b6572;
-  --nuomi-accent: #3150cb;
+  --nuomi-ink: #2a2520;
+  --nuomi-ink-muted: #6b6358;
+  --nuomi-accent: #9c3f0a;
   --nuomi-ok: #166a2a;
   --nuomi-warn: #8a6508;
-  --nuomi-danger: #c92a2a;
+  /* Darkened from the review's #c92a2a: on kraft overlay (#eee8d9) the raw
+     value lands at 4.48:1 — just under the text gate. */
+  --nuomi-danger: #bd2626;
   /* Capability badge ink (KiloCode-style Re/I/Vo/Vi). Dark-on-light so the
      10px badge text clears 4.5:1 on the raised surface (themeContrast guarded). */
   --nuomi-cap-re: #0369a1;
@@ -24,8 +29,8 @@
   --nuomi-cap-vo: #a16207;
   --nuomi-cap-vi: #86198f;
   /* Minimal rail (screenshot ref): near-invisible track, gray rounded thumb. */
-  --nuomi-scrollbar: #c3c7cf;
-  --nuomi-scrollbar-hover: #9aa1ad;
+  --nuomi-scrollbar: #cfc7b6;
+  --nuomi-scrollbar-hover: #a89f8d;
   /* Kraft-paper grain (turbulence noise, ~5% opacity) tiled over the light
      surface — keeps text readable while giving the "paper" feel (review §4.2.1). */
   --nuomi-paper-texture:
@@ -257,10 +262,19 @@
   .sketch-shadow-lg { box-shadow: 5px 5px 0 var(--nuomi-ink-muted); }
   .sketch-shadow-accent { box-shadow: 3px 3px 0 var(--nuomi-accent); }
 
-  /* Sketch card/panel: dashed outline + wobbly radius (review §6.2 / §11.1). */
+  /* Sketch card/panel: dashed outline + wobbly radius (review §6.2 / §11.1).
+     Cards are paper scraps — they carry the theme's grain over their solid
+     background-color (utilities keep winning for the color itself). */
   .sketch-card {
     border: 1px dashed var(--nuomi-ink-muted);
     border-radius: 12px 255px 15px 225px / 225px 15px 255px 12px;
+    background-image: var(--nuomi-paper-texture);
+  }
+  .dark .sketch-card {
+    background-image: var(--nuomi-chalk-texture);
+  }
+  [data-theme="high-contrast"] .sketch-card {
+    background-image: none;
   }
   .sketch-input {
     border: 1px dashed var(--nuomi-ink-muted);

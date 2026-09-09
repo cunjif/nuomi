@@ -61,7 +61,10 @@ module.exports = {
         },
       },
       animation: {
-        "draw-in": "sketch-draw-in 200ms ease-out both",
+        // `backwards` (not `both`): after the entrance finishes the element
+        // returns to its natural styles, so hover transforms (TaskCard lift)
+        // are not pinned by the fill-mode's final keyframe.
+        "draw-in": "sketch-draw-in 200ms ease-out backwards",
         "stroke": "sketch-stroke-draw 400ms ease-out both",
       },
     },

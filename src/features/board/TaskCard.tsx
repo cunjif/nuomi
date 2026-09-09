@@ -42,7 +42,7 @@ export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, on
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`sketch-card sketch-shadow-sm relative bg-surface-overlay p-2 ${
+      className={`sketch-card sketch-shadow-sm animate-draw-in relative bg-surface-overlay p-2 transition-[box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:shadow-sketch-md ${
         isDragging ? "opacity-50" : ""
       }`}
     >

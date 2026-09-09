@@ -16,7 +16,8 @@ const paperLight: monaco.editor.IStandaloneThemeData = {
   base: "vs",
   inherit: true,
   rules: [],
-  colors: { "editor.background": "#ffffff", "editorGutter.background": "#ffffff", "editor.lineHighlightBackground": "#eceef2" },
+  // Kraft-paper raised tone from global.css paper-light (review §9.4).
+  colors: { "editor.background": "#fffdf5", "editorGutter.background": "#fffdf5", "editor.lineHighlightBackground": "#eee8d9" },
 };
 
 const gridNotebook: monaco.editor.IStandaloneThemeData = {

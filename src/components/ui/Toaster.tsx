@@ -14,7 +14,7 @@ export function Toaster(): ReactNode {
           key={toast.id}
           type="button"
           onClick={() => dismiss(toast.id)}
-          className={`pointer-events-auto rounded border px-3 py-2 text-left text-sm shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
+          className={`sketch-card sketch-shadow-md animate-draw-in pointer-events-auto border border-dashed px-3 py-2 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
             toast.kind === "error"
               ? "border-state-danger bg-surface-overlay text-ink"
               : "border-state-ok bg-surface-overlay text-ink"

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import type { ProviderDto } from "../../lib/ipc/bindings.gen";
+import { Button } from "../../components/ui/Button";
 import { ipc } from "../../lib/ipc/client";
 import {
   ProviderForm,
@@ -43,7 +44,7 @@ function ListRow({ provider, status, active, onSelect }: ListRowProps): ReactNod
         <span
           aria-hidden
           style={providerAvatarStyle(provider.name)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-ink"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[155px_12px_155px_12px/12px_155px_12px_155px] border border-dashed border-ink-muted/50 text-[11px] font-semibold text-ink"
         >
           {providerInitials(provider.name)}
         </span>
@@ -64,7 +65,7 @@ function ListRow({ provider, status, active, onSelect }: ListRowProps): ReactNod
                 ? "provider.statusError"
                 : "provider.statusUntested",
           )}
-          className={`h-2 w-2 shrink-0 rounded-full ${DOT_CLASSES[status]}`}
+          className={`h-2 w-2 shrink-0 rounded-[40%_60%_55%_45%/50%_45%_55%_50%] ${DOT_CLASSES[status]}`}
         />
       </button>
     </li>
@@ -133,16 +134,17 @@ export function ProvidersSection(): ReactNode {
               {providers.length === 0 ? t("provider.empty") : t("provider.noSearchMatch")}
             </p>
           )}
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               setCreating(true);
               setSelectedId(null);
             }}
-            className="mt-2 rounded border border-dashed border-ink-muted/60 px-2 py-1.5 text-xs text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
+            className="mt-2 w-full"
           >
             {t("provider.add")}
-          </button>
+          </Button>
         </div>
 
         {/* Right: detail */}
