@@ -144,6 +144,47 @@ describe("ProvidersSection", () => {
     });
   });
 
+  it("fetches the endpoint catalog and lets the user tick models in and out", async () => {
+    const listProviderModels = vi
+      .fn()
+      .mockResolvedValue(ok({ models: ["gpt-4o", "gpt-4o-mini", "o1-mini"], error: null }));
+    const upsertProvider = vi.fn().mockResolvedValue(ok(null));
+    injectIpcCommands({
+      listProviders: vi.fn().mockResolvedValue(ok([provider({})])),
+      upsertProvider,
+      deleteProvider: vi.fn(),
+      testProviderConnection: vi.fn(),
+      listProviderModels,
+    } as never);
+    renderWithProviders(<ProvidersSection />);
+
+    fireEvent.click(await screen.findByText("alpha"));
+    fireEvent.click(await screen.findByRole("button", { name: /fetch models/i }));
+    await waitFor(() => expect(listProviderModels).toHaveBeenCalledTimes(1));
+    expect(listProviderModels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "prov-1",
+        protocol: "open_ai_compatible",
+        baseUrl: "https://api.alpha.test/v1",
+      }),
+    );
+
+    // Tick two catalog models in, then untick one: only the first survives.
+    fireEvent.click(await screen.findByRole("checkbox", { name: "gpt-4o" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "o1-mini" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "gpt-4o" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(upsertProvider).toHaveBeenCalled());
+    const input = upsertProvider.mock.calls[0]?.[0];
+    // Seeded models survive; gpt-4o was ticked in then out, o1-mini stays.
+    expect(input.settings.models.map((m: { id: string }) => m.id)).toEqual([
+      "model-a",
+      "model-b",
+      "o1-mini",
+    ]);
+  });
+
   it("reports the latency line after a successful connection test", async () => {
     const testProviderConnection = vi
       .fn()

@@ -246,6 +246,14 @@ async testProviderConnection(input: TestProviderConnectionInput) : Promise<Resul
     else return { status: "error", error: e  as any };
 }
 },
+async listProviderModels(input: ListProviderModelsInput) : Promise<Result<ListProviderModelsDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_provider_models", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setSensitiveTools(patterns: string[]) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_sensitive_tools", { patterns }) };
@@ -546,6 +554,25 @@ export type IntegrationKindDto = "feishu_bot" | "qq_webhook" | "telemetry"
  */
 export type IpcError = { generic: { code: string; message: string; details?: JsonValue | null } }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type ListProviderModelsDto = { 
+/**
+ * Sorted, de-duplicated ids exposed by `GET {base_url}/models`.
+ */
+models: string[]; 
+/**
+ * Set instead of an IPC error on transport/HTTP/parse failures, so the
+ * settings form keeps the previously fetched list on screen.
+ */
+error: string | null }
+export type ListProviderModelsInput = { 
+/**
+ * When set and `api_key` is empty, the stored keyring secret is used.
+ */
+providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKey: string | null; 
+/**
+ * Overrides the stored per-provider proxy when non-empty.
+ */
+proxy: string | null }
 /**
  * One model exposed by a provider endpoint plus its capability tags
  * (KiloCode-style per-model capabilities).
@@ -577,7 +604,11 @@ export type ProviderSettingsDto = {
  * Per-model entries with capability tags. Legacy string model ids are
  * normalized to `{ id, capabilities: ["reasoning"] }` by the entity.
  */
-models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | null; topP?: number | null; maxTokens?: number | null; timeoutSecs?: number | null; retry?: number | null; maxConcurrency?: number | null; priority?: number | null; roles?: string[]; enabled?: boolean }
+models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | null; topP?: number | null; maxTokens?: number | null; timeoutSecs?: number | null; retry?: number | null; maxConcurrency?: number | null; priority?: number | null; roles?: string[]; 
+/**
+ * Per-provider local network proxy (`http://host:port`); `None` = direct.
+ */
+proxy?: string | null; enabled?: boolean }
 export type RoleDto = { id: string; name: string; providerId: string | null; providerIds: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities: CapabilityDto[]; temperature: number | null; maxTokens: number | null; params: JsonValue; builtin: boolean; generated: boolean; ephemeral: boolean; source: JsonValue; createdAt: number; updatedAt: number }
 export type RoleInput = { name: string; providerId: string | null; 
 /**

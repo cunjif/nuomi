@@ -66,6 +66,11 @@ pub struct ProviderSettings {
     /// Role tags this provider is suited for, e.g. `["code","review"]`.
     #[serde(default)]
     pub roles: Vec<String>,
+    /// Per-provider local network proxy for ALL endpoint traffic, e.g.
+    /// `http://127.0.0.1:7890` (http/https; socks needs the reqwest `socks`
+    /// feature). `None`/empty = direct connection via the shared pool.
+    #[serde(default)]
+    pub proxy: Option<String>,
     #[serde(default = "crate::domain::entities::provider_enabled_default")]
     pub enabled: bool,
 }
@@ -171,6 +176,7 @@ impl Default for ProviderSettings {
             max_concurrency: None,
             priority: None,
             roles: Vec::new(),
+            proxy: None,
             enabled: true,
         }
     }

@@ -280,6 +280,15 @@ pub async fn test_provider_connection(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_provider_models(
+    state: tauri::State<'_, AppState>,
+    input: commands::ListProviderModelsInput,
+) -> Result<commands::ListProviderModelsDto, IpcError> {
+    commands::impl_list_provider_models(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn set_sensitive_tools(
     state: tauri::State<'_, AppState>,
     patterns: Vec<String>,

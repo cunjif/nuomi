@@ -64,6 +64,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::list_providers,
         tauri_cmds::delete_provider,
         tauri_cmds::test_provider_connection,
+        tauri_cmds::list_provider_models,
         tauri_cmds::set_sensitive_tools,
         tauri_cmds::get_sensitive_tools,
         tauri_cmds::set_online_authorized,

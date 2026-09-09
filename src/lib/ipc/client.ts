@@ -83,6 +83,8 @@ export const ipc = {
   deleteProvider: (providerId: string) => unwrap(current.deleteProvider(providerId)),
   testProviderConnection: (input: Parameters<Commands["testProviderConnection"]>[0]) =>
     unwrap(current.testProviderConnection(input)),
+  listProviderModels: (input: Parameters<Commands["listProviderModels"]>[0]) =>
+    unwrap(current.listProviderModels(input)),
   setSensitiveTools: (patterns: string[]) => unwrap(current.setSensitiveTools(patterns)),
   getSensitiveTools: () => unwrap(current.getSensitiveTools()),
   setOnlineAuthorized: (authorized: boolean) =>

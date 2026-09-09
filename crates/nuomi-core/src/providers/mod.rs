@@ -2,6 +2,7 @@
 //! orchestration.
 
 pub mod anthropic;
+pub mod catalog;
 pub mod client;
 pub mod context;
 pub mod fake;
@@ -13,11 +14,12 @@ pub mod sse;
 pub mod types;
 
 pub use anthropic::AnthropicCompatibleClient;
+pub use catalog::list_model_ids;
 pub use client::LlmProvider;
 pub use fake::FakeLlm;
 pub use master::{MasterSlaveRouter, SlaveAsTool};
 pub use openai::OpenAiCompatibleClient;
-pub use pool::{shared_client, warm, warm_from_store, WarmResult};
+pub use pool::{client_for_endpoint, shared_client, warm, warm_from_store, WarmResult};
 pub use secrets::{MemorySecretStore, OsKeyring, SecretStore};
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, ToolDef, Usage,

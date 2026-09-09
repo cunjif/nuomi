@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use futures::future::join_all;
 
+use super::ProviderError;
+
 /// Idle keep-alive connections kept per host in the shared pool.
 const POOL_MAX_IDLE_PER_HOST: usize = 32;
 
@@ -46,6 +48,26 @@ pub fn shared_client() -> reqwest::Client {
                 .unwrap_or_else(|_| reqwest::Client::new())
         })
         .clone()
+}
+
+/// Client for one provider endpoint: the shared direct pool when `proxy` is
+/// `None`/empty, otherwise a dedicated pool routed through the proxy URL
+/// (`http://host:port`; socks requires the reqwest `socks` feature).
+/// Proxied and direct traffic deliberately never share connections.
+///
+/// Errors (unparseable proxy URL, TLS backend failure) surface to the caller
+/// — the settings UI shows them instead of silently falling back to a direct
+/// connection, which would leak traffic the user wanted proxied.
+pub fn client_for_endpoint(proxy: Option<&str>) -> Result<reqwest::Client, ProviderError> {
+    let Some(proxy) = proxy.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Ok(shared_client());
+    };
+    Ok(reqwest::Client::builder()
+        .pool_max_idle_per_host(POOL_MAX_IDLE_PER_HOST)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .tcp_nodelay(true)
+        .proxy(reqwest::Proxy::all(proxy)?)
+        .build()?)
 }
 
 /// Outcome of one warm probe against a provider base URL.
@@ -253,6 +275,17 @@ mod tests {
         assert!(!results[0].ok);
         assert!(!results[0].detail.is_empty());
         assert_eq!(results[0].base_url, "http://127.0.0.1:1");
+    }
+
+    #[test]
+    fn client_for_endpoint_falls_back_to_shared_and_rejects_bad_proxies() {
+        // None/empty/blank → the shared direct client.
+        assert!(super::client_for_endpoint(None).is_ok());
+        assert!(super::client_for_endpoint(Some("")).is_ok());
+        assert!(super::client_for_endpoint(Some("   ")).is_ok());
+        // Unparseable proxy URL surfaces as an error, never a silent direct
+        // fallback (that would leak traffic the user wanted proxied).
+        assert!(super::client_for_endpoint(Some("::not-a-proxy")).is_err());
     }
 
     #[tokio::test]

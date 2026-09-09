@@ -26,6 +26,8 @@ interface DoubleState {
   approvals: ApprovalDto[];
   schedules: ScheduleDto[];
   providers: ProviderDto[];
+  /** Catalog returned by listProviderModels (tests override per case). */
+  providerModels: string[];
   agentProfiles: AgentProfileDto[];
   roles: RoleDto[];
   teams: TeamDto[];
@@ -51,6 +53,7 @@ export const tdState: DoubleState = {
   approvals: [],
   schedules: [],
   providers: [],
+  providerModels: ["gpt-4o", "gpt-4o-mini"],
   agentProfiles: [],
   roles: [],
   teams: [],
@@ -93,6 +96,7 @@ export function tdReset(): void {
   tdState.approvals.length = 0;
   tdState.schedules.length = 0;
   tdState.providers.length = 0;
+  tdState.providerModels = ["gpt-4o", "gpt-4o-mini"];
   tdState.agentProfiles.length = 0;
   tdState.roles.length = 0;
   tdState.teams.length = 0;

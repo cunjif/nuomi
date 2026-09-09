@@ -689,6 +689,9 @@ pub struct ProviderSettingsDto {
     pub priority: Option<f64>,
     #[serde(default)]
     pub roles: Vec<String>,
+    /// Per-provider local network proxy (`http://host:port`); `None` = direct.
+    #[serde(default)]
+    pub proxy: Option<String>,
     #[serde(default)]
     pub enabled: bool,
 }
@@ -777,6 +780,7 @@ impl ProviderSettingsDto {
             max_concurrency: settings.max_concurrency,
             priority: settings.priority,
             roles: settings.roles,
+            proxy: settings.proxy,
             enabled: settings.enabled,
         }
     }
@@ -800,6 +804,7 @@ impl ProviderSettingsDto {
             max_concurrency: self.max_concurrency,
             priority: self.priority,
             roles: self.roles,
+            proxy: self.proxy,
             enabled: self.enabled,
         }
     }
@@ -963,6 +968,58 @@ pub struct TestProviderConnectionDto {
     pub error: Option<String>,
 }
 
+/// API key + proxy for a read-only probe: explicitly typed values win,
+/// otherwise both come from the stored provider row (`provider_id`); missing
+/// rows/keys degrade to empty (direct connection). One DB read for both.
+async fn resolve_probe_secrets(
+    state: &AppState,
+    provider_id: Option<&str>,
+    api_key: Option<String>,
+    proxy: Option<String>,
+) -> Result<(String, Option<String>), IpcError> {
+    use nuomi_core::providers::SecretStore;
+    let typed_key = api_key.filter(|k| !k.is_empty());
+    let typed_proxy = proxy.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    if typed_key.is_some() && typed_proxy.is_some() {
+        return Ok((typed_key.unwrap_or_default(), typed_proxy));
+    }
+    let Some(provider_id) = provider_id else {
+        return Ok((typed_key.unwrap_or_default(), typed_proxy));
+    };
+    let path = state.db_path.clone();
+    let pid = provider_id.to_string();
+    let (stored_key, stored_proxy) =
+        tokio::task::spawn_blocking(move || -> Result<(Option<String>, Option<String>), IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            match repos::providers::get_provider(&db.0, &pid) {
+                Ok(row) => {
+                    let settings =
+                        nuomi_core::domain::entities::ProviderSettings::from_params(&row.params);
+                    Ok((row.keyring_ref, settings.proxy))
+                }
+                Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                    "provider.not_found",
+                    format!("provider#{pid} not found"),
+                )),
+                Err(e) => Err(e.into()),
+            }
+        })
+        .await??;
+    // Keep the original semantics: typed key wins, else keyring secret.
+    let api_key = match typed_key {
+        Some(k) => k,
+        None => match stored_key {
+            Some(reference) => nuomi_core::providers::OsKeyring
+                .get(&reference)
+                .await
+                .unwrap_or_default(),
+            None => String::new(),
+        },
+    };
+    Ok((api_key, typed_proxy.or(stored_proxy)))
+}
+
 /// Read-only connectivity probe (5s budget): resolves the API key (explicit
 /// input, else the stored keyring secret for `provider_id`), then sends a
 /// one-token chat through the matching core client. Never persists anything;
@@ -1065,6 +1122,53 @@ pub async fn impl_test_provider_connection(
             error: Some(format!("timed out after {}s", TEST_TIMEOUT.as_secs())),
         },
     })
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListProviderModelsInput {
+    /// When set and `api_key` is empty, the stored keyring secret is used.
+    pub provider_id: Option<String>,
+    pub protocol: ProviderProtocolDto,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    /// Overrides the stored per-provider proxy when non-empty.
+    pub proxy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListProviderModelsDto {
+    /// Sorted, de-duplicated ids exposed by `GET {base_url}/models`.
+    pub models: Vec<String>,
+    /// Set instead of an IPC error on transport/HTTP/parse failures, so the
+    /// settings form keeps the previously fetched list on screen.
+    pub error: Option<String>,
+}
+
+/// Read-only model catalog fetch (KiloCode-style picker): resolves the API
+/// key exactly like the connectivity probe, then lists the ids the endpoint
+/// exposes. Never persists anything.
+pub async fn impl_list_provider_models(
+    state: &AppState,
+    input: ListProviderModelsInput,
+) -> Result<ListProviderModelsDto, IpcError> {
+    let (api_key, proxy) =
+        resolve_probe_secrets(state, input.provider_id.as_deref(), input.api_key, input.proxy)
+            .await?;
+    let protocol = protocol_from_dto(input.protocol);
+    match nuomi_core::providers::list_model_ids(protocol, &input.base_url, &api_key, proxy.as_deref())
+        .await
+    {
+        Ok(models) => Ok(ListProviderModelsDto {
+            models,
+            error: None,
+        }),
+        Err(e) => Ok(ListProviderModelsDto {
+            models: Vec::new(),
+            error: Some(e.to_string()),
+        }),
+    }
 }
 
 pub async fn impl_set_sensitive_tools(

@@ -32,15 +32,6 @@ export function providerAvatarStyle(name: string): { backgroundColor: string } {
   return { backgroundColor: `hsl(${220 + (hash % 80)} 55% 45% / 0.35)` };
 }
 
-const ROLE_KEYS = ["code", "review", "docs", "plan"] as const;
-type RoleKey = (typeof ROLE_KEYS)[number];
-const ROLE_LABEL_KEYS: Record<RoleKey, string> = {
-  code: "provider.roleCode",
-  review: "provider.roleReview",
-  docs: "provider.roleDocs",
-  plan: "provider.rolePlan",
-};
-
 /** Per-model capability badges (KiloCode-style Re/I/Vo/Vi). */
 const MODEL_CAPS: ReadonlyArray<{ key: CapabilityDto; short: string; cls: string; labelKey: string }> = [
   { key: "reasoning", short: "Re", cls: "border-sky-500/60 text-sky-400", labelKey: "provider.capReasoning" },
@@ -100,6 +91,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     typeKeyOf(provider?.protocol ?? "open_ai_compatible"),
   );
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
+  const [proxy, setProxy] = useState(settings?.proxy ?? "");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [models, setModels] = useState<ModelEntryDto[]>(settings?.models ?? []);
@@ -114,7 +106,6 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     settings?.maxConcurrency?.toString() ?? "",
   );
   const [priority, setPriority] = useState<number>(settings?.priority ?? 5);
-  const [roles, setRoles] = useState<string[]>(settings?.roles ?? []);
   const [enabled, setEnabled] = useState<boolean>(settings?.enabled ?? true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -122,6 +113,11 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     status: ProviderTestStatus;
     message: string;
   } | null>(null);
+  // Endpoint catalog (KiloCode-style picker): ids fetched from
+  // GET {baseUrl}/models, kept until the next fetch so re-picking never
+  // re-hits the network.
+  const [catalog, setCatalog] = useState<string[] | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const saveMut = useMutation({
     mutationFn: (input: ProviderInput) => ipc.upsertProvider(input),
@@ -144,6 +140,28 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           ? { status: "ok", message: t("provider.testOk", { ms: result.latencyMs ?? 0 }) }
           : { status: "error", message: result.error ?? t("provider.testFailed") },
       );
+    },
+  });
+
+  /** Trimmed proxy or null — one canonical form for save + both probes. */
+  const proxyInput = proxy.trim().length > 0 ? proxy.trim() : null;
+
+  const catalogMut = useMutation({
+    mutationFn: () =>
+      ipc.listProviderModels({
+        providerId: provider?.id ?? null,
+        protocol: protocolOf(typeKey),
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.length > 0 ? apiKey : null,
+        proxy: proxyInput,
+      }),
+    onSuccess: (result) => {
+      setCatalog(result.models);
+      setCatalogError(result.error);
+    },
+    onError: (e) => {
+      setCatalog(null);
+      setCatalogError(describeError(e));
     },
   });
 
@@ -184,6 +202,27 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     setModels(models.filter((m) => m.id !== id));
   }
 
+  function selectAllCatalog(): void {
+    setModels((prev) => {
+      const missing = (catalog ?? []).filter((id) => !prev.some((m) => m.id === id));
+      return [...prev, ...missing.map((id): ModelEntryDto => ({ id, capabilities: ["reasoning"] }))];
+    });
+  }
+
+  function clearCatalog(): void {
+    const ids = new Set(catalog ?? []);
+    setModels((prev) => prev.filter((m) => !ids.has(m.id)));
+  }
+
+  /** Add/remove a catalog id (picking seeds `reasoning`, like manual adds). */
+  function toggleCatalogModel(id: string): void {
+    setModels((prev) =>
+      prev.some((m) => m.id === id)
+        ? prev.filter((m) => m.id !== id)
+        : [...prev, { id, capabilities: ["reasoning"] }],
+    );
+  }
+
   function toggleModelCapability(id: string, cap: CapabilityDto): void {
     setModels((prev) =>
       prev.map((m) =>
@@ -196,12 +235,6 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
             }
           : m,
       ),
-    );
-  }
-
-  function toggleRole(role: RoleKey): void {
-    setRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
     );
   }
 
@@ -233,7 +266,11 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
             retry: numberOrNull(retry),
             maxConcurrency: numberOrNull(maxConcurrency),
             priority,
-            roles,
+            // Role routing moved to the Roles tab (RoleForm bindings); the
+            // stored value is preserved untouched so backend routing and
+            // existing configs survive this edit round-trip.
+            roles: provider?.settings?.roles ?? [],
+            proxy: proxyInput,
             enabled,
           },
         });
@@ -307,6 +344,16 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
               className={field}
             />
           </label>
+          <label className="col-span-2 flex flex-col gap-0.5 text-ink-muted">
+            {t("provider.proxy")}
+            <input
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="http://127.0.0.1:7890"
+              className={field}
+            />
+            <span className="text-[10px]">{t("provider.proxyHint")}</span>
+          </label>
           <div className="col-span-2 flex items-end gap-2">
             <label className="flex flex-1 flex-col gap-0.5 text-ink-muted">
               {t("provider.apiKey")}
@@ -338,6 +385,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
                   protocol: protocolOf(typeKey),
                   baseUrl: baseUrl.trim(),
                   apiKey: apiKey.length > 0 ? apiKey : null,
+                  proxy: proxyInput,
                   model: defaultModel.length > 0 ? defaultModel : (models[0]?.id ?? null),
                 })
               }
@@ -360,6 +408,72 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
       {/* Models: one row per model with capability badges (Re/I/Vo/Vi) */}
       <fieldset className="rounded border border-ink-muted/30 p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.models")}</legend>
+        {/* Catalog fetch (KiloCode): pull the ids the endpoint exposes, then
+        tick the ones this provider should use. Re-fetching re-runs the same
+        request; the list stays until then. */}
+        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={catalogMut.isPending || baseUrl.trim().length === 0}
+            onClick={() => catalogMut.mutate()}
+            className="rounded border border-ink-muted/40 px-2 py-0.5 text-ink hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+          >
+            {catalogMut.isPending ? t("provider.fetchingModels") : `⟳ ${t("provider.fetchModels")}`}
+          </button>
+          {catalog !== null && catalogError === null && (
+            <span className="text-[10px] text-ink-muted">
+              {t("provider.modelsFetched", { count: catalog.length })}
+            </span>
+          )}
+          {catalogError !== null && (
+            <span role="status" className="text-[10px] text-state-danger">
+              {t("provider.fetchModelsFailed", { error: catalogError })}
+            </span>
+          )}
+        </div>
+        {catalog !== null && catalog.length === 0 && catalogError === null && (
+          <p className="mb-1.5 text-[10px] text-ink-muted">{t("provider.fetchModelsEmpty")}</p>
+        )}
+        {catalog !== null && catalog.length > 0 && (
+          <div className="mb-2 max-h-40 overflow-y-auto rounded border border-ink-muted/30 bg-surface p-1">
+            <div className="flex items-center gap-2 px-1 pb-1 text-[10px]">
+              <button
+                type="button"
+                onClick={selectAllCatalog}
+                className="text-ink-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
+              >
+                {t("provider.selectAll")}
+              </button>
+              <button
+                type="button"
+                onClick={clearCatalog}
+                className="text-ink-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
+              >
+                {t("provider.selectNone")}
+              </button>
+            </div>
+            <ul className="flex flex-col">
+              {catalog.map((id) => {
+                const active = models.some((m) => m.id === id);
+                return (
+                  <li key={id}>
+                    <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-surface-overlay">
+                      <input
+                        type="checkbox"
+                        className="accent-[var(--nuomi-accent)]"
+                        checked={active}
+                        onChange={() => toggleCatalogModel(id)}
+                      />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">
+                        {id}
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
         <ul className="flex flex-col gap-1">
           {models.map((model) => (
             <li
@@ -519,7 +633,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
         )}
       </div>
 
-      {/* Routing & priority */}
+      {/* Routing & priority (role routing lives in the Roles tab) */}
       <fieldset className="rounded border border-ink-muted/30 p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.routing")}</legend>
         <label className="flex flex-col gap-0.5 text-ink-muted">
@@ -537,29 +651,6 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
             <span className="w-8 text-right tabular-nums text-ink">{priority}</span>
           </span>
         </label>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {ROLE_KEYS.map((role) => {
-            const active = roles.includes(role);
-            return (
-              <label
-                key={role}
-                className={`flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 focus-within:ring-2 focus-within:ring-ink-accent ${
-                  active
-                    ? "border-ink-accent bg-ink-accent/20 text-ink"
-                    : "border-ink-muted/40 text-ink-muted hover:bg-surface-overlay"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="sr-only"
-                  checked={active}
-                  onChange={() => toggleRole(role)}
-                />
-                {t(ROLE_LABEL_KEYS[role])}
-              </label>
-            );
-          })}
-        </div>
       </fieldset>
 
       {/* Footer */}

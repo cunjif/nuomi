@@ -288,6 +288,10 @@ export function testDoubleCommands(): CommandSet {
       }
       return ok({ ok: true, latencyMs: 42, error: null });
     },
+    async listProviderModels() {
+      // Test double: a fixed catalog; tests override it to drive the picker.
+      return ok({ models: [...tdState.providerModels], error: null });
+    },
     async setSensitiveTools(patterns) {
       tdState.sensitiveTools = [...patterns];
       return ok(null);
