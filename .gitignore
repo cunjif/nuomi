@@ -35,3 +35,6 @@ code-review-*.md
 
 # Third-party agent scratch dirs
 .codeartsdoer/
+
+# Local review reports
+reviews/
