@@ -1,17 +1,18 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type View } from "../../lib/store/uiStore";
+import { Icon, type IconName } from "../../components/ui/Icon/Icon";
 import { SessionsList } from "./SessionsList";
 import { ThemeToggle } from "./ThemeToggle";
 
-const NAV_ITEMS: Array<{ view: View; labelKey: string }> = [
-  { view: "chat", labelKey: "shell.navChat" },
-  { view: "board", labelKey: "shell.navBoard" },
-  { view: "trace", labelKey: "shell.navTrace" },
-  { view: "git", labelKey: "shell.navGit" },
-  { view: "approvals", labelKey: "shell.navApprovals" },
-  { view: "scheduler", labelKey: "shell.navScheduler" },
-  { view: "settings", labelKey: "shell.navSettings" },
+const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
+  { view: "chat", labelKey: "shell.navChat", icon: "chat" },
+  { view: "board", labelKey: "shell.navBoard", icon: "board" },
+  { view: "trace", labelKey: "shell.navTrace", icon: "trace" },
+  { view: "git", labelKey: "shell.navGit", icon: "git" },
+  { view: "approvals", labelKey: "shell.navApprovals", icon: "approvals" },
+  { view: "scheduler", labelKey: "shell.navScheduler", icon: "scheduler" },
+  { view: "settings", labelKey: "shell.navSettings", icon: "settings" },
 ];
 
 /** Left rail: view switcher on top, session list below. */
@@ -35,12 +36,13 @@ export function LeftRail(): ReactNode {
               setActiveArea("chat");
             }}
             aria-current={view === item.view ? "page" : undefined}
-            className={`rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1.5 text-left font-note-hand text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
+            className={`flex items-center gap-2 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1.5 text-left font-note-hand text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
               view === item.view
                 ? "bg-surface-overlay text-ink-accent ring-1 ring-inset ring-ink-muted/40"
                 : "text-ink-muted hover:bg-surface-overlay"
             }`}
           >
+            <Icon name={item.icon} size={16} className="nav-icon shrink-0" />
             {t(item.labelKey)}
           </button>
         ))}

@@ -297,6 +297,22 @@
     background-repeat: repeat-y;
   }
 
+  /* Left-rail nav icons redraw their stroke on hover/focus — the "pen
+     stroke" micro-interaction (review §8.2). dasharray 100 exceeds any
+     24px-box path length, so the resting stroke stays solid. */
+  @keyframes icon-redraw {
+    from { stroke-dashoffset: 100; }
+    to { stroke-dashoffset: 0; }
+  }
+  .nav-icon {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+  button:hover .nav-icon,
+  button:focus-visible .nav-icon {
+    animation: icon-redraw 450ms ease-out;
+  }
+
   /* Sticky note with torn top/bottom edges (review §11.1). clip-path cuts
      irregular bites; padding keeps text clear of the ragged rim. */
   .torn-note {
@@ -411,7 +427,8 @@
   .animate-draw-in,
   .animate-stroke,
   .animate-spin,
-  .animate-pulse {
+  .animate-pulse,
+  .nav-icon {
     animation: none;
   }
   .animate-draw-in {
