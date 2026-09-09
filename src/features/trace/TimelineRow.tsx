@@ -20,7 +20,7 @@ export function TimelineRow({ entry, speakerFallback }: TimelineRowProps): React
   }
   if (entry.kind === "tool") {
     return (
-      <details className="mx-3 my-1 rounded border border-ink-muted/40 bg-surface-raised text-sm">
+      <details className="sketch-card mx-3 my-1 bg-surface-raised text-sm">
         <summary className="cursor-pointer px-3 py-1.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent">
           {t("chat.toolCall")}
           <span className="ml-2 font-mono text-ink-accent">{entry.tool}</span>
@@ -31,7 +31,7 @@ export function TimelineRow({ entry, speakerFallback }: TimelineRowProps): React
   }
   if (entry.kind === "tool_result") {
     return (
-      <details className="mx-3 my-1 rounded border border-ink-muted/40 bg-surface-raised text-sm">
+      <details className="sketch-card mx-3 my-1 bg-surface-raised text-sm">
         <summary className="cursor-pointer px-3 py-1.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent">
           {t("chat.toolResult")}
         </summary>

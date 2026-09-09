@@ -10,7 +10,7 @@ export function WhiteBoardFlow({ notes }: WhiteBoardFlowProps): ReactNode {
   const { t } = useTranslation();
   return (
     <aside aria-label={t("trace.whiteboardHeading")} className="w-64 shrink-0 overflow-y-auto border-l border-ink-muted/30 p-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+      <h3 className="text-title-hand mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
         {t("trace.whiteboardHeading")}
       </h3>
       {notes.length === 0 ? (
@@ -18,7 +18,10 @@ export function WhiteBoardFlow({ notes }: WhiteBoardFlowProps): ReactNode {
       ) : (
         <ul className="flex flex-col gap-2">
           {notes.map((note) => (
-            <li key={note.seq} className="rounded border border-state-warn/50 bg-surface-raised p-2 text-xs text-ink">
+            <li
+              key={note.seq}
+              className="sketch-card rotate-[-0.4deg] border-state-warn/60 bg-surface-raised p-2 font-note-hand text-xs text-ink"
+            >
               {note.body}
             </li>
           ))}

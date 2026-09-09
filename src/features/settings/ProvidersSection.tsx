@@ -93,9 +93,9 @@ export function ProvidersSection(): ReactNode {
     <section aria-label={t("provider.heading")} className="mb-3">
       <div className="grid grid-cols-[240px_minmax(0,1fr)] gap-3">
         {/* Left: list */}
-        <div className="flex flex-col self-start rounded border border-ink-muted/40 bg-surface-raised p-2">
+        <div className="sketch-card flex flex-col self-start bg-surface-raised p-2">
           <div className="mb-2 flex items-center justify-between px-1">
-            <h3 className="text-sm font-semibold text-ink">{t("provider.heading")}</h3>
+            <h3 className="text-title-hand text-sm font-semibold text-ink">{t("provider.heading")}</h3>
             <span className="rounded bg-ink-accent/20 px-1.5 py-0.5 text-[10px] text-ink-accent">
               {t("provider.count", { count: providers.length })}
             </span>
@@ -106,7 +106,7 @@ export function ProvidersSection(): ReactNode {
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("provider.searchPlaceholder")}
             aria-label={t("provider.searchPlaceholder")}
-            className="mb-2 w-full rounded border border-ink-muted/40 bg-surface-overlay px-2 py-1 text-xs text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
+            className="sketch-input mb-2 w-full bg-surface-overlay px-2 py-1 text-xs text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
           />
           {providersQuery.isLoading ? (
             <p className="px-1 py-2 text-xs text-ink-muted">{t("common.empty")}</p>
@@ -146,7 +146,7 @@ export function ProvidersSection(): ReactNode {
         </div>
 
         {/* Right: detail */}
-        <div className="min-h-[16rem] rounded border border-ink-muted/40 bg-surface-raised p-3">
+        <div className="sketch-card min-h-[16rem] bg-surface-raised p-3">
           {creating || selected !== null ? (
             <ProviderForm
               key={creating ? "new" : (selected?.id ?? "new")}

@@ -34,7 +34,7 @@ export function LeftRail(): ReactNode {
               setActiveArea("chat");
             }}
             aria-current={view === item.view ? "page" : undefined}
-            className={`rounded px-3 py-1.5 text-left text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
+            className={`rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1.5 text-left font-note-hand text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
               view === item.view
                 ? "bg-surface-overlay text-ink-accent ring-1 ring-inset ring-ink-muted/40"
                 : "text-ink-muted hover:bg-surface-overlay"

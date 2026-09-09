@@ -12,11 +12,11 @@ export function HandoffChainView({ chain }: HandoffChainViewProps): ReactNode {
   const { t } = useTranslation();
   return (
     <section aria-label={t("trace.handoffHeading")} className="border-b border-ink-muted/30 p-3">
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+      <h3 className="text-title-hand mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">
         {t("trace.handoffHeading")}
       </h3>
       {chain.cycle && (
-        <p role="alert" className="mb-1 flex items-center gap-1.5 rounded border border-state-danger px-2 py-1 text-xs text-state-danger">
+        <p role="alert" className="mb-1 flex items-center gap-1.5 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-dashed border-state-danger px-2 py-1 text-xs text-state-danger">
           <Icon name="warning" size={14} />
           {t("trace.cycleWarning")}
         </p>

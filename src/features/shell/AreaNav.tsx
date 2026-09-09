@@ -97,11 +97,11 @@ export function AreaNav(): ReactNode {
         <div className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
-            className="flex size-5 items-center justify-center rounded border border-ink-muted/50 bg-surface-overlay text-[10px] font-bold text-ink-accent"
+            className="flex size-5 items-center justify-center rounded-[155px_12px_155px_12px/12px_155px_12px_155px] border border-dashed border-ink-muted/50 bg-surface-overlay text-[10px] font-bold text-ink-accent"
           >
             N
           </span>
-          <span className="text-xs font-semibold">{t("shell.appTitle")}</span>
+          <span className="text-title-hand text-xs font-semibold">{t("shell.appTitle")}</span>
         </div>
         {/* Area tabs centered on the title row. */}
         <div

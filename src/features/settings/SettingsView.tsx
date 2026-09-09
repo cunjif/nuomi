@@ -66,7 +66,7 @@ export function SettingsView(): ReactNode {
             role="tab"
             aria-selected={tab === item.key}
             onClick={() => setTab(item.key)}
-            className={`shrink-0 rounded px-3 py-1 text-xs focus-visible:ring-2 focus-visible:ring-ink-accent ${
+            className={`shrink-0 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1 font-note-hand text-xs focus-visible:ring-2 focus-visible:ring-ink-accent ${
               tab === item.key
                 ? "bg-surface-overlay text-ink-accent ring-1 ring-inset ring-ink-muted/40"
                 : "text-ink-muted hover:bg-surface-overlay"

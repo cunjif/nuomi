@@ -27,7 +27,7 @@ export function RunDrawer(): ReactNode {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="truncate text-sm font-semibold">{t("board.runsFor", { title: taskId })}</h2>
+          <h2 className="text-title-hand truncate text-sm font-semibold">{t("board.runsFor", { title: taskId })}</h2>
           <button
             type="button"
             onClick={close}
@@ -46,7 +46,7 @@ export function RunDrawer(): ReactNode {
         >
           <ul className="flex flex-col gap-2 overflow-y-auto">
             {(runsQuery.data ?? []).map((run) => (
-              <li key={run.id} className="rounded border border-ink-muted/40 bg-surface p-2 text-xs">
+              <li key={run.id} className="sketch-card bg-surface p-2 text-xs">
                 <p className="font-mono text-ink-muted">{run.id}</p>
                 <p className="mt-1">
                   <span className="text-ink-muted">{t("board.runStatus")}: </span>

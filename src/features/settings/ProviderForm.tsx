@@ -307,7 +307,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
       </div>
 
       {/* Connection */}
-      <fieldset className="rounded border border-ink-muted/30 p-2">
+      <fieldset className="sketch-card p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.connection")}</legend>
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-0.5 text-ink-muted">
@@ -406,7 +406,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
       </fieldset>
 
       {/* Models: one row per model with capability badges (Re/I/Vo/Vi) */}
-      <fieldset className="rounded border border-ink-muted/30 p-2">
+      <fieldset className="sketch-card p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.models")}</legend>
         {/* Catalog fetch (KiloCode): pull the ids the endpoint exposes, then
         tick the ones this provider should use. Re-fetching re-runs the same
@@ -435,7 +435,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           <p className="mb-1.5 text-[10px] text-ink-muted">{t("provider.fetchModelsEmpty")}</p>
         )}
         {catalog !== null && catalog.length > 0 && (
-          <div className="mb-2 max-h-40 overflow-y-auto rounded border border-ink-muted/30 bg-surface p-1">
+          <div className="sketch-input mb-2 max-h-40 overflow-y-auto bg-surface p-1">
             <div className="flex items-center gap-2 px-1 pb-1 text-[10px]">
               <button
                 type="button"
@@ -546,7 +546,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
       </fieldset>
 
       {/* Advanced (collapsible) */}
-      <div className="rounded border border-ink-muted/30 p-2">
+      <div className="sketch-card p-2">
         <button
           type="button"
           aria-expanded={advancedOpen}
@@ -634,7 +634,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
       </div>
 
       {/* Routing & priority (role routing lives in the Roles tab) */}
-      <fieldset className="rounded border border-ink-muted/30 p-2">
+      <fieldset className="sketch-card p-2">
         <legend className="px-1 font-medium text-ink-muted">{t("provider.routing")}</legend>
         <label className="flex flex-col gap-0.5 text-ink-muted">
           {t("provider.priority")}
