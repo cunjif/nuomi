@@ -80,18 +80,18 @@ function RoleRow({
   const { t } = useTranslation();
   const protectedRole = role.builtin;
   return (
-    <li className="rounded border border-ink-muted/40 bg-surface-raised p-3 text-xs">
+    <li className="sketch-card bg-surface-raised p-3 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-ink">{role.name}</span>
         <BindingBadge role={role} providerNames={providerNames} profileNames={profileNames} />
         <CapabilityBadges role={role} />
         {role.generated && (
-          <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] text-violet-400">
+          <span className="rounded border border-dashed border-cap-vi px-1.5 py-0.5 font-scribble text-[10px] leading-none text-cap-vi">
             {t("settings.roles.badgeGenerated")}
           </span>
         )}
         {protectedRole && (
-          <span className="rounded bg-ink-muted/20 px-1.5 py-0.5 text-[10px] text-ink-muted">
+          <span className="rounded border border-dashed border-ink-muted px-1.5 py-0.5 font-scribble text-[10px] leading-none text-ink-muted">
             {t("settings.roles.badgeBuiltin")}
           </span>
         )}
