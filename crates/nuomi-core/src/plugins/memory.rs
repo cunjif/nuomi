@@ -104,7 +104,7 @@ impl Plugin for MemoryPlugin {
     }
 
     async fn init(&self, ctx: &Context) -> Result<(), HarnessError> {
-        ctx.register_service("memory", "", Arc::new(self.service.clone()))
+        ctx.register_service("memory", "memory", Arc::new(self.service.clone()))
             .await
     }
 }

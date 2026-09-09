@@ -386,7 +386,7 @@ impl Plugin for LoopEnginePlugin {
     }
 
     async fn init(&self, ctx: &Context) -> Result<(), HarnessError> {
-        ctx.register_service("loop_engine", "", self.engine.clone())
+        ctx.register_service("loop_engine", "loop_engine", self.engine.clone())
             .await
     }
 }

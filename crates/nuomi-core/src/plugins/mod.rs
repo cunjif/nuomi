@@ -13,8 +13,8 @@ pub use approval_gate::{
     execute_with_gate, read_sensitive_tools, resolve_approval, set_sensitive_tools, ApprovalGate,
     GateDecision, SensitiveToolPolicy, SENSITIVE_TOOLS_MARKER,
 };
-pub use hooks::{HookDecision, HookPoint, HookRegistry};
+pub use hooks::{HookDecision, HookPoint, HookRegistry, HooksPlugin};
 pub use loop_engine::{DeltaCallback, LoopConfig, LoopEngine, LoopRunResult};
 pub use memory::MemoryService;
 pub use system_prompt::SystemPromptService;
-pub use tools::ToolRegistry;
+pub use tools::{ToolRegistry, ToolsPlugin};

@@ -9,11 +9,13 @@ pub mod bus;
 pub mod context;
 pub mod kernel;
 pub mod plugin;
+pub mod sideload;
 
 pub use bus::{Event, EventBus, EventRejected, Flow, WaterfallHandler};
 pub use context::{Context, Disposer, EffectGuard};
 pub use kernel::Kernel;
 pub use plugin::Plugin;
+pub use sideload::{scan, BootReport, LoadOutcome, PluginManifest, SideloadedPlugin};
 
 use thiserror::Error;
 

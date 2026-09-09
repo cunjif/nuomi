@@ -71,7 +71,11 @@ impl Plugin for SystemPromptPlugin {
     }
 
     async fn init(&self, ctx: &Context) -> Result<(), HarnessError> {
-        ctx.register_service("system_prompt", "", Arc::new(self.service.clone()))
-            .await
+        ctx.register_service(
+            "system_prompt",
+            "system_prompt",
+            Arc::new(self.service.clone()),
+        )
+        .await
     }
 }

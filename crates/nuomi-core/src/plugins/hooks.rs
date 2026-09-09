@@ -116,7 +116,7 @@ impl crate::harness::Plugin for HooksPlugin {
     }
 
     async fn init(&self, ctx: &crate::harness::Context) -> Result<(), HarnessError> {
-        ctx.register_service("hooks", "", self.registry.clone())
+        ctx.register_service("hooks", "hooks", self.registry.clone())
             .await
     }
 }

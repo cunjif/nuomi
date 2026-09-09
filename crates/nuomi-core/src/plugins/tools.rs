@@ -410,6 +410,37 @@ fn exchange_reader_tools(journal: Arc<ExchangeJournal>) -> Vec<Arc<dyn Tool>> {
     ]
 }
 
+/// The plugin wrapper registering the shared registry into the Context
+/// (mirrors `HooksPlugin`), so a real `Kernel` boot can produce the tool
+/// service instead of the facade hand-wiring it.
+pub struct ToolsPlugin {
+    registry: Arc<ToolRegistry>,
+}
+
+impl ToolsPlugin {
+    pub fn new(registry: Arc<ToolRegistry>) -> Self {
+        Self { registry }
+    }
+}
+
+impl Default for ToolsPlugin {
+    fn default() -> Self {
+        Self::new(Arc::new(ToolRegistry::new()))
+    }
+}
+
+#[async_trait]
+impl crate::harness::Plugin for ToolsPlugin {
+    fn id(&self) -> &str {
+        "tools"
+    }
+
+    async fn init(&self, ctx: &crate::harness::Context) -> Result<(), HarnessError> {
+        ctx.register_service("tools", "tools", self.registry.clone())
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

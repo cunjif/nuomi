@@ -26,6 +26,9 @@ base64.workspace = true
 # PTY long sessions for interactive CLI agents (harness-research P1):
 # wezterm's portable-pty — Windows ConPTY / macOS & Linux unix PTYs.
 portable-pty = "0.9"
+# Third-party plugin side-loading (ADR 0009): plugin.toml manifest + config dir.
+toml = "0.8"
+dirs = "5"
 
 [dev-dependencies]
 tempfile.workspace = true
