@@ -86,15 +86,26 @@ pub async fn materialize(
             ));
             continue;
         };
+        // Per-provider proxy (settings.proxy): a dedicated pool routed through
+        // it. An unparseable proxy skips the provider — silently falling back
+        // to a direct connection would leak traffic the user wanted proxied.
+        let proxy = crate::domain::entities::ProviderSettings::from_params(&config.params).proxy;
+        let http = match crate::providers::pool::client_for_endpoint(proxy.as_deref()) {
+            Ok(http) => http,
+            Err(e) => {
+                warnings.push(format!("provider '{}' skipped: {e}", config.name));
+                continue;
+            }
+        };
         let client: Arc<dyn LlmProvider> = match config.protocol {
-            ProviderProtocol::OpenAiCompatible => Arc::new(OpenAiCompatibleClient::new(
-                config.base_url.clone(),
-                api_key,
-            )),
-            ProviderProtocol::AnthropicCompatible => Arc::new(AnthropicCompatibleClient::new(
-                config.base_url.clone(),
-                api_key,
-            )),
+            ProviderProtocol::OpenAiCompatible => Arc::new(
+                OpenAiCompatibleClient::new(config.base_url.clone(), api_key)
+                    .with_http_client(http),
+            ),
+            ProviderProtocol::AnthropicCompatible => Arc::new(
+                AnthropicCompatibleClient::new(config.base_url.clone(), api_key)
+                    .with_http_client(http),
+            ),
         };
         // Master wins over list order; otherwise the first entry sticks.
         if config.is_master || default.is_none() {

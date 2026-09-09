@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ipc } from "../../lib/ipc/client";
+import { toast } from "../../lib/store/toastStore";
 import { useUiStore, type ActiveArea } from "../../lib/store/uiStore";
 
 const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> = [
@@ -41,20 +42,25 @@ function hasTauriRuntime(): boolean {
 function WindowControls(): ReactNode {
   const { t } = useTranslation();
   const win = useMemo(() => getCurrentWindow(), []);
+  // Surface ACL/runtime failures — a silently dead button is undebuggable
+  // (missing capability permissions reject the promise).
+  const run = (action: () => Promise<void>): void => {
+    action().catch((e: unknown) => toast.error(`${t("shell.windowControlFailed")}: ${String(e)}`));
+  };
   const base =
     "flex h-9 w-11 items-center justify-center text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
   return (
     <div className="ml-auto flex items-stretch self-stretch">
-      <button type="button" aria-label={t("shell.minimize")} onClick={() => void win.minimize()} className={base}>
+      <button type="button" aria-label={t("shell.minimize")} onClick={() => run(() => win.minimize())} className={base}>
         —
       </button>
-      <button type="button" aria-label={t("shell.maximize")} onClick={() => void win.toggleMaximize()} className={base}>
+      <button type="button" aria-label={t("shell.maximize")} onClick={() => run(() => win.toggleMaximize())} className={base}>
         ▢
       </button>
       <button
         type="button"
         aria-label={t("shell.close")}
-        onClick={() => void win.close()}
+        onClick={() => run(() => win.close())}
         className={`${base} hover:bg-state-danger hover:text-surface`}
       >
         ✕

@@ -51,7 +51,8 @@
     "appTitle": "nuomi · 糯米",
     "minimize": "最小化",
     "maximize": "最大化",
-    "close": "关闭"
+    "close": "关闭",
+    "windowControlFailed": "窗口操作失败"
   },
   "theme": {
     "toggle": "切换主题",

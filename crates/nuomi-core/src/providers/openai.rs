@@ -28,6 +28,13 @@ impl OpenAiCompatibleClient {
         }
     }
 
+    /// Overrides the HTTP client — used for per-provider proxy routing
+    /// (see `pool::client_for_endpoint`).
+    pub fn with_http_client(mut self, http: reqwest::Client) -> Self {
+        self.http = http;
+        self
+    }
+
     fn endpoint(&self) -> String {
         format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
     }

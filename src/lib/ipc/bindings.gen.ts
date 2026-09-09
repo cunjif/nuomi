@@ -668,6 +668,10 @@ export type TestProviderConnectionInput = {
  */
 providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKey: string | null; 
 /**
+ * Overrides the stored per-provider proxy when non-empty.
+ */
+proxy: string | null; 
+/**
  * Model for the minimal chat probe; protocol defaults apply when empty.
  */
 model: string | null }

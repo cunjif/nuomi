@@ -956,6 +956,8 @@ pub struct TestProviderConnectionInput {
     pub protocol: ProviderProtocolDto,
     pub base_url: String,
     pub api_key: Option<String>,
+    /// Overrides the stored per-provider proxy when non-empty.
+    pub proxy: Option<String>,
     /// Model for the minimal chat probe; protocol defaults apply when empty.
     pub model: Option<String>,
 }
@@ -1028,43 +1030,14 @@ pub async fn impl_test_provider_connection(
     state: &AppState,
     input: TestProviderConnectionInput,
 ) -> Result<TestProviderConnectionDto, IpcError> {
-    use nuomi_core::providers::{LlmProvider, SecretStore};
+    use nuomi_core::providers::LlmProvider;
     /// Probe budget; mirrors the CLI-agent check so a wedged endpoint
     /// surfaces as `ok:false`, never a hang.
     const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    let api_key = if input.api_key.as_deref().is_some_and(|k| !k.is_empty()) {
-        input.api_key.unwrap_or_default()
-    } else {
-        match input.provider_id.as_deref() {
-            Some(provider_id) => {
-                let path = state.db_path.clone();
-                let pid = provider_id.to_string();
-                let reference =
-                    tokio::task::spawn_blocking(move || -> Result<Option<String>, IpcError> {
-                        let db = Db::open(&path)?;
-                        migrations::run(&db.0)?;
-                        match repos::providers::get_provider(&db.0, &pid) {
-                            Ok(row) => Ok(row.keyring_ref),
-                            Err(StoreError::NotFound { .. }) => Err(IpcError::new(
-                                "provider.not_found",
-                                format!("provider#{pid} not found"),
-                            )),
-                            Err(e) => Err(e.into()),
-                        }
-                    })
-                    .await??;
-                match reference {
-                    Some(reference) => nuomi_core::providers::OsKeyring
-                        .get(&reference)
-                        .await
-                        .unwrap_or_default(),
-                    None => String::new(),
-                }
-            }
-            None => String::new(),
-        }
-    };
+    let (api_key, proxy) =
+        resolve_probe_secrets(state, input.provider_id.as_deref(), input.api_key, input.proxy)
+            .await?;
 
     let model = input
         .model
@@ -1082,6 +1055,9 @@ pub async fn impl_test_provider_connection(
     request.max_tokens = Some(1);
 
     let started = std::time::Instant::now();
+    // Per-provider proxy: build the client before starting the latency clock
+    // (a builder failure is a config error, not probe latency).
+    let http = nuomi_core::providers::pool::client_for_endpoint(proxy.as_deref())?;
     let probe: std::pin::Pin<
         Box<
             dyn std::future::Future<
@@ -1094,11 +1070,13 @@ pub async fn impl_test_provider_connection(
     > = match input.protocol {
         ProviderProtocolDto::OpenAiCompatible => Box::pin(async {
             nuomi_core::providers::OpenAiCompatibleClient::new(&input.base_url, &api_key)
+                .with_http_client(http)
                 .complete(&request)
                 .await
         }),
         ProviderProtocolDto::AnthropicCompatible => Box::pin(async {
             nuomi_core::providers::AnthropicCompatibleClient::new(&input.base_url, &api_key)
+                .with_http_client(http)
                 .complete(&request)
                 .await
         }),
