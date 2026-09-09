@@ -343,7 +343,10 @@
       "saved": "Integration saved",
       "saveFailed": "Failed to save integration",
       "empty": "No integrations yet — fill in the form above to add one."
-    }
+    },
+    "tab.providers": "Providers",
+    "tab.access": "Tools & Access",
+    "navLabel": "Settings sections"
   },
   "provider": {
     "heading": "Providers",

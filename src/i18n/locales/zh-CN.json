@@ -343,7 +343,10 @@
       "saved": "集成已保存",
       "saveFailed": "保存集成失败",
       "empty": "还没有集成，填写上方表单添加一个。"
-    }
+    },
+    "tab.providers": "模型提供方",
+    "tab.access": "工具与授权",
+    "navLabel": "设置分类"
   },
   "provider": {
     "heading": "服务商",

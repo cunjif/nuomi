@@ -72,6 +72,16 @@
 }
 
 @layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  /* Desktop shell: the window itself never scrolls (VSCode 模型) — every
+  surface owns an inner scroll container, so the OS window scrollbar the
+  settings page used to grow never appears. */
+  body {
+    overflow: hidden;
+  }
   body {
     @apply bg-surface text-ink font-sans antialiased;
   }
