@@ -126,10 +126,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/models"))
             .and(header("authorization", "Bearer secret"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(PAYLOAD, "application/json"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_raw(PAYLOAD, "application/json"))
             .mount(&server)
             .await;
 
@@ -175,9 +172,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = list_model_ids(ProviderProtocol::OpenAiCompatible, &server.uri(), "bad", None)
-            .await
-            .expect_err("401 must be an error");
+        let err = list_model_ids(
+            ProviderProtocol::OpenAiCompatible,
+            &server.uri(),
+            "bad",
+            None,
+        )
+        .await
+        .expect_err("401 must be an error");
         assert!(err.to_string().contains("401"), "{err}");
     }
 

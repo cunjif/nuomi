@@ -28,7 +28,7 @@ use crate::plugins::hooks::{HookDecision, HookRegistry};
 use crate::plugins::tools::{Tool, ToolRegistry};
 use crate::providers::ToolDef;
 
-pub use loader::{scan, LoadOutcome, SourceKind};
+pub use loader::{apply_to_report, scan, LoadOutcome, SourceKind};
 pub use manifest::{Permissions, PluginManifest};
 pub use process::StderrTail;
 pub use protocol::NPP_API_VERSION;

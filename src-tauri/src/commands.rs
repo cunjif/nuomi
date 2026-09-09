@@ -981,7 +981,9 @@ async fn resolve_probe_secrets(
 ) -> Result<(String, Option<String>), IpcError> {
     use nuomi_core::providers::SecretStore;
     let typed_key = api_key.filter(|k| !k.is_empty());
-    let typed_proxy = proxy.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    let typed_proxy = proxy
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
     if typed_key.is_some() && typed_proxy.is_some() {
         return Ok((typed_key.unwrap_or_default(), typed_proxy));
     }
@@ -990,8 +992,8 @@ async fn resolve_probe_secrets(
     };
     let path = state.db_path.clone();
     let pid = provider_id.to_string();
-    let (stored_key, stored_proxy) =
-        tokio::task::spawn_blocking(move || -> Result<(Option<String>, Option<String>), IpcError> {
+    let (stored_key, stored_proxy) = tokio::task::spawn_blocking(
+        move || -> Result<(Option<String>, Option<String>), IpcError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             match repos::providers::get_provider(&db.0, &pid) {
@@ -1006,8 +1008,9 @@ async fn resolve_probe_secrets(
                 )),
                 Err(e) => Err(e.into()),
             }
-        })
-        .await??;
+        },
+    )
+    .await??;
     // Keep the original semantics: typed key wins, else keyring secret.
     let api_key = match typed_key {
         Some(k) => k,
@@ -1035,9 +1038,13 @@ pub async fn impl_test_provider_connection(
     /// surfaces as `ok:false`, never a hang.
     const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    let (api_key, proxy) =
-        resolve_probe_secrets(state, input.provider_id.as_deref(), input.api_key, input.proxy)
-            .await?;
+    let (api_key, proxy) = resolve_probe_secrets(
+        state,
+        input.provider_id.as_deref(),
+        input.api_key,
+        input.proxy,
+    )
+    .await?;
 
     let model = input
         .model
@@ -1131,12 +1138,21 @@ pub async fn impl_list_provider_models(
     state: &AppState,
     input: ListProviderModelsInput,
 ) -> Result<ListProviderModelsDto, IpcError> {
-    let (api_key, proxy) =
-        resolve_probe_secrets(state, input.provider_id.as_deref(), input.api_key, input.proxy)
-            .await?;
+    let (api_key, proxy) = resolve_probe_secrets(
+        state,
+        input.provider_id.as_deref(),
+        input.api_key,
+        input.proxy,
+    )
+    .await?;
     let protocol = protocol_from_dto(input.protocol);
-    match nuomi_core::providers::list_model_ids(protocol, &input.base_url, &api_key, proxy.as_deref())
-        .await
+    match nuomi_core::providers::list_model_ids(
+        protocol,
+        &input.base_url,
+        &api_key,
+        proxy.as_deref(),
+    )
+    .await
     {
         Ok(models) => Ok(ListProviderModelsDto {
             models,
