@@ -19,9 +19,7 @@ import type {
   SymbolProvider,
 } from "./types";
 import { registerCommand } from "../commands/registry";
-
-/** localStorage prefix for the per-extension enable toggle (manager panel). */
-const ENABLED_PREFIX = "nuomi.editorExt.enabled.";
+import { ipc } from "../ipc/client";
 
 interface QueuedMonacoProvider {
   extId: string;
@@ -88,14 +86,120 @@ export function getEditorExtVersion(): number {
   return version;
 }
 
+/**
+ * Bumps the version store from outside the registry (ADR 0010): async
+ * provider caches (plugin symbol RPC) land after the consumer rendered, so
+ * they must be able to force a re-render explicitly.
+ */
+export function bumpEditorExtVersion(): void {
+  notify();
+}
+
 /** React hook: re-renders whenever registrations or enable toggles change. */
 export function useEditorExtVersion(): number {
   return useSyncExternalStore(subscribeEditorExtChanges, getEditorExtVersion, getEditorExtVersion);
 }
 
-// --- enable state -----------------------------------------------------------
+// --- enable state (app_settings, ADR 0010) ---------------------------------
+//
+// Authoritative storage is the SQLite `app_settings` KV via IPC (single JSON
+// blob under `editorext.enabled.`), so the kernel side and a future CLI can
+// read the same switch state. Reads stay synchronous through an in-memory
+// cache; legacy localStorage entries (pre-ADR-0010) are migrated once and
+// kept only as a write fallback when IPC is unavailable (tests, web preview).
+
+const ENABLED_PREFIX = "nuomi.editorExt.enabled.";
+const ENABLED_SETTING_KEY = "editorext.enabled.";
+
+type EnabledMap = Record<string, boolean>;
+
+let enabledMap: EnabledMap | null = null;
+let enabledInit: Promise<void> | null = null;
+
+function readLegacyEnabled(): EnabledMap {
+  const legacy: EnabledMap = {};
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key === null || !key.startsWith(ENABLED_PREFIX)) continue;
+      const id = key.slice(ENABLED_PREFIX.length);
+      if (id.length > 0) legacy[id] = localStorage.getItem(key) !== "0";
+    }
+  } catch {
+    // Storage unavailable — nothing to migrate.
+  }
+  return legacy;
+}
+
+function clearLegacyEnabled(): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(ENABLED_PREFIX)) doomed.push(key);
+    }
+    for (const key of doomed) localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable — nothing to clean.
+  }
+}
+
+/**
+ * Loads the enable-state blob from app_settings and merges (then clears) any
+ * legacy localStorage entries into it. Idempotent; safe to call repeatedly.
+ * Failures never throw — the cache keeps working in-memory.
+ */
+export function initEditorExtEnabledStore(): Promise<void> {
+  if (enabledInit !== null) return enabledInit;
+  enabledInit = (async () => {
+    if (enabledMap !== null) return;
+    // Seed from localStorage so pre-init reads and the migration payload
+    // reflect the last-known state even before the IPC round-trip lands.
+    enabledMap = readLegacyEnabled();
+    try {
+      const stored = await ipc.appSettingGet(ENABLED_SETTING_KEY);
+      if (stored !== null) {
+        try {
+          const parsed = JSON.parse(stored) as EnabledMap;
+          if (parsed !== null && typeof parsed === "object") {
+            enabledMap = { ...enabledMap, ...parsed };
+          }
+        } catch {
+          // Malformed blob — treat as empty and overwrite below.
+        }
+      }
+      // Persist the merged map (migration + normalization in one write).
+      await ipc.appSettingSet(ENABLED_SETTING_KEY, JSON.stringify(enabledMap));
+      // Migration succeeded: the legacy keys must not resurrect stale values
+      // on the next boot (they would win the merge above).
+      clearLegacyEnabled();
+    } catch {
+      // IPC unavailable (tests / non-Tauri): localStorage remains the store.
+    }
+    notify();
+  })();
+  return enabledInit;
+}
+
+function persistEnabled(next: EnabledMap): void {
+  void ipc
+    .appSettingSet(ENABLED_SETTING_KEY, JSON.stringify(next))
+    .then(() => clearLegacyEnabled())
+    .catch(() => {
+      // Fallback: keep the toggle in localStorage for this session and the
+      // next migration run.
+      try {
+        for (const [id, on] of Object.entries(next)) {
+          localStorage.setItem(ENABLED_PREFIX + id, on ? "1" : "0");
+        }
+      } catch {
+        // Storage unavailable — the toggle stays in-memory.
+      }
+    });
+}
 
 export function isEditorExtensionEnabled(id: string): boolean {
+  if (enabledMap !== null) return enabledMap[id] !== false;
   try {
     const raw = localStorage.getItem(ENABLED_PREFIX + id);
     if (raw === "0") return false;
@@ -106,11 +210,14 @@ export function isEditorExtensionEnabled(id: string): boolean {
 }
 
 export function setEditorExtensionEnabled(id: string, enabled: boolean): void {
-  try {
-    localStorage.setItem(ENABLED_PREFIX + id, enabled ? "1" : "0");
-  } catch {
-    // Storage unavailable — the toggle stays in-memory for this session.
+  if (enabledMap === null) {
+    // Ensure the cache exists even if init has not run yet.
+    enabledMap = readLegacyEnabled();
+    void initEditorExtEnabledStore();
   }
+  const next: EnabledMap = { ...enabledMap, [id]: enabled };
+  enabledMap = next;
+  persistEnabled(next);
   notify();
 }
 
@@ -127,6 +234,44 @@ export function registerEditorExtension(ext: EditorExtension): void {
 
 export function getRegisteredEditorExtensions(): readonly EditorExtension[] {
   return extensions;
+}
+
+/**
+ * Removes an extension and every contribution it made (previews, outlines,
+ * overlays, queued Monaco providers...). Used when a kernel plugin is
+ * uninstalled: its derived editor extension must disappear immediately even
+ * though the plugin process only exits on the next boot.
+ *
+ * Note: Monaco providers already flushed into a mounted editor namespace
+ * cannot be unregistered — they stay inert until reload (their consumers
+ * re-check the read side below, which no longer lists them).
+ */
+export function unregisterEditorExtension(id: string): void {
+  const idx = extensions.findIndex((e) => e.id === id);
+  if (idx < 0) return;
+  extensions.splice(idx, 1);
+  activated.delete(id);
+  const owned = (entry: { extId: string }): boolean => entry.extId !== id;
+  const keep = <T extends { extId: string }>(list: T[]): T[] => {
+    const filtered = list.filter(owned);
+    list.length = 0;
+    list.push(...filtered);
+    return list;
+  };
+  keep(previews);
+  keep(outlines);
+  keep(wysiwygEditors);
+  keep(toolbarActions);
+  keep(overlays);
+  keep(monacoQueue);
+  keep(readyQueue);
+  // Flushed providers were registered against the queue indexes before this
+  // removal; shrink the flush cursor so nothing re-flushes stale entries.
+  flushedCount = Math.min(flushedCount, monacoQueue.length);
+  capabilities.forEach((cap) => {
+    if (cap.startsWith(`${id}:`)) capabilities.delete(cap);
+  });
+  notify();
 }
 
 function isExtEnabled(extId: string): boolean {
@@ -287,5 +432,7 @@ export function resetEditorExtensionsForTest(): void {
   monacoQueue.length = 0;
   readyQueue.length = 0;
   flushedCount = 0;
+  enabledMap = null;
+  enabledInit = null;
   notify();
 }

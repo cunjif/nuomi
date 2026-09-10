@@ -174,6 +174,14 @@ impl NuomiKernel {
         // resolved through the kernel's Context.
         let mut kernel = Kernel::new(Context::default());
         let ctx = kernel.context().clone();
+        // Editor bridge: the shell's plugin_editor_call IPC resolves this
+        // service to reach side-loaded plugins' editor RPC methods.
+        ctx.register_service(
+            "kernel",
+            "editor_bridge",
+            Arc::new(crate::harness::EditorBridgeRegistry::new()),
+        )
+        .await?;
         kernel.register(Arc::new(ToolsPlugin::default()))?;
         kernel.register(Arc::new(HooksPlugin::new(Arc::new(HookRegistry::new()))))?;
         kernel.register(Arc::new(SystemPromptPlugin::new(

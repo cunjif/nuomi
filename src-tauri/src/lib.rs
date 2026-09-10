@@ -100,6 +100,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::plugin_install_from_path,
         tauri_cmds::plugin_uninstall,
         tauri_cmds::plugin_open_dir,
+        tauri_cmds::plugin_editor_call,
+        tauri_cmds::app_setting_get,
+        tauri_cmds::app_setting_set,
     ])
 }
 

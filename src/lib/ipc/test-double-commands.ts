@@ -693,6 +693,7 @@ export function testDoubleCommands(): CommandSet {
         tools: [],
         hooks: [],
         events: [],
+        editor: null,
         permissions: { fsRead: [], fsWrite: [], network: [], shell: false },
       });
     },
@@ -700,6 +701,16 @@ export function testDoubleCommands(): CommandSet {
       return ok(null);
     },
     async pluginOpenDir() {
+      return ok(null);
+    },
+    async pluginEditorCall(_pluginId: string, _method: string, _params: JsonValue) {
+      return err("plugin_not_loaded", "test double: no live plugin process");
+    },
+    async appSettingGet(key: string) {
+      return ok<string | null>(tdState.appSettings.get(key) ?? null);
+    },
+    async appSettingSet(key: string, value: string) {
+      tdState.appSettings.set(key, value);
       return ok(null);
     },
 

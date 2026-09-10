@@ -92,13 +92,16 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
   const [mdSourceMode, setMdSourceMode] = useState(false);
   const wysiwygActive = wysiwyg !== null && !mdSourceMode;
   const language = languageForPath(path);
+  // Plugin symbol providers fill their cache asynchronously (ADR 0010); the
+  // version bump on cache fill re-runs this memo so the outline populates.
+  const extVersion = useEditorExtVersion();
   const symbols = useMemo<DocumentSymbol[]>(() => {
     if (fileQuery.isLoading || fileQuery.isError) return [];
     const providers = getOutlineProviders().filter(
       (p) => p.languages.includes("*") || p.languages.includes(language),
     );
     return providers.flatMap((p) => p.provideSymbols({ path, language, content: value }));
-  }, [fileQuery.isLoading, fileQuery.isError, language, path, value]);
+  }, [fileQuery.isLoading, fileQuery.isError, language, path, value, extVersion]);
 
   const saveMut = useMutation({
     mutationFn: () => ipc.writeFile(path, value),

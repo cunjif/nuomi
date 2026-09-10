@@ -3,7 +3,12 @@
  * allows tests to swap the underlying command set (ipc-contract rule:
  * tests never touch the real Tauri runtime).
  */
-import { commands as production, type IpcError, type Result } from "./bindings.gen";
+import {
+  commands as production,
+  type IpcError,
+  type JsonValue,
+  type Result,
+} from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
 export class IpcCommandError extends Error {
@@ -126,6 +131,10 @@ export const ipc = {
   pluginInstallFromPath: (path: string) => unwrap(current.pluginInstallFromPath(path)),
   pluginUninstall: (pluginId: string) => unwrap(current.pluginUninstall(pluginId)),
   pluginOpenDir: () => unwrap(current.pluginOpenDir()),
+  pluginEditorCall: (pluginId: string, method: string, params: JsonValue) =>
+    unwrap(current.pluginEditorCall(pluginId, method, params)),
+  appSettingGet: (key: string) => unwrap(current.appSettingGet(key)),
+  appSettingSet: (key: string, value: string) => unwrap(current.appSettingSet(key, value)),
 };
 
 export type Ipc = typeof ipc;

@@ -16,6 +16,7 @@ import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
 import { AreaNav } from "./AreaNav";
 import { EditorArea } from "./EditorArea";
+import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge";
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
@@ -145,6 +146,13 @@ export function Shell(): ReactNode {
       unlisten?.();
     };
   }, [queryClient]);
+
+  // Plugin-delivered editor extensions (ADR 0010): hydrate once per mount —
+  // the plugin list is a pure disk scan, so this works before kernel-ready;
+  // editor RPC calls degrade gracefully until the kernel is up.
+  useEffect(() => {
+    void hydratePluginEditorExtensions();
+  }, []);
 
   const workspaceQuery = useQuery({
     queryKey: ["workspace"],

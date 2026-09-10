@@ -3063,6 +3063,72 @@ pub async fn impl_journal_rollback(state: &AppState, seq: u64) -> Result<(), Ipc
 
 // ---------- plugins panel (ADR 0009 §4 addendum) ----------
 
+/// One `[[editor.commands]]` entry (ADR 0010).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorCommandDto {
+    name: String,
+    title: String,
+    tool: String,
+}
+
+/// One `[[editor.overlays]]` entry (ADR 0010): URL rendered in a sandboxed
+/// iframe overlay by the shell.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorOverlayDto {
+    id: String,
+    title: String,
+    url: String,
+    width: u32,
+    height: u32,
+}
+
+/// The plugin manifest's `[editor]` section (ADR 0010). Present only when the
+/// plugin declares editor contributions.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorContributionDto {
+    /// Monaco language ids served; `["*"]` = all.
+    languages: Vec<String>,
+    /// Plugin implements the `editor/hover` NPP method.
+    hover: bool,
+    /// Plugin implements the `editor/symbols` NPP method.
+    symbols: bool,
+    commands: Vec<EditorCommandDto>,
+    overlays: Vec<EditorOverlayDto>,
+}
+
+impl EditorContributionDto {
+    fn from_manifest(editor: &nuomi_core::harness::sideload::manifest::EditorSection) -> Self {
+        Self {
+            languages: editor.languages.clone(),
+            hover: editor.hover,
+            symbols: editor.symbols,
+            commands: editor
+                .commands
+                .iter()
+                .map(|c| EditorCommandDto {
+                    name: c.name.clone(),
+                    title: c.title.clone(),
+                    tool: c.tool.clone(),
+                })
+                .collect(),
+            overlays: editor
+                .overlays
+                .iter()
+                .map(|o| EditorOverlayDto {
+                    id: o.id.clone(),
+                    title: o.title.clone(),
+                    url: o.url.clone(),
+                    width: o.width,
+                    height: o.height,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Declared permission surface of one plugin (panel display only, v1).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -3091,6 +3157,9 @@ pub struct PluginInfoDto {
     tools: Vec<String>,
     hooks: Vec<String>,
     events: Vec<String>,
+    /// Editor contributions (ADR 0010); `None` when the manifest has no
+    /// `[editor]` section.
+    editor: Option<EditorContributionDto>,
     permissions: PluginPermissionsDto,
 }
 
@@ -3123,6 +3192,10 @@ fn plugin_info_from_manifest(
             .collect(),
         hooks: manifest.hooks.iter().map(|h| h.point.clone()).collect(),
         events: manifest.events.iter().map(|e| e.topic.clone()).collect(),
+        editor: manifest
+            .editor
+            .as_ref()
+            .map(EditorContributionDto::from_manifest),
         permissions: PluginPermissionsDto {
             fs_read: manifest.permissions.fs.read.clone(),
             fs_write: manifest.permissions.fs.write.clone(),
@@ -3141,7 +3214,11 @@ pub fn impl_plugin_list() -> PluginListResultDto {
     let mut failed = Vec::new();
     for outcome in outcomes {
         match outcome {
-            nuomi_core::harness::sideload::LoadOutcome::Loaded { source, dir, manifest } => {
+            nuomi_core::harness::sideload::LoadOutcome::Loaded {
+                source,
+                dir,
+                manifest,
+            } => {
                 plugins.push(plugin_info_from_manifest(&manifest, source.label(), &dir));
             }
             nuomi_core::harness::sideload::LoadOutcome::Skipped { dir, reason } => {
@@ -3164,11 +3241,9 @@ pub fn impl_plugin_list() -> PluginListResultDto {
 pub fn impl_plugin_install_from_path(path: String) -> Result<PluginInfoDto, IpcError> {
     let plugins_dir = nuomi_core::harness::sideload::user_plugins_dir()
         .map_err(|e| IpcError::new("plugin.install_failed", e.to_string()))?;
-    let manifest = nuomi_core::harness::sideload::install_into(
-        &plugins_dir,
-        std::path::Path::new(&path),
-    )
-    .map_err(|e| IpcError::new("plugin.install_failed", e.to_string()))?;
+    let manifest =
+        nuomi_core::harness::sideload::install_into(&plugins_dir, std::path::Path::new(&path))
+            .map_err(|e| IpcError::new("plugin.install_failed", e.to_string()))?;
     let dir = plugins_dir.join(&manifest.id);
     Ok(plugin_info_from_manifest(&manifest, "user", &dir))
 }
@@ -3195,6 +3270,61 @@ pub fn impl_plugin_open_dir() -> Result<(), IpcError> {
     let result = std::process::Command::new("xdg-open").arg(&dir).spawn();
     result.map_err(|e| IpcError::new("plugin.open_dir_failed", e.to_string()))?;
     Ok(())
+}
+
+/// Forwards one editor RPC to a side-loaded plugin's process over NPP
+/// (ADR 0010). Requires a booted kernel and a live plugin; structured errors
+/// (`kernel_not_ready` / `plugin_not_loaded`) let the frontend degrade
+/// gracefully instead of wedging editor providers.
+pub async fn impl_plugin_editor_call(
+    state: &AppState,
+    plugin_id: String,
+    method: String,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, IpcError> {
+    let bridge = state
+        .kernel
+        .context()
+        .service::<nuomi_core::harness::EditorBridgeRegistry>("editor_bridge")
+        .await
+        .ok_or_else(|| IpcError::new("kernel_not_ready", "kernel is not booted yet"))?;
+    bridge
+        .call(&plugin_id, &method, params)
+        .await
+        .map_err(|e| IpcError::new("plugin_not_loaded", e.to_string()))
+}
+
+/// Reads one app_settings key (ADR 0010 extension enable state et al).
+pub async fn impl_app_setting_get(
+    state: &AppState,
+    key: String,
+) -> Result<Option<String>, IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<String>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::settings::get(&db.0, &key)
+            .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))?
+}
+
+/// Upserts one app_settings key.
+pub async fn impl_app_setting_set(
+    state: &AppState,
+    key: String,
+    value: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::settings::set(&db.0, &key, &value)
+            .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))?
 }
 
 #[cfg(test)]

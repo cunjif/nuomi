@@ -37,8 +37,10 @@ export function activateBuiltinEditorExtensions(): void {
 
 export {
   registerEditorExtension,
+  unregisterEditorExtension,
   getRegisteredEditorExtensions,
   ensureEditorExtensionsActivated,
+  initEditorExtEnabledStore,
   isEditorExtensionEnabled,
   setEditorExtensionEnabled,
   findPreviewForPath,
@@ -64,3 +66,9 @@ export type {
   SymbolProvider,
   DocumentSymbol,
 } from "./types";
+export {
+  hydratePluginEditorExtensions,
+  teardownPluginEditorExtension,
+  pluginEditorExtensionId,
+  PLUGIN_EDITOR_PREFIX,
+} from "./pluginBridge";

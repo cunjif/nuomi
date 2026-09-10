@@ -6,7 +6,7 @@
  * Future: Rust plugins will deliver extra commands the same way — hydrate the
  * registry at startup via registerCommand() per backend-provided entry.
  */
-import { getCommands, registerCommand, type SlashCommand } from "./registry";
+import { getCommands, registerCommand, commandDescription, type SlashCommand } from "./registry";
 
 const BUILTIN_COMMANDS: SlashCommand[] = [
   {
@@ -60,7 +60,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
     run(_args, ctx) {
       const lines = getCommands().map((cmd) => {
         const usage = cmd.usage ? ` ${ctx.t(cmd.usage)}` : "";
-        return `/${cmd.name}${usage} — ${ctx.t(cmd.descriptionI18nKey)}`;
+        return `/${cmd.name}${usage} — ${commandDescription(cmd, ctx.t)}`;
       });
       // The toast surface collapses newlines, so join on a readable separator.
       ctx.toast.success(`${ctx.t("commands.helpTitle")} ${lines.join(" | ")}`);

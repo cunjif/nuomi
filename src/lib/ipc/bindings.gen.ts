@@ -533,6 +533,30 @@ async pluginOpenDir() : Promise<Result<null, IpcError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async pluginEditorCall(pluginId: string, method: string, params: JsonValue) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin_editor_call", { pluginId, method, params }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async appSettingGet(key: string) : Promise<Result<string | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("app_setting_get", { key }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async appSettingSet(key: string, value: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("app_setting_set", { key, value }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -555,6 +579,32 @@ export type ApprovalDto = { id: string; runId: string; toolName: string; argumen
 export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
+/**
+ * One `[[editor.commands]]` entry (ADR 0010).
+ */
+export type EditorCommandDto = { name: string; title: string; tool: string }
+/**
+ * The plugin manifest's `[editor]` section (ADR 0010). Present only when the
+ * plugin declares editor contributions.
+ */
+export type EditorContributionDto = { 
+/**
+ * Monaco language ids served; `["*"]` = all.
+ */
+languages: string[]; 
+/**
+ * Plugin implements the `editor/hover` NPP method.
+ */
+hover: boolean; 
+/**
+ * Plugin implements the `editor/symbols` NPP method.
+ */
+symbols: boolean; commands: EditorCommandDto[]; overlays: EditorOverlayDto[] }
+/**
+ * One `[[editor.overlays]]` entry (ADR 0010): URL rendered in a sandboxed
+ * iframe overlay by the shell.
+ */
+export type EditorOverlayDto = { id: string; title: string; url: string; width: number; height: number }
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
 export type GitCommitDto = { hash: string; subject: string; author: string }
@@ -626,7 +676,12 @@ uninstallable: boolean;
 /**
  * Fully-qualified tool names (`<id>.<tool>`).
  */
-tools: string[]; hooks: string[]; events: string[]; permissions: PluginPermissionsDto }
+tools: string[]; hooks: string[]; events: string[]; 
+/**
+ * Editor contributions (ADR 0010); `None` when the manifest has no
+ * `[editor]` section.
+ */
+editor: EditorContributionDto | null; permissions: PluginPermissionsDto }
 export type PluginListResultDto = { plugins: PluginInfoDto[]; skipped: string[]; failed: string[] }
 /**
  * Declared permission surface of one plugin (panel display only, v1).

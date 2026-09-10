@@ -19,6 +19,10 @@ export function stubLocalStorage(): Map<string, string> {
     clear: (): void => {
       backing.clear();
     },
+    key: (index: number): string | null => [...backing.keys()][index] ?? null,
+    get length(): number {
+      return backing.size;
+    },
   });
   return backing;
 }

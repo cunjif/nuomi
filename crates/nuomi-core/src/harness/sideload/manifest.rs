@@ -108,6 +108,83 @@ pub struct EventSubscription {
     pub topic: String,
 }
 
+/// One `[[editor.commands]]` entry: a slash command backed by an existing
+/// `[[tools]]` entry (the mapping is enforced at validation time).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EditorCommandContribution {
+    /// Slash-command name; exposed to the user as `/<plugin_id>.<name>`.
+    pub name: String,
+    #[serde(default)]
+    pub title: String,
+    /// Bare tool name from this plugin's `[[tools]]`.
+    pub tool: String,
+}
+
+/// One `[[editor.overlays]]` entry: a URL the shell renders in a sandboxed
+/// iframe overlay. Only `https://` or loopback `http://` URLs are accepted.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EditorOverlayContribution {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    pub url: String,
+    #[serde(default = "default_overlay_width")]
+    pub width: u32,
+    #[serde(default = "default_overlay_height")]
+    pub height: u32,
+}
+
+fn default_overlay_width() -> u32 {
+    320
+}
+
+fn default_overlay_height() -> u32 {
+    240
+}
+
+/// The `[editor]` section: editor-extension contributions served over the
+/// additive NPP v1 methods `editor/hover` / `editor/symbols` / `editor/command`
+/// (host→plugin; see `editor_bridge.rs`). Declared capabilities are the
+/// permission boundary — the host never calls a method the manifest omitted.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EditorSection {
+    /// Monaco language ids the hover/symbol providers serve; `["*"]` = all.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// Plugin implements `editor/hover`.
+    #[serde(default)]
+    pub hover: bool,
+    /// Plugin implements `editor/symbols`.
+    #[serde(default)]
+    pub symbols: bool,
+    #[serde(default)]
+    pub commands: Vec<EditorCommandContribution>,
+    #[serde(default)]
+    pub overlays: Vec<EditorOverlayContribution>,
+}
+
+impl EditorSection {
+    /// True when the section declares no contributions at all. Note that
+    /// `languages` alone is NOT a contribution — it only scopes hover/symbols,
+    /// so `[editor] languages = ["markdown"]` with nothing else reports `true`
+    /// and the plugin is never registered on the editor bridge.
+    pub fn has_no_contributions(&self) -> bool {
+        !self.hover && !self.symbols && self.commands.is_empty() && self.overlays.is_empty()
+    }
+}
+
+/// Overlay URLs must be `https://…` or plain-http loopback only (dev servers).
+fn is_allowed_overlay_url(url: &str) -> bool {
+    if let Some(rest) = url.strip_prefix("https://") {
+        return !rest.is_empty();
+    }
+    if let Some(rest) = url.strip_prefix("http://") {
+        let host = rest.split(['/', ':', '?', '#']).next().unwrap_or("");
+        return host == "localhost" || host == "127.0.0.1";
+    }
+    false
+}
+
 /// The parsed manifest. Field order follows docs/plugins/plugin-format.md.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginManifest {
@@ -130,6 +207,8 @@ pub struct PluginManifest {
     pub hooks: Vec<HookContribution>,
     #[serde(default)]
     pub events: Vec<EventSubscription>,
+    #[serde(default)]
+    pub editor: Option<EditorSection>,
 }
 
 /// Bare-key charset shared by `id` and tool names (kebab-case).
@@ -174,6 +253,7 @@ impl PluginManifest {
             "tools",
             "hooks",
             "events",
+            "editor",
         ];
         for key in table.keys() {
             if !KNOWN.contains(&key.as_str()) {
@@ -228,6 +308,52 @@ impl PluginManifest {
         for event in &self.events {
             if event.topic.trim().is_empty() {
                 return invalid("event topic must not be empty");
+            }
+        }
+        if let Some(editor) = &self.editor {
+            self.validate_editor(editor)?;
+        }
+        Ok(())
+    }
+
+    fn validate_editor(&self, editor: &EditorSection) -> Result<(), ManifestError> {
+        if (editor.hover || editor.symbols) && editor.languages.is_empty() {
+            return invalid("editor.hover/symbols require a non-empty editor.languages list");
+        }
+        let mut command_names = std::collections::HashSet::new();
+        for command in &editor.commands {
+            if !is_kebab(&command.name) {
+                return invalid(format!(
+                    "editor command name '{}' must be kebab-case",
+                    command.name
+                ));
+            }
+            if !command_names.insert(command.name.as_str()) {
+                return invalid(format!(
+                    "editor command '{}' is declared twice",
+                    command.name
+                ));
+            }
+            if !self.tools.iter().any(|t| t.name == command.tool) {
+                return invalid(format!(
+                    "editor command '{}' maps to undeclared tool '{}'",
+                    command.name, command.tool
+                ));
+            }
+        }
+        let mut overlay_ids = std::collections::HashSet::new();
+        for overlay in &editor.overlays {
+            if overlay.id.trim().is_empty() {
+                return invalid("editor overlay id must not be empty");
+            }
+            if !overlay_ids.insert(overlay.id.as_str()) {
+                return invalid(format!("editor overlay '{}' is declared twice", overlay.id));
+            }
+            if !is_allowed_overlay_url(&overlay.url) {
+                return invalid(format!(
+                    "editor overlay '{}' url must be https:// or http://localhost",
+                    overlay.id
+                ));
             }
         }
         Ok(())
@@ -347,5 +473,158 @@ point = "lunchtime"
         );
         let err = PluginManifest::load(dir.path()).unwrap_err().to_string();
         assert!(err.contains("hook point"), "{err}");
+    }
+
+    #[test]
+    fn parses_editor_section() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(
+            dir.path(),
+            r#"
+id = "mdx"
+name = "Mdx"
+version = "0.1.0"
+api_version = 1
+entry = ["python", "plugin.py"]
+[[tools]]
+name = "to-upper"
+[editor]
+languages = ["markdown"]
+hover = true
+symbols = true
+[[editor.commands]]
+name = "ask"
+title = "Ask mdx"
+tool = "to-upper"
+[[editor.overlays]]
+id = "stats"
+title = "Stats"
+url = "https://plugins.example.com/stats"
+width = 400
+height = 300
+"#,
+        );
+        let manifest = PluginManifest::load(dir.path()).unwrap();
+        let editor = manifest.editor.expect("editor section parsed");
+        assert_eq!(editor.languages, vec!["markdown".to_string()]);
+        assert!(editor.hover && editor.symbols);
+        assert_eq!(editor.commands.len(), 1);
+        assert_eq!(editor.commands[0].tool, "to-upper");
+        assert_eq!(editor.overlays[0].width, 400);
+        assert_eq!(editor.overlays[0].height, 300);
+        assert!(!editor.has_no_contributions());
+    }
+
+    #[test]
+    fn editor_languages_alone_is_not_a_contribution() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(
+            dir.path(),
+            r#"
+id = "e"
+name = "E"
+version = "0.1.0"
+api_version = 1
+entry = ["run"]
+[editor]
+languages = ["markdown"]
+"#,
+        );
+        // `languages` only scopes hover/symbols — it contributes nothing on
+        // its own, so the plugin must not be registered on the editor bridge.
+        let manifest = PluginManifest::load(dir.path()).unwrap();
+        assert!(manifest.editor.unwrap().has_no_contributions());
+    }
+
+    #[test]
+    fn editor_without_section_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(
+            dir.path(),
+            r#"
+id = "plain"
+name = "P"
+version = "0.1.0"
+api_version = 1
+entry = ["run"]
+"#,
+        );
+        let manifest = PluginManifest::load(dir.path()).unwrap();
+        assert!(manifest.editor.is_none());
+    }
+
+    #[test]
+    fn editor_command_must_map_to_declared_tool() {
+        let base = r#"
+id = "e"
+name = "E"
+version = "0.1.0"
+api_version = 1
+entry = ["run"]
+[editor]
+languages = ["*"]
+[[editor.commands]]
+name = "ask"
+tool = "ghost"
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(dir.path(), base);
+        let err = PluginManifest::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("undeclared tool"), "{err}");
+    }
+
+    #[test]
+    fn editor_hover_requires_languages() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(
+            dir.path(),
+            r#"
+id = "e"
+name = "E"
+version = "0.1.0"
+api_version = 1
+entry = ["run"]
+[editor]
+hover = true
+"#,
+        );
+        let err = PluginManifest::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("languages"), "{err}");
+    }
+
+    #[test]
+    fn editor_overlay_url_must_be_https_or_loopback() {
+        let make = |url: &str| {
+            format!(
+                r#"
+id = "e"
+name = "E"
+version = "0.1.0"
+api_version = 1
+entry = ["run"]
+[editor]
+[[editor.overlays]]
+id = "panel"
+url = "{url}"
+"#
+            )
+        };
+        for (url, ok) in [
+            ("https://plugins.example.com/stats", true),
+            ("http://localhost:5173/panel", true),
+            ("http://127.0.0.1:3000", true),
+            ("http://evil.example.com", false),
+            ("file:///etc/passwd", false),
+            ("javascript:alert(1)", false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write_manifest(dir.path(), &make(url));
+            assert_eq!(
+                PluginManifest::load(dir.path()).is_ok(),
+                ok,
+                "url {url} should be {}",
+                if ok { "allowed" } else { "rejected" }
+            );
+        }
     }
 }

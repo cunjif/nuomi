@@ -31,7 +31,9 @@ pub enum InstallError {
     PluginNotInstalled(String),
     #[error("zip archive is unsafe or malformed: {0}")]
     ZipUnsafe(String),
-    #[error("zip archive contains no plugin.toml (at archive root or in a single top-level folder)")]
+    #[error(
+        "zip archive contains no plugin.toml (at archive root or in a single top-level folder)"
+    )]
     ZipNoManifest,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -52,10 +54,16 @@ pub fn user_plugins_dir() -> Result<PathBuf, InstallError> {
 /// Installs a plugin from a directory or a `.zip` archive into
 /// `plugins_dir/<manifest.id>`. Returns the manifest of the installed plugin
 /// (read back from the installed location).
-pub fn install_into(plugins_dir: &Path, source_path: &Path) -> Result<PluginManifest, InstallError> {
+pub fn install_into(
+    plugins_dir: &Path,
+    source_path: &Path,
+) -> Result<PluginManifest, InstallError> {
     if source_path.is_dir() {
         install_directory(plugins_dir, source_path)
-    } else if source_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+    } else if source_path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+    {
         install_zip(plugins_dir, source_path)
     } else {
         Err(InstallError::UnsupportedSource(
@@ -111,8 +119,8 @@ fn install_zip(plugins_dir: &Path, zip_path: &Path) -> Result<PluginManifest, In
 
     // Staging under the OS temp dir; a uuid keeps concurrent installs apart.
     // Always cleaned up, even on failure.
-    let staging_root = std::env::temp_dir()
-        .join(format!("nuomi-plugin-install-{}", crate::domain::new_id()));
+    let staging_root =
+        std::env::temp_dir().join(format!("nuomi-plugin-install-{}", crate::domain::new_id()));
     fs::create_dir_all(&staging_root)?;
     let result = extract_and_install(plugins_dir, &mut archive, &staging_root);
     let _ = fs::remove_dir_all(&staging_root);
@@ -137,7 +145,9 @@ fn extract_and_install(
         }
         total += entry.size();
         if total > ZIP_TOTAL_CAP {
-            return Err(InstallError::ZipUnsafe("uncompressed payload too large".into()));
+            return Err(InstallError::ZipUnsafe(
+                "uncompressed payload too large".into(),
+            ));
         }
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -156,14 +166,20 @@ fn extract_and_install(
 fn sanitize_zip_path(staging: &Path, entry_name: &str) -> Result<PathBuf, InstallError> {
     let rel = Path::new(entry_name);
     if entry_name.starts_with('/') || entry_name.starts_with('\\') {
-        return Err(InstallError::ZipUnsafe(format!("absolute entry path: {entry_name}")));
+        return Err(InstallError::ZipUnsafe(format!(
+            "absolute entry path: {entry_name}"
+        )));
     }
     let mut safe = staging.to_path_buf();
     for component in rel.components() {
         match component {
             Component::Normal(part) => safe.push(part),
             Component::CurDir => {}
-            _ => return Err(InstallError::ZipUnsafe(format!("unsafe entry path: {entry_name}"))),
+            _ => {
+                return Err(InstallError::ZipUnsafe(format!(
+                    "unsafe entry path: {entry_name}"
+                )))
+            }
         }
     }
     Ok(safe)
@@ -292,7 +308,8 @@ entry = ["node", "plugin.cjs"]
         let mut zip = zip::ZipWriter::new(file);
         for (name, body) in entries {
             if name.ends_with('/') {
-                zip.add_directory(*name, SimpleFileOptions::default()).unwrap();
+                zip.add_directory(*name, SimpleFileOptions::default())
+                    .unwrap();
             } else {
                 zip.start_file(name, SimpleFileOptions::default()).unwrap();
                 zip.write_all(body.as_bytes()).unwrap();
@@ -331,7 +348,10 @@ entry = ["node", "plugin.cjs"]
         let zip_path = work.path().join("flat.zip");
         build_zip(
             &zip_path,
-            &[("plugin.toml", MANIFEST), ("plugin.cjs", "console.log('hi')")],
+            &[
+                ("plugin.toml", MANIFEST),
+                ("plugin.cjs", "console.log('hi')"),
+            ],
         );
         let manifest = install_into(plugins_dir.path(), &zip_path).unwrap();
         assert_eq!(manifest.id, "installer-test");

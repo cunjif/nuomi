@@ -32,3 +32,22 @@ order = 100
 
 [[events]]
 topic = "session.*"
+
+# ── 编辑器扩展贡献（ADR 0010）───────────────────────────────────────────
+# 插件代码零改动：editor/command 由宿主改写为上方已声明的 upper 工具调用。
+# languages 只在 hover/symbols 为 true 时才有意义（限定服务哪些语言），故此处省略。
+[editor]
+hover = false            # 本插件未实现 editor/hover（宿主不会调用未声明的方法）
+symbols = false          # 未实现 editor/symbols
+
+[[editor.commands]]
+name = "upper"           # 聊天输入框出现 /upper.upper
+title = "Uppercase text via the upper tool"
+tool = "upper"           # 必须引用上方 [[tools]] 已声明的工具名
+
+[[editor.overlays]]
+id = "stats"
+title = "Upper Stats"
+url = "https://nuomi.example.com/upper-stats"   # 仅 https / http://localhost
+width = 320
+height = 240

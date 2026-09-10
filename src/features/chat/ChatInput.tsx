@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "../../lib/commands/builtin";
 import {
+  commandDescription,
   getCommands,
   parseInput,
   suggestCommands,
@@ -146,7 +147,7 @@ export function ChatInput({ disabled, pending, commandContext, onSubmit }: ChatI
                     /{cmd.name}
                     {cmd.usage ? ` ${t(cmd.usage)}` : ""}
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{t(cmd.descriptionI18nKey)}</span>
+                  <span className="min-w-0 flex-1 truncate">{commandDescription(cmd, t)}</span>
                 </button>
               </li>
             ))}

@@ -14,6 +14,17 @@ use super::super::HarnessError;
 
 /// The protocol major this host speaks. Plugins offering a higher
 /// `api_version` are rejected at the `initialize` handshake.
+///
+/// Method surface (v1, additive — see ADR 0009 + ADR 0010):
+/// - `initialize` / `initialized` (notify) / `shutdown`: lifecycle handshake
+/// - `tools/list` / `tools/call`: tool contributions
+/// - `hook/handle`: hook verdicts
+/// - `event` (notify): bus topics the manifest subscribed to
+/// - `nuomi/log` (plugin→host): log forwarding
+/// - `editor/hover` / `editor/symbols`: editor providers, only sent to
+///   plugins whose manifest `[editor]` section declares `hover` / `symbols`
+/// - `editor/command`: never sent as such — the host maps it to the
+///   manifest-declared `tools/call` (see `editor_bridge.rs`)
 pub const NPP_API_VERSION: u32 = 1;
 
 /// The host's own identity, sent in `initialize`.

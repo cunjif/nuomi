@@ -353,8 +353,15 @@
     "navLabel": "设置分类"
   },
   "plugins": {
-    "title": "插件",
-    "subtitle": "安装、卸载与管理第三方侧载插件（ADR 0009）。",
+    "title": "扩展中心",
+    "subtitle": "一套系统管理内置编辑器扩展与内核插件（ADR 0009 / 0010）。",
+    "builtinSection": "内置编辑器扩展",
+    "pluginSection": "内核插件",
+    "kindBuiltin": "编辑器扩展",
+    "kindPlugin": "内核插件",
+    "editorContrib": "编辑器贡献",
+    "noEditorContrib": "无编辑器贡献",
+    "editorToggleHint": "开关只控制该插件的编辑器贡献（悬浮文档、大纲、命令、浮窗），插件本体随启动加载。",
     "installFromFolder": "从文件夹安装",
     "installFromZip": "从压缩包安装",
     "openDir": "打开插件目录",

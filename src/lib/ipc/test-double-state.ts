@@ -37,6 +37,8 @@ interface DoubleState {
   onlineAuthorized: boolean;
   /** Persisted capability-routing rules (get/setRoutingRules round-trip). */
   routingRules: { preferLocal: boolean; capabilityOverrides: Record<string, string> };
+  /** App KV settings backing store (get/setAppSetting round-trip). */
+  appSettings: Map<string, string>;
   /** Active workspace root returned by get/setWorkspace (files stay flat paths). */
   workspaceRoot: string;
   /** Whether the workspace has been configured (drives first-launch gating). */
@@ -62,6 +64,7 @@ export const tdState: DoubleState = {
   sensitiveTools: null,
   onlineAuthorized: false,
   routingRules: { preferLocal: false, capabilityOverrides: {} },
+  appSettings: new Map(),
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
   files: new Map(),
@@ -105,6 +108,7 @@ export function tdReset(): void {
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
   tdState.routingRules = { preferLocal: false, capabilityOverrides: {} };
+  tdState.appSettings.clear();
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;
   tdState.files.clear();

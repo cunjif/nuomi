@@ -90,6 +90,38 @@ params: { "topic": "session.message", "payload": { … } }
 - 内核把总线上匹配清单 `[[events]].topic` 的 Event 转发过来；fire-and-forget，插件无回执。
 - 事件负载为 `serde_json::Value`（内核 Event.payload 原样），语义遵循 ADR-0002（只加不改删）。
 
+### host→plugin: `editor/hover`（request，ADR 0010）
+
+```json
+params: { "path": "docs/intro.md", "language": "markdown", "line": 4, "character": 12 }
+result: { "contents": "**UPPER** — 把文本转为大写（markdown）" }
+```
+
+- 仅当清单 `[editor].hover = true` 且编辑器语言匹配 `[editor].languages` 时由宿主发起；行列为 0-based。
+- `contents` 为 markdown 字符串；空串/缺失/超时（5s）→ 宿主向编辑器返回空 hover，绝不阻断输入。
+- `path` 语义：`file://` URI 时为文件路径，否则为 URI 字符串。
+
+### host→plugin: `editor/symbols`（request，ADR 0010）
+
+```json
+params: { "path": "plugin.py", "language": "python", "content": "…全文…" }
+result: { "symbols": [ { "name": "upper", "kind": "function", "range": {"start": {"line": 3, "character": 0}, "end": {"line": 9, "character": 0}}, "selectionRange": {…} } ] }
+```
+
+- LSP `DocumentSymbol` 形状（0-based 位置）；`kind` 为粗粒度字符串（function/class/struct/method/heading…）。
+- 宿主端为同步缓存 + 后台刷新：首轮返回 []，RPC 落地后由版本通知驱动重渲染。
+- 错误/超时 → 该文件无符号；声明性缓存不会阻塞索引管线。
+
+### host→plugin: `editor/command`（request，ADR 0010）
+
+```json
+params: { "name": "ask", "arguments": { "text": "hello" } }
+```
+
+- **宿主不透传此方法**：桥接层校验 `name` 在清单 `[[editor.commands]]` 中声明后，改写为
+  `tools/call { name: <清单映射的 tool>, arguments }` 发送给插件。因此插件侧只需实现 `tools/call`。
+- 未声明命令 → 宿主拒绝（清单即权限边界）。
+
 ### host→plugin: `shutdown`（request）
 
 `params: {}` → 插件应在 2s 内回结果并自行退出；超时内核 SIGKILL。`dispose` 错误只记录、不中断内核关停扫尾。
@@ -105,5 +137,7 @@ params: { "level": "info|warn|error", "message": "…" }
 ## 版本化与兼容
 
 - 同一 `api_version`（major）内：只能**新增**方法/字段；改名、改语义、删除 = major+1。
+- editor/* 方法为 v1 内增量新增（ADR 0010）：宿主只对清单声明 `[editor]` 的插件调用对应方法，
+  旧插件与旧宿主互不感知，`NPP_API_VERSION` 保持 1。
 - 旧内核遇到新字段必须忽略；新内核遇到旧清单必须照常工作。
 - 协议破坏性变更走 ADR（AGENTS.md §7.7 / ADR-0001 缓解条款）。

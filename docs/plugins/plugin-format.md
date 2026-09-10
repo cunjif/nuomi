@@ -46,6 +46,28 @@ order = 100                         # 同点多个钩子的执行序（小者先
 # 内核事件总线上匹配 topic 的 Event 以 event 通知转发（fire-and-forget）。
 [[events]]
 topic = "session.*"                 # 点段通配，匹配内核总线语义（bus.rs topic_matches）
+
+# ── 编辑器扩展贡献（可选；ADR 0010）────────────────────────────────────
+# 声明后，桌面壳的扩展中心会出现派生扩展 "plugin.<id>.editor"，与本体内置
+# 编辑器扩展同列管理；能力经 NPP 增量方法 editor/hover、editor/symbols 与
+# editor/command（映射到 [[tools]]）提供。声明即权限边界：宿主绝不调用未
+# 声明的方法。
+[editor]
+languages = ["markdown", "python"]  # hover/symbols 服务的 Monaco 语言 id；["*"] = 全部
+hover = true                        # 插件实现 editor/hover（悬浮文档）
+symbols = true                      # 插件实现 editor/symbols（LSP DocumentSymbol 形状）
+
+[[editor.commands]]                 # 聊天输入框 slash 命令 → /<plugin_id>.<name>
+name = "ask"                        # kebab-case；同插件内唯一
+title = "Ask upper"                 # 直接展示文本（插件无应用 i18n key）
+tool = "upper"                      # 必须引用本插件 [[tools]] 已声明的工具名
+
+[[editor.overlays]]                 # 受控 iframe 浮窗（sandbox="allow-scripts"）
+id = "stats"                        # 插件内唯一
+title = "Stats Panel"
+url = "https://plugins.example.com/stats"   # 仅 https 或 http://localhost(:port)
+width = 320                         # 可选；默认 320
+height = 240                        # 可选；默认 240
 ```
 
 ## 校验规则
@@ -56,6 +78,11 @@ topic = "session.*"                 # 点段通配，匹配内核总线语义（
 | `api_version` > 内核 `NPP_API_VERSION` | 握手阶段拒绝，`failed` |
 | `entry` 为空或非数组 | `failed` |
 | 工具名重复（同插件内）或注册后与既有工具重名（含前缀后） | `failed` |
+| `editor.hover`/`editor.symbols` 为 true 但 `editor.languages` 为空 | `failed` |
+| `editor.commands[].tool` 未在 `[[tools]]` 中声明 | `failed` |
+| `editor.commands[].name` 重复或非 kebab-case | `failed` |
+| `editor.overlays[].url` 非 https / 非 loopback http | `failed` |
+| `editor.overlays[].id` 重复或为空 | `failed` |
 | **未知键** | **警告不报错**（前向兼容：旧内核跑新清单只丢新能力） |
 | 同 `id` 插件出现在多个扫描目录 | 先到先得（`NUOMI_PLUGIN_PATH` > 用户配置目录 > 工作区 `.nuomi/plugins`），后者 `skipped(duplicate)` |
 

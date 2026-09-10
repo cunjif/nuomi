@@ -8,6 +8,11 @@ import { renderWithProviders } from "../../test/helpers";
 import { injectIpcCommands, resetIpcCommands } from "../../lib/ipc/client";
 import { i18n } from "../../i18n";
 import type { PluginInfoDto, PluginListResultDto } from "../../lib/ipc/bindings.gen";
+import {
+  getRegisteredEditorExtensions,
+  registerEditorExtension,
+  resetEditorExtensionsForTest,
+} from "../../lib/editor-ext";
 import { PluginsView } from "./PluginsView";
 
 const openDialog = vi.fn();
@@ -25,6 +30,7 @@ const samplePlugin: PluginInfoDto = {
   tools: ["upper.upper"],
   hooks: ["post_tool_call"],
   events: ["session.start"],
+  editor: null,
   permissions: { fsRead: ["./data/**"], fsWrite: [], network: [], shell: false },
 };
 
@@ -39,6 +45,7 @@ const emptyList: PluginListResultDto = { plugins: [], skipped: [], failed: [] };
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   resetIpcCommands();
+  resetEditorExtensionsForTest();
   openDialog.mockReset();
 });
 
@@ -93,5 +100,88 @@ describe("PluginsView", () => {
 
     await new Promise((r) => setTimeout(r, 20));
     expect(uninstall).not.toHaveBeenCalled();
+  });
+
+  it("shows builtin editor extensions in their own section with toggles", async () => {
+    injectIpcCommands({ pluginList: async () => ({ status: "ok", data: emptyList }) });
+    registerEditorExtension({
+      id: "builtin.preview-markdown",
+      titleI18nKey: "editor.ext.previewMarkdown",
+      contribute: () => {},
+    });
+
+    renderWithProviders(<PluginsView />);
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /markdown preview/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("hydrates the derived editor extension right after a successful install", async () => {
+    let installed = false;
+    injectIpcCommands({
+      pluginList: async () => ({
+        status: "ok",
+        data: {
+          plugins: installed
+            ? [
+                {
+                  ...samplePlugin,
+                  editor: {
+                    languages: ["*"],
+                    hover: false,
+                    symbols: true,
+                    commands: [],
+                    overlays: [],
+                  },
+                },
+              ]
+            : [],
+          skipped: [],
+          failed: [],
+        },
+      }),
+      pluginInstallFromPath: async () => {
+        installed = true;
+        return { status: "ok" as const, data: samplePlugin };
+      },
+    });
+    openDialog.mockResolvedValue("/picked/plugin");
+
+    renderWithProviders(<PluginsView />);
+    fireEvent.click(await screen.findByRole("button", { name: /install from folder/i }));
+
+    await waitFor(() =>
+      expect(getRegisteredEditorExtensions().map((e) => e.id)).toContain("plugin.upper.editor"),
+    );
+  });
+
+  it("surfaces the editor-contribution switch for plugins declaring [editor]", async () => {
+    injectIpcCommands({
+      pluginList: async () => ({
+        status: "ok",
+        data: {
+          plugins: [
+            {
+              ...samplePlugin,
+              editor: {
+                languages: ["*"],
+                hover: true,
+                symbols: false,
+                commands: [{ name: "ask", title: "Ask upper", tool: "to-upper" }],
+                overlays: [],
+              },
+            },
+          ],
+          skipped: [],
+          failed: [],
+        },
+      }),
+    });
+
+    renderWithProviders(<PluginsView />);
+    expect(await screen.findByText(/editor contributions/i)).toBeInTheDocument();
+    expect(screen.getByText(/\/upper\.ask/)).toBeInTheDocument();
   });
 });

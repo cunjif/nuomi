@@ -254,6 +254,33 @@ fn print_plugin_list() {
                         manifest.events.iter().map(|e| e.topic.as_str()).collect();
                     println!("  events: {}", topics.join(", "));
                 }
+                if let Some(editor) = &manifest.editor {
+                    if !editor.has_no_contributions() {
+                        let mut caps: Vec<String> = Vec::new();
+                        if editor.hover {
+                            caps.push("hover".into());
+                        }
+                        if editor.symbols {
+                            caps.push("symbols".into());
+                        }
+                        caps.extend(
+                            editor
+                                .commands
+                                .iter()
+                                .map(|c| format!("/{}.{}", manifest.id, c.name)),
+                        );
+                        caps.extend(editor.overlays.iter().map(|o| format!("overlay:{}", o.id)));
+                        if editor.languages.is_empty() {
+                            println!("  editor: {}", caps.join(", "));
+                        } else {
+                            println!(
+                                "  editor: {} | languages: {}",
+                                caps.join(", "),
+                                editor.languages.join(",")
+                            );
+                        }
+                    }
+                }
             }
             LoadOutcome::Skipped { dir, reason } => {
                 println!("skipped  {} — {reason}", dir.display());

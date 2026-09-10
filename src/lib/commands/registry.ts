@@ -31,8 +31,14 @@ export interface CommandContext {
 export interface SlashCommand {
   /** Name without the leading "/", e.g. "workspace". */
   name: string;
-  /** i18n key of the human-readable description, e.g. "commands.workspace.description". */
-  descriptionI18nKey: string;
+  /**
+   * i18n key of the human-readable description, e.g. "commands.workspace.description".
+   * Optional when a direct `description` is supplied (plugin-provided
+   * commands have no app i18n keys).
+   */
+  descriptionI18nKey?: string;
+  /** Direct description (plugin-provided commands); wins over the i18n key. */
+  description?: string;
   /**
    * i18n key of the argument hint shown in the completion panel, rendered as
    * e.g. "/workspace <path>" (i18n'd so zh/en can adapt the placeholder).
@@ -71,6 +77,12 @@ export function getCommands(): readonly SlashCommand[] {
 
 export function findCommand(name: string): SlashCommand | undefined {
   return registry.find((c) => c.name === name);
+}
+
+/** Human description: direct `description` first (plugin commands), i18n key fallback. */
+export function commandDescription(command: SlashCommand, t: (key: string) => string): string {
+  if (command.description !== undefined && command.description.length > 0) return command.description;
+  return t(command.descriptionI18nKey ?? `commands.${command.name}.description`);
 }
 
 /** Closest matches for an unknown command: prefix match first, then contains. */

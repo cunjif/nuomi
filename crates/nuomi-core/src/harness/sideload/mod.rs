@@ -24,6 +24,7 @@ use tokio::io::BufReader;
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
+use super::editor_bridge::{EditorBridgeRegistry, EditorRpc};
 use super::{Context, HarnessError, Plugin};
 use crate::plugins::hooks::{HookDecision, HookRegistry};
 use crate::plugins::tools::{Tool, ToolRegistry};
@@ -143,6 +144,9 @@ pub struct SideloadedPlugin {
     dir: PathBuf,
     process: Mutex<Option<PluginProcess>>,
     conn: Mutex<Option<Arc<ChildNpp>>>,
+    /// Editor bridge handle captured at init (when the manifest declares an
+    /// `[editor]` section); used by `dispose` to drop the bridge entry.
+    editor_bridge: Mutex<Option<Arc<EditorBridgeRegistry>>>,
 }
 
 impl SideloadedPlugin {
@@ -153,6 +157,7 @@ impl SideloadedPlugin {
             dir,
             process: Mutex::new(None),
             conn: Mutex::new(None),
+            editor_bridge: Mutex::new(None),
         }
     }
 
@@ -290,6 +295,30 @@ impl SideloadedPlugin {
         Ok(())
     }
 
+    /// Registers the plugin on the editor bridge when its manifest declares
+    /// an `[editor]` section. A missing bridge service is a warning, not an
+    /// error: editor contributions are optional shell affordances.
+    async fn register_editor_bridge(&self, ctx: &Context, conn: &Arc<ChildNpp>) {
+        let Some(section) = self.manifest.editor.clone() else {
+            return;
+        };
+        if section.has_no_contributions() {
+            return;
+        }
+        let Some(bridge) = ctx.service::<EditorBridgeRegistry>("editor_bridge").await else {
+            tracing::warn!(
+                plugin = %self.manifest.id,
+                "manifest declares [editor] but the editor bridge service is missing; skipping"
+            );
+            return;
+        };
+        let conn_dyn: Arc<dyn EditorRpc> = conn.clone();
+        bridge
+            .register(self.manifest.id.clone(), conn_dyn, section)
+            .await;
+        *self.editor_bridge.lock().await = Some(bridge);
+    }
+
     /// Spawns forwarder tasks: bus topics matching the manifest patterns are
     /// pushed to the plugin as `event` notifications (fire-and-forget).
     async fn spawn_event_forwarders(&self, ctx: &Context, conn: &Arc<ChildNpp>) {
@@ -354,6 +383,7 @@ impl Plugin for SideloadedPlugin {
         self.register_tools(ctx, &conn).await?;
         self.register_hooks(ctx, &conn).await?;
         self.spawn_event_forwarders(ctx, &conn).await;
+        self.register_editor_bridge(ctx, &conn).await;
         *self.process.lock().await = Some(process);
         *self.conn.lock().await = Some(conn);
         Ok(())
@@ -372,6 +402,9 @@ impl Plugin for SideloadedPlugin {
     async fn dispose(&self) -> Result<(), HarnessError> {
         let conn = self.conn.lock().await.take();
         let process = self.process.lock().await.take();
+        if let Some(bridge) = self.editor_bridge.lock().await.take() {
+            bridge.remove(&self.manifest.id).await;
+        }
         if let Some(conn) = conn {
             match tokio::time::timeout(SHUTDOWN_GRACE, conn.request("shutdown", json!({}))).await {
                 Ok(Ok(_)) | Ok(Err(_)) | Err(_) => {} // Shutdown is best-effort by protocol; kill below is the backstop.

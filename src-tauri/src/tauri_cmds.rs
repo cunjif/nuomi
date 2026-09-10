@@ -30,6 +30,36 @@ pub fn plugin_open_dir() -> Result<(), IpcError> {
 
 #[tauri::command]
 #[specta::specta]
+pub async fn plugin_editor_call(
+    state: tauri::State<'_, AppState>,
+    plugin_id: String,
+    method: String,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, IpcError> {
+    commands::impl_plugin_editor_call(&state, plugin_id, method, params).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn app_setting_get(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, IpcError> {
+    commands::impl_app_setting_get(&state, key).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn app_setting_set(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), IpcError> {
+    commands::impl_app_setting_set(&state, key, value).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_session(
     state: tauri::State<'_, AppState>,
 ) -> Result<commands::SessionDto, IpcError> {

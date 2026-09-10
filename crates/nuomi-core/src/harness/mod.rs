@@ -7,12 +7,14 @@
 
 pub mod bus;
 pub mod context;
+pub mod editor_bridge;
 pub mod kernel;
 pub mod plugin;
 pub mod sideload;
 
 pub use bus::{Event, EventBus, EventRejected, Flow, WaterfallHandler};
 pub use context::{Context, Disposer, EffectGuard};
+pub use editor_bridge::EditorBridgeRegistry;
 pub use kernel::Kernel;
 pub use plugin::Plugin;
 pub use sideload::{scan, BootReport, LoadOutcome, PluginManifest, SideloadedPlugin};

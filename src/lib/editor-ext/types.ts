@@ -154,9 +154,21 @@ export interface EditorExtContext {
 }
 
 export interface EditorExtension {
-  /** Globally unique, e.g. "builtin.preview-markdown". */
+  /** Globally unique, e.g. "builtin.preview-markdown" or "plugin.<id>.editor". */
   id: string;
-  /** i18n key of the human title shown in the extension manager. */
-  titleI18nKey: string;
+  /**
+   * i18n key of the human title shown in the extension manager. Optional
+   * when a direct `title` is supplied instead (plugin-delivered extensions
+   * have no app i18n keys).
+   */
+  titleI18nKey?: string;
+  /** Direct human title (plugin-delivered extensions; wins over the i18n key). */
+  title?: string;
+  /**
+   * Opaque producer metadata. Only producers that can change without a code
+   * change use it — the plugin bridge stores a `<id>@<version>` stamp so it
+   * can tell whether an already-registered plugin extension needs replacing.
+   */
+  metadata?: Readonly<Record<string, string>>;
   contribute(ctx: EditorExtContext): void;
 }

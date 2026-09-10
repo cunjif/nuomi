@@ -353,8 +353,15 @@
     "navLabel": "Settings sections"
   },
   "plugins": {
-    "title": "Plugins",
-    "subtitle": "Install, uninstall and manage third-party side-loaded plugins (ADR 0009).",
+    "title": "Extensions Center",
+    "subtitle": "One system for built-in editor extensions and kernel plugins (ADR 0009 / 0010).",
+    "builtinSection": "Built-in editor extensions",
+    "pluginSection": "Kernel plugins",
+    "kindBuiltin": "Editor extension",
+    "kindPlugin": "Kernel plugin",
+    "editorContrib": "Editor contributions",
+    "noEditorContrib": "No editor contributions",
+    "editorToggleHint": "The switch controls only this plugin's editor contributions (hover docs, outline, commands, overlays); the plugin itself loads at boot.",
     "installFromFolder": "Install from folder",
     "installFromZip": "Install from .zip",
     "openDir": "Open plugins folder",
