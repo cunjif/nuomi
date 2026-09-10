@@ -3061,6 +3061,142 @@ pub async fn impl_journal_rollback(state: &AppState, seq: u64) -> Result<(), Ipc
         .map_err(|e| IpcError::new("journal.rollback_failed", e.to_string()))
 }
 
+// ---------- plugins panel (ADR 0009 §4 addendum) ----------
+
+/// Declared permission surface of one plugin (panel display only, v1).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPermissionsDto {
+    fs_read: Vec<String>,
+    fs_write: Vec<String>,
+    network: Vec<String>,
+    shell: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInfoDto {
+    id: String,
+    name: String,
+    version: String,
+    api_version: u32,
+    description: Option<String>,
+    /// env | config | user | workspace (loader SourceKind label).
+    source: String,
+    /// Absolute plugin directory (display + "reveal" affordances).
+    dir: String,
+    /// True when the panel may uninstall it (source = user config dir).
+    uninstallable: bool,
+    /// Fully-qualified tool names (`<id>.<tool>`).
+    tools: Vec<String>,
+    hooks: Vec<String>,
+    events: Vec<String>,
+    permissions: PluginPermissionsDto,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginListResultDto {
+    plugins: Vec<PluginInfoDto>,
+    skipped: Vec<String>,
+    failed: Vec<String>,
+}
+
+fn plugin_info_from_manifest(
+    manifest: &nuomi_core::harness::sideload::PluginManifest,
+    source: &str,
+    dir: &std::path::Path,
+) -> PluginInfoDto {
+    PluginInfoDto {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        api_version: manifest.api_version,
+        description: manifest.description.clone(),
+        source: source.to_string(),
+        dir: dir.display().to_string(),
+        uninstallable: source == "user",
+        tools: manifest
+            .tools
+            .iter()
+            .map(|t| format!("{}.{}", manifest.id, t.name))
+            .collect(),
+        hooks: manifest.hooks.iter().map(|h| h.point.clone()).collect(),
+        events: manifest.events.iter().map(|e| e.topic.clone()).collect(),
+        permissions: PluginPermissionsDto {
+            fs_read: manifest.permissions.fs.read.clone(),
+            fs_write: manifest.permissions.fs.write.clone(),
+            network: manifest.permissions.network.clone(),
+            shell: manifest.permissions.shell,
+        },
+    }
+}
+
+/// Disk scan of every side-load location — what the NEXT boot would load.
+/// Pure read; no kernel or database involved.
+pub fn impl_plugin_list() -> PluginListResultDto {
+    let outcomes = nuomi_core::harness::sideload::scan(&[]);
+    let mut plugins = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    for outcome in outcomes {
+        match outcome {
+            nuomi_core::harness::sideload::LoadOutcome::Loaded { source, dir, manifest } => {
+                plugins.push(plugin_info_from_manifest(&manifest, source.label(), &dir));
+            }
+            nuomi_core::harness::sideload::LoadOutcome::Skipped { dir, reason } => {
+                skipped.push(format!("{}: {reason}", dir.display()));
+            }
+            nuomi_core::harness::sideload::LoadOutcome::Failed { dir, reason } => {
+                failed.push(format!("{}: {reason}", dir.display()));
+            }
+        }
+    }
+    PluginListResultDto {
+        plugins,
+        skipped,
+        failed,
+    }
+}
+
+/// Installs from a plugin directory or `.zip` into the user plugin dir.
+/// Takes effect on next app boot (the running kernel keeps its process set).
+pub fn impl_plugin_install_from_path(path: String) -> Result<PluginInfoDto, IpcError> {
+    let plugins_dir = nuomi_core::harness::sideload::user_plugins_dir()
+        .map_err(|e| IpcError::new("plugin.install_failed", e.to_string()))?;
+    let manifest = nuomi_core::harness::sideload::install_into(
+        &plugins_dir,
+        std::path::Path::new(&path),
+    )
+    .map_err(|e| IpcError::new("plugin.install_failed", e.to_string()))?;
+    let dir = plugins_dir.join(&manifest.id);
+    Ok(plugin_info_from_manifest(&manifest, "user", &dir))
+}
+
+/// Uninstalls a user-managed plugin by id (removes its directory).
+pub fn impl_plugin_uninstall(plugin_id: String) -> Result<(), IpcError> {
+    let plugins_dir = nuomi_core::harness::sideload::user_plugins_dir()
+        .map_err(|e| IpcError::new("plugin.uninstall_failed", e.to_string()))?;
+    nuomi_core::harness::sideload::uninstall_from(&plugins_dir, &plugin_id)
+        .map_err(|e| IpcError::new("plugin.uninstall_failed", e.to_string()))?;
+    Ok(())
+}
+
+/// Reveals the user plugin directory in the OS file manager (fallback-free
+/// convenience so users can hand-edit without hunting for the path).
+pub fn impl_plugin_open_dir() -> Result<(), IpcError> {
+    let dir = nuomi_core::harness::sideload::user_plugins_dir()
+        .map_err(|e| IpcError::new("plugin.open_dir_failed", e.to_string()))?;
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer").arg(&dir).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(&dir).spawn();
+    result.map_err(|e| IpcError::new("plugin.open_dir_failed", e.to_string()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::mask_webhook_url;

@@ -56,7 +56,7 @@ nuomi/
 ├─ docs/plugins/              # 插件开发文档（manifest 格式 / NPP 协议 / 入门教程）
 ├─ src-tauri/                 # （UI 里程碑回归时启用）Tauri 薄壳 bin，依赖 nuomi-core → owner: bridge-engineer
 ├─ src/                       # （UI 里程碑回归时启用）React 前端 frontend → owner: ui-engineer
-│  ├─ features/<domain>/      #   board · runs · agents · approvals · scheduler · settings
+│  ├─ features/<domain>/      #   board · runs · agents · approvals · scheduler · settings · plugins
 │  ├─ components/ui/          #   设计系统原子 design-system primitives
 │  ├─ lib/ipc/                #   生成的 IPC 绑定 generated bindings（禁止手改 never hand-edit）
 │  └─ lib/store/              #   zustand stores

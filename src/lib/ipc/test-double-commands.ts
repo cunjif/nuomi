@@ -9,6 +9,8 @@ import type {
   IntegrationDto,
   IntegrationInput,
   JsonValue,
+  PluginInfoDto,
+  PluginListResultDto,
   ProviderInput,
   Result,
   RoleDto,
@@ -673,6 +675,32 @@ export function testDoubleCommands(): CommandSet {
       const integration = tdState.integrations.find((i) => i.id === integrationId);
       if (!integration) return err("integration.not_found", `integration#${integrationId} not found`);
       return ok({ ok: true, error: null });
+    },
+
+    async pluginList() {
+      return ok<PluginListResultDto>({ plugins: [], skipped: [], failed: [] });
+    },
+    async pluginInstallFromPath(_path: string) {
+      return ok<PluginInfoDto>({
+        id: "demo",
+        name: "Demo",
+        version: "1.0.0",
+        apiVersion: 1,
+        description: null,
+        source: "user",
+        dir: "/demo",
+        uninstallable: true,
+        tools: [],
+        hooks: [],
+        events: [],
+        permissions: { fsRead: [], fsWrite: [], network: [], shell: false },
+      });
+    },
+    async pluginUninstall(_pluginId: string) {
+      return ok(null);
+    },
+    async pluginOpenDir() {
+      return ok(null);
     },
 
     async journalRollback(_seq) {

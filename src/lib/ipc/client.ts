@@ -122,6 +122,10 @@ export const ipc = {
     unwrap(current.deleteIntegration(integrationId)),
   testIntegration: (integrationId: string) =>
     unwrap(current.testIntegration(integrationId)),
+  pluginList: () => unwrap(current.pluginList()),
+  pluginInstallFromPath: (path: string) => unwrap(current.pluginInstallFromPath(path)),
+  pluginUninstall: (pluginId: string) => unwrap(current.pluginUninstall(pluginId)),
+  pluginOpenDir: () => unwrap(current.pluginOpenDir()),
 };
 
 export type Ipc = typeof ipc;

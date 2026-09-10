@@ -29,6 +29,8 @@ portable-pty = "0.9"
 # Third-party plugin side-loading (ADR 0009): plugin.toml manifest + config dir.
 toml = "0.8"
 dirs = "5"
+# Zip install source for the plugin panel (ADR 0009 §4 addendum): deflate only.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -57,6 +57,13 @@ const SettingsIcon: Glyph = (p) => (
     <path d="M12 4.2v2.4M12 17.4v2.4M4.2 12h2.4M17.4 12h2.4M6.7 6.7l1.7 1.7M15.6 15.6l1.7 1.7M17.3 6.7l-1.7 1.7M8.4 15.6l-1.7 1.7" />
   </svg>
 );
+// Two interlocking blocks — a hand-sketched "plugin" mark.
+const PluginsIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M4.5 9.2h5.8V4.6H18v5.6h-5.4v9.2H4.5z" />
+    <path d="M9.3 11.8v4.6h4.5M7.6 12.6v3" />
+  </svg>
+);
 const MenuIcon: Glyph = (p) => (
   <svg {...p}>
     <path d="M4.5 7h15M4.5 12h15M4.5 17h15" />
@@ -283,6 +290,7 @@ export const iconRegistry = {
   scheduler: SchedulerIcon,
   approvals: ApprovalsIcon,
   settings: SettingsIcon,
+  plugins: PluginsIcon,
   menu: MenuIcon,
   close: CloseIcon,
   minimize: MinimizeIcon,

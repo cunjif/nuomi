@@ -13,6 +13,7 @@ import { SchedulerView } from "../scheduler/SchedulerView";
 import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
+import { PluginsView } from "../plugins/PluginsView";
 import { AreaNav } from "./AreaNav";
 import { EditorArea } from "./EditorArea";
 import { LeftRail } from "./LeftRail";
@@ -221,5 +222,7 @@ function renderView(view: View): ReactNode {
       return <SchedulerView />;
     case "settings":
       return <SettingsView />;
+    case "plugins":
+      return <PluginsView />;
   }
 }

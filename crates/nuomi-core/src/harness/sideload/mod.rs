@@ -7,6 +7,7 @@
 //!
 //! Hard rule: side-load failures are never fatal ([`Tolerant`] + `BootReport`).
 
+pub mod install;
 pub mod loader;
 pub mod manifest;
 pub mod process;
@@ -28,6 +29,7 @@ use crate::plugins::hooks::{HookDecision, HookRegistry};
 use crate::plugins::tools::{Tool, ToolRegistry};
 use crate::providers::ToolDef;
 
+pub use install::{install_into, uninstall_from, user_plugins_dir, InstallError};
 pub use loader::{apply_to_report, scan, LoadOutcome, SourceKind};
 pub use manifest::{Permissions, PluginManifest};
 pub use process::StderrTail;

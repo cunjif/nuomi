@@ -6,6 +6,30 @@ use crate::state::AppState;
 
 #[tauri::command]
 #[specta::specta]
+pub fn plugin_list() -> Result<commands::PluginListResultDto, IpcError> {
+    Ok(commands::impl_plugin_list())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn plugin_install_from_path(path: String) -> Result<commands::PluginInfoDto, IpcError> {
+    commands::impl_plugin_install_from_path(path)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn plugin_uninstall(plugin_id: String) -> Result<(), IpcError> {
+    commands::impl_plugin_uninstall(plugin_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn plugin_open_dir() -> Result<(), IpcError> {
+    commands::impl_plugin_open_dir()
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_session(
     state: tauri::State<'_, AppState>,
 ) -> Result<commands::SessionDto, IpcError> {

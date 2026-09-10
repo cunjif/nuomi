@@ -45,6 +45,7 @@
     "navApprovals": "Approvals",
     "navScheduler": "Scheduler",
     "navSettings": "Settings",
+    "navPlugins": "Plugins",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "checking": "Connecting…",
@@ -351,6 +352,38 @@
     "tab.access": "Tools & Access",
     "navLabel": "Settings sections"
   },
+  "plugins": {
+    "title": "Plugins",
+    "subtitle": "Install, uninstall and manage third-party side-loaded plugins (ADR 0009).",
+    "installFromFolder": "Install from folder",
+    "installFromZip": "Install from .zip",
+    "openDir": "Open plugins folder",
+    "noneInstalled": "No plugins installed yet. Use the buttons above to install from a local folder or a .zip.",
+    "nextBootNote": "Install and uninstall take effect on the next app start; running plugin processes are not interrupted.",
+    "uninstall": "Uninstall",
+    "source": {
+      "user": "User dir",
+      "env": "Env var",
+      "config": "Config",
+      "workspace": "Workspace"
+    },
+    "permissionsTitle": "Declared permissions",
+    "toolsTitle": "Tools",
+    "hooksTitle": "Hooks",
+    "eventsTitle": "Events",
+    "noContributions": "No tool/hook/event contributions",
+    "installing": "Installing…",
+    "uninstalling": "Uninstalling…",
+    "installed": "Installed plugin {{name}}",
+    "uninstalled": "Uninstalled plugin {{name}}",
+    "installFailed": "Install failed: {{message}}",
+    "uninstallFailed": "Uninstall failed: {{message}}",
+    "pickFolderTitle": "Select plugin folder",
+    "pickZipTitle": "Select plugin archive",
+    "skippedTitle": "Skipped",
+    "failedTitle": "Failed to load",
+    "confirmUninstall": "Uninstall plugin {{name}}?"
+  },
   "provider": {
     "heading": "Providers",
     "count": "{{count}}",
@@ -542,7 +575,10 @@
     "task_not_found": "Task not found or already deleted",
     "task_invalid_status": "Task status does not allow this operation",
     "git_not_a_repository": "Not a git repository",
-    "git_command_not_allowed": "That git command is not allowed"
+    "git_command_not_allowed": "That git command is not allowed",
+    "plugin_install_failed": "Plugin install failed: {{message}}",
+    "plugin_uninstall_failed": "Plugin uninstall failed: {{message}}",
+    "plugin_open_dir_failed": "Could not open plugins folder: {{message}}"
   },
   "nav": {
     "areaLabel": "Main area",

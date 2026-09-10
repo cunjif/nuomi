@@ -45,6 +45,7 @@
     "navApprovals": "审批",
     "navScheduler": "定时任务",
     "navSettings": "设置",
+    "navPlugins": "插件",
     "connected": "已连接",
     "disconnected": "连接断开",
     "checking": "连接中…",
@@ -351,6 +352,38 @@
     "tab.access": "工具与授权",
     "navLabel": "设置分类"
   },
+  "plugins": {
+    "title": "插件",
+    "subtitle": "安装、卸载与管理第三方侧载插件（ADR 0009）。",
+    "installFromFolder": "从文件夹安装",
+    "installFromZip": "从压缩包安装",
+    "openDir": "打开插件目录",
+    "noneInstalled": "尚未安装插件。点上方按钮从本地文件夹或 .zip 包安装。",
+    "nextBootNote": "安装与卸载在下次应用启动时生效，已启动的插件进程不会被打断。",
+    "uninstall": "卸载",
+    "source": {
+      "user": "用户目录",
+      "env": "环境变量",
+      "config": "配置文件",
+      "workspace": "工作区"
+    },
+    "permissionsTitle": "声明权限",
+    "toolsTitle": "工具",
+    "hooksTitle": "钩子",
+    "eventsTitle": "事件",
+    "noContributions": "无工具/钩子/事件贡献",
+    "installing": "正在安装…",
+    "uninstalling": "正在卸载…",
+    "installed": "已安装插件 {{name}}",
+    "uninstalled": "已卸载插件 {{name}}",
+    "installFailed": "安装失败：{{message}}",
+    "uninstallFailed": "卸载失败：{{message}}",
+    "pickFolderTitle": "选择插件文件夹",
+    "pickZipTitle": "选择插件压缩包",
+    "skippedTitle": "已跳过",
+    "failedTitle": "加载失败",
+    "confirmUninstall": "确定卸载插件 {{name}}？"
+  },
   "provider": {
     "heading": "服务商",
     "count": "{{count}} 个",
@@ -547,6 +580,9 @@
     "task_not_found": "任务不存在或已被删除",
     "task_invalid_status": "任务当前状态不允许该操作",
     "git_not_a_repository": "当前目录不是 git 仓库",
-    "git_command_not_allowed": "该 git 命令不被允许"
+    "git_command_not_allowed": "该 git 命令不被允许",
+    "plugin_install_failed": "插件安装失败：{{message}}",
+    "plugin_uninstall_failed": "插件卸载失败：{{message}}",
+    "plugin_open_dir_failed": "无法打开插件目录：{{message}}"
   }
 }

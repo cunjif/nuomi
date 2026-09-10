@@ -501,6 +501,38 @@ async testIntegration(integrationId: string) : Promise<Result<TestIntegrationDto
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async pluginList() : Promise<Result<PluginListResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pluginInstallFromPath(path: string) : Promise<Result<PluginInfoDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin_install_from_path", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pluginUninstall(pluginId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin_uninstall", { pluginId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pluginOpenDir() : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin_open_dir") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -578,6 +610,28 @@ proxy: string | null }
  * (KiloCode-style per-model capabilities).
  */
 export type ModelEntryDto = { id: string; capabilities: CapabilityDto[] }
+export type PluginInfoDto = { id: string; name: string; version: string; apiVersion: number; description: string | null; 
+/**
+ * env | config | user | workspace (loader SourceKind label).
+ */
+source: string; 
+/**
+ * Absolute plugin directory (display + "reveal" affordances).
+ */
+dir: string; 
+/**
+ * True when the panel may uninstall it (source = user config dir).
+ */
+uninstallable: boolean; 
+/**
+ * Fully-qualified tool names (`<id>.<tool>`).
+ */
+tools: string[]; hooks: string[]; events: string[]; permissions: PluginPermissionsDto }
+export type PluginListResultDto = { plugins: PluginInfoDto[]; skipped: string[]; failed: string[] }
+/**
+ * Declared permission surface of one plugin (panel display only, v1).
+ */
+export type PluginPermissionsDto = { fsRead: string[]; fsWrite: string[]; network: string[]; shell: boolean }
 export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean; settings: ProviderSettingsDto }
 export type ProviderInput = { 
 /**

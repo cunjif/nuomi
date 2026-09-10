@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 
-export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings";
+export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins";
 
 /**
  * Which surface owns the main content area: the conversation view (whatever
