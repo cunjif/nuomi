@@ -6,23 +6,29 @@
 import type {
   AgentProfileDto,
   ApprovalDto,
+  ConversationDto,
   EventDto,
   FileEntryDto,
   IntegrationDto,
   ProviderDto,
   RoleDto,
+  RunDto,
   ScheduleDto,
-  SessionDto,
   TaskDto,
   TeamDto,
   WhiteBoardNoteDto,
 } from "./bindings.gen";
 
 interface DoubleState {
-  sessions: SessionDto[];
+  /**
+   * Conversations, not bare sessions: a session *is* a conversation since
+   * migration 0011, and `ConversationDto` is the superset both
+   * `listSessions` and `listConversations` serve.
+   */
+  sessions: ConversationDto[];
   events: Map<string, EventDto[]>;
   tasks: TaskDto[];
-  runs: Array<{ id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number }>;
+  runs: RunDto[];
   approvals: ApprovalDto[];
   schedules: ScheduleDto[];
   providers: ProviderDto[];
@@ -43,6 +49,8 @@ interface DoubleState {
   workspaceRoot: string;
   /** Whether the workspace has been configured (drives first-launch gating). */
   workspaceConfigured: boolean;
+  /** Registered workspaces for the multi-workspace test double. */
+  workspaces: import("./bindings.gen").WorkspaceEntryDto[];
   /** path → entry; dirs have content === null */
   files: Map<string, { isDir: boolean; size: number; content: string | null }>;
 }
@@ -67,6 +75,7 @@ export const tdState: DoubleState = {
   appSettings: new Map(),
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
+  workspaces: [],
   files: new Map(),
 };
 
@@ -90,6 +99,47 @@ export function listDir(path: string): FileEntryDto[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Seeds a conversation row. Omitted fields fall back to a plain chat session
+ * so tests only spell out what they actually assert on.
+ */
+export function seedConversation(row: Partial<ConversationDto> & { id: string }): void {
+  tdState.sessions.push({
+    title: row.id,
+    kind: "chat",
+    agent: null,
+    teamId: null,
+    taskId: null,
+    scheduleId: null,
+    createdAt: 1,
+    updatedAt: 1,
+    goal: null,
+    mainAgentId: null,
+    routeMode: null,
+    whiteboardRouteMode: null,
+    participantAgents: [],
+    todoList: [],
+    ...row,
+  });
+}
+
+/**
+ * Seeds a Provider row. The conversation surface is gated on "at least one
+ * Provider exists", so any test that renders it must seed one.
+ */
+export function seedProvider(row: Partial<ProviderDto> & { id: string }): void {
+  tdState.providers.push({
+    name: row.id,
+    protocol: "open_ai_compatible",
+    baseUrl: "https://example.invalid/v1",
+    hasKey: true,
+    capabilities: [],
+    isMaster: true,
+    settings: {},
+    ...row,
+  });
+}
+
 /** Wipe all double state between tests. */
 export function tdReset(): void {
   tdState.sessions.length = 0;
@@ -111,6 +161,7 @@ export function tdReset(): void {
   tdState.appSettings.clear();
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;
+  tdState.workspaces.length = 0;
   tdState.files.clear();
 }
 

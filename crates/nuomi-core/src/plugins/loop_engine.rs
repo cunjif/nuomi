@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::harness::{Context, Event, HarnessError, Plugin};
 use crate::providers::{ChatMessage, ChatRequest, LlmProvider, StreamEvent};
 use async_trait::async_trait;
@@ -79,6 +81,10 @@ pub struct LoopEngine {
     steering: Arc<Mutex<VecDeque<String>>>,
     /// Messages that continue the run after a natural stop.
     follow_ups: Arc<Mutex<VecDeque<String>>>,
+    /// Cooperative stop signal. Checked at every step boundary — an
+    /// in-flight provider stream is *not* aborted mid-token, so a cancel
+    /// takes effect when the current step finishes.
+    cancel: Option<CancellationToken>,
 }
 
 /// Recovers the queue even if a panicking writer poisoned the mutex.
@@ -101,7 +107,22 @@ impl LoopEngine {
             turn_hook: None,
             steering: Arc::new(Mutex::new(VecDeque::new())),
             follow_ups: Arc::new(Mutex::new(VecDeque::new())),
+            cancel: None,
         }
+    }
+
+    /// Attaches a cooperative stop signal: when it is cancelled the loop
+    /// returns at the next step boundary with whatever it produced so far.
+    pub fn with_cancel(mut self, token: CancellationToken) -> Self {
+        self.cancel = Some(token);
+        self
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .map(|t| t.is_cancelled())
+            .unwrap_or(false)
     }
 
     /// Sets an optional callback invoked for every streamed text delta
@@ -203,6 +224,11 @@ impl LoopEngine {
         let allowlist: Vec<String> = Vec::new(); // role-level filtering applied by orchestrator
         let defs = tools.defs_for(&allowlist).await;
 
+        // Injected messages are inserted *after* the replayed history so the
+        // caller's `transcript[history_len..]` slice still starts exactly at
+        // this turn's messages (inserting at 0 shifted the boundary and made
+        // the last history message persist twice).
+        let history_len = history.len();
         let mut transcript = history;
         transcript.push(ChatMessage::user(user_task.to_string()));
 
@@ -217,7 +243,7 @@ impl LoopEngine {
                         .collect::<Vec<_>>()
                         .join("\n");
                     transcript.insert(
-                        0,
+                        history_len,
                         ChatMessage::system(format!("Relevant long-term memories:\n{digest}")),
                     );
                 }
@@ -226,6 +252,18 @@ impl LoopEngine {
 
         let mut steps = 0usize;
         while steps < self.config.max_steps {
+            if self.cancelled() {
+                ctx.publish(Event::new(
+                    "session.cancelled",
+                    serde_json::json!({ "steps": steps }),
+                ));
+                return Ok(LoopRunResult {
+                    transcript,
+                    final_text: String::new(),
+                    steps,
+                    truncated: false,
+                });
+            }
             steps += 1;
             // prepareNextTurn hook: per-turn overrides (model hot-switch …).
             let turn_override = self
@@ -588,6 +626,65 @@ mod tests {
             tool_msg.content,
             "[tool call skipped] output truncated; arguments may be incomplete"
         );
+    }
+
+    #[tokio::test]
+    async fn memory_digest_does_not_shift_the_history_boundary() {
+        // Regression: the digest used to be inserted at index 0, which moved
+        // every history message one slot right — the caller's
+        // `transcript[history_len..]` slice then re-persisted the last
+        // history message on every turn.
+        let dir = tempfile::tempdir().unwrap();
+        let db_path: Arc<str> = Arc::from(dir.path().join("m.db").to_string_lossy().to_string());
+        {
+            let conn = crate::store::Db::open(&db_path).unwrap();
+            crate::store::migrations::run(&conn.0).unwrap();
+        }
+        let memory = MemoryService::new(db_path);
+        // The recall keyword is the first word of the task, so it must appear
+        // in the stored entry for the digest to be injected at all.
+        memory
+            .remember("follow up: user prefers rust".into(), None, vec![], "note", false)
+            .await
+            .unwrap();
+
+        let provider = Arc::new(FakeLlm::new("fake", vec![FakeLlm::response("ok")]));
+        let engine = LoopEngine::new(provider, LoopConfig::default());
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        let history = vec![
+            ChatMessage::user("earlier question"),
+            ChatMessage::assistant("earlier answer"),
+        ];
+        let result = engine
+            .run_with_history(&ctx, &tools, None, Some(&memory), history, "follow up")
+            .await
+            .unwrap();
+
+        // History keeps its prefix verbatim: nothing was pushed into it.
+        assert_eq!(result.transcript[0].content, "earlier question");
+        assert_eq!(result.transcript[1].content, "earlier answer");
+        // Everything the caller persists (from `history_len` on) is new: the
+        // injected digest, then this turn's user message.
+        let fresh = &result.transcript[2..];
+        assert!(fresh.iter().any(|m| m.role == MessageRole::System));
+        assert_eq!(fresh.last().unwrap().content, "ok");
+    }
+
+    #[tokio::test]
+    async fn cancelled_before_first_step_returns_immediately() {
+        let provider = Arc::new(FakeLlm::new("fake", vec![FakeLlm::response("never used")]));
+        let token = CancellationToken::new();
+        token.cancel();
+        let engine = LoopEngine::new(provider, LoopConfig::default()).with_cancel(token);
+        let ctx = Context::default();
+        let tools = ToolRegistry::new();
+        let result = engine
+            .run(&ctx, &tools, None, None, "compute 1+2")
+            .await
+            .unwrap();
+        assert_eq!(result.steps, 0);
+        assert!(result.final_text.is_empty());
     }
 
     #[tokio::test]

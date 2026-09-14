@@ -26,6 +26,12 @@ pub enum CoreError {
     #[error("workspace error: {0}")]
     Workspace(#[from] crate::services::WorkspaceError),
 
+    #[error("workspace registry error: {0}")]
+    WorkspaceRegistry(#[from] crate::services::RegistryError),
+
+    #[error("workspace migration error: {0}")]
+    WorkspaceMigration(#[from] crate::services::MigrationOrchestrationError),
+
     #[error("git error: {0}")]
     Git(#[from] crate::services::GitError),
 

@@ -54,6 +54,7 @@ const TOKEN_VARS = [
   "cap-i",
   "cap-vo",
   "cap-vi",
+  "diff-add",
 ] as const;
 type TokenVar = (typeof TOKEN_VARS)[number];
 // resolveTheme stores vars camelCased via `toCamel` (surface-raised →
@@ -212,6 +213,66 @@ const PAIRS: ContrastPair[] = [
     rationale: "RunDrawer.tsx:21 · AutoFormConfirmDialog.tsx:74 scrim rule",
     fg: (t) => t.ink,
     bg: (t) => compositeOver(t.scrim, t.surface),
+  },
+  // ── Diff rows (DiffView.tsx): the row tint is fg/10 over the panel the
+  // diff renders on; the sign glyph and the line text must both stay legible,
+  // and which theme+surface is worst case flips between the light (dark ink)
+  // and dark (light ink) families — hence both surfaces for every row kind.
+  {
+    name: "diff: add sign on diff-add/10 over surface",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:104 SIGN_STYLES.added (light-family worst case)",
+    fg: (t) => t.diffAdd,
+    bg: (t) => compositeOver({ ...t.diffAdd, a: 0.1 }, t.surface),
+  },
+  {
+    name: "diff: add sign on diff-add/10 over surface-raised",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:104 SIGN_STYLES.added (dark-family worst case)",
+    fg: (t) => t.diffAdd,
+    bg: (t) => compositeOver({ ...t.diffAdd, a: 0.1 }, t.surfaceRaised),
+  },
+  {
+    name: "diff: added line text on diff-add/10 over surface",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:158 line content (ink) over the added tint",
+    fg: (t) => t.ink,
+    bg: (t) => compositeOver({ ...t.diffAdd, a: 0.1 }, t.surface),
+  },
+  {
+    name: "diff: added line text on diff-add/10 over surface-raised",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:158 line content (ink) over the added tint",
+    fg: (t) => t.ink,
+    bg: (t) => compositeOver({ ...t.diffAdd, a: 0.1 }, t.surfaceRaised),
+  },
+  {
+    name: "diff: del sign on danger/10 over surface",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:103 SIGN_STYLES.removed (light-family worst case)",
+    fg: (t) => t.danger,
+    bg: (t) => compositeOver({ ...t.danger, a: 0.1 }, t.surface),
+  },
+  {
+    name: "diff: del sign on danger/10 over surface-raised",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:103 SIGN_STYLES.removed (dark-family worst case)",
+    fg: (t) => t.danger,
+    bg: (t) => compositeOver({ ...t.danger, a: 0.1 }, t.surfaceRaised),
+  },
+  {
+    name: "diff: removed line text on danger/10 over surface",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:158 line content (ink) over the removed tint",
+    fg: (t) => t.ink,
+    bg: (t) => compositeOver({ ...t.danger, a: 0.1 }, t.surface),
+  },
+  {
+    name: "diff: removed line text on danger/10 over surface-raised",
+    threshold: TEXT_MIN,
+    rationale: "DiffView.tsx:158 line content (ink) over the removed tint",
+    fg: (t) => t.ink,
+    bg: (t) => compositeOver({ ...t.danger, a: 0.1 }, t.surfaceRaised),
   },
   // ── Non-text UI components ≥ 3:1 (WCAG 1.4.11) ──────────────────────────
   { name: "border: ink-muted vs surface", threshold: UI_MIN, rationale: "NewTaskForm.tsx:67 bare-border buttons", fg: (t) => t.inkMuted, bg: (t) => t.surface },

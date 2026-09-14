@@ -13,6 +13,7 @@ import type { TFunction } from "i18next";
 import type { Ipc } from "../ipc/client";
 import type { toast } from "../store/toastStore";
 import type { View } from "../store/uiStore";
+import type { ArgKind, CommandCategory, CommandSuggestion } from "./commandTypes";
 
 /** Services a command may use. Built by ChatView from existing state/props. */
 export interface CommandContext {
@@ -31,6 +32,8 @@ export interface CommandContext {
 export interface SlashCommand {
   /** Name without the leading "/", e.g. "workspace". */
   name: string;
+  /** Grouping for `/help` and completion ordering. */
+  category: CommandCategory;
   /**
    * i18n key of the human-readable description, e.g. "commands.workspace.description".
    * Optional when a direct `description` is supplied (plugin-provided
@@ -44,13 +47,19 @@ export interface SlashCommand {
    * e.g. "/workspace <path>" (i18n'd so zh/en can adapt the placeholder).
    */
   usage?: string;
-  args?: "none" | "required" | "optional";
+  args: ArgKind;
+  /** Fuzzy search keywords (zh/en) beyond the command name. */
+  keywords?: string[];
+  /** Dynamic parameter candidates; empty array degrades to plain text input. */
+  suggest?: (ctx: CommandContext) => Promise<CommandSuggestion[]> | CommandSuggestion[];
   /**
    * Execute the command. Throwing keeps the composer draft and surfaces a
    * toast; resolving clears the draft (this is how /clear works — it is a
    * no-op run and the composer does the clearing).
    */
   run(args: string, ctx: CommandContext): Promise<void> | void;
+  /** Origin: built-in or plugin-provided. */
+  source?: "builtin" | "plugin";
 }
 
 export interface ParsedInput {

@@ -28,6 +28,10 @@
   --nuomi-cap-i: #047857;
   --nuomi-cap-vo: #a16207;
   --nuomi-cap-vi: #86198f;
+  /* Diff "added" ink. Blue instead of the green `ok` so red/green confusion
+     (the most common colour-vision deficiency) cannot hide a change; same
+     deep blue as the Re badge, which already clears 4.5:1 on kraft. */
+  --nuomi-diff-add: #0369a1;
   /* Minimal rail (screenshot ref): near-invisible track, gray rounded thumb. */
   --nuomi-scrollbar: #cfc7b6;
   --nuomi-scrollbar-hover: #a89f8d;
@@ -58,6 +62,8 @@
   --nuomi-cap-i: #6ee7b7;
   --nuomi-cap-vo: #fcd34d;
   --nuomi-cap-vi: #f0abfc;
+  /* Diff "added" ink — pastel sky blue (see :root note on why not green). */
+  --nuomi-diff-add: #7dd3fc;
   --nuomi-scrollbar: #3a3d42;
   --nuomi-scrollbar-hover: #565b63;
   /* Chalk-dust grain (faint white noise) over the blackboard (review §4.2.3). */
@@ -83,11 +89,16 @@
   --nuomi-accent: #3150cb;
   --nuomi-ok: #166a2a;
   --nuomi-warn: #8a6508;
-  --nuomi-danger: #c92a2a;
+  /* Darkened from the review's #c92a2a for the same reason as :root — the raw
+     value lands at 4.43:1 on its own danger/10 diff tint (DiffView removed
+     rows), just under the text gate. */
+  --nuomi-danger: #bd2626;
   --nuomi-cap-re: #0369a1;
   --nuomi-cap-i: #047857;
   --nuomi-cap-vo: #a16207;
   --nuomi-cap-vi: #86198f;
+  /* Diff "added" ink — deep blue, distinguishable from the accent's #3150cb. */
+  --nuomi-diff-add: #0369a1;
   --nuomi-scrollbar: #c3c7cf;
   --nuomi-scrollbar-hover: #9aa1ad;
   /* 24px blue ruling (review §4.2.2). */
@@ -117,6 +128,9 @@
   --nuomi-cap-i: #00ff00;
   --nuomi-cap-vo: #ffff00;
   --nuomi-cap-vi: #ff66ff;
+  /* Diff "added" ink — bright cyan-blue on black, well clear of the yellow
+     accent and the pure-red `danger`. */
+  --nuomi-diff-add: #66d9ff;
   --nuomi-scrollbar: #565b63;
   --nuomi-scrollbar-hover: #9aa1ad;
 }

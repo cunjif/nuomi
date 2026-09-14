@@ -19,6 +19,8 @@ function base() {
     gitLog: vi.fn().mockResolvedValue(ok([
       { hash: "abcdef1234567890", subject: "feat: init", author: "james" },
     ])),
+    gitWorktrees: vi.fn().mockResolvedValue(ok([])),
+    gitDiff: vi.fn().mockResolvedValue(ok("")),
   };
 }
 

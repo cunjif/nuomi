@@ -30,6 +30,12 @@ module.exports = {
           vo: "var(--nuomi-cap-vo, #a16207)",
           vi: "var(--nuomi-cap-vi, #86198f)",
         },
+        // Diff "added" ink (DiffView). Blue rather than the green `state.ok`:
+        // red/blue stays separable under the common red-green deficiencies.
+        // Removed lines use `state.danger` (the app's single red).
+        diff: {
+          add: "var(--nuomi-diff-add, #0369a1)",
+        },
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],

@@ -10,6 +10,7 @@ pub mod commands;
 mod events;
 mod ipc_error;
 pub mod notifier;
+pub mod schedule_dispatcher;
 pub mod state;
 mod tauri_cmds;
 
@@ -56,6 +57,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::git_commit,
         tauri_cmds::git_push,
         tauri_cmds::git_worktrees,
+        tauri_cmds::git_diff,
         tauri_cmds::create_schedule,
         tauri_cmds::list_schedules,
         tauri_cmds::toggle_schedule,
@@ -71,6 +73,13 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::get_online_authorized,
         tauri_cmds::get_workspace,
         tauri_cmds::set_workspace,
+        tauri_cmds::list_workspaces,
+        tauri_cmds::add_workspace,
+        tauri_cmds::remove_workspace,
+        tauri_cmds::activate_workspace,
+        tauri_cmds::get_active_workspace,
+        tauri_cmds::list_orphan_sessions,
+        tauri_cmds::reclaim_orphan_sessions,
         tauri_cmds::list_agent_profiles,
         tauri_cmds::upsert_agent_profile,
         tauri_cmds::delete_agent_profile,
@@ -103,6 +112,28 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::plugin_editor_call,
         tauri_cmds::app_setting_get,
         tauri_cmds::app_setting_set,
+        tauri_cmds::create_conversation,
+        tauri_cmds::list_conversations,
+        tauri_cmds::get_conversation,
+        tauri_cmds::set_conversation_agent,
+        tauri_cmds::list_agent_options,
+        tauri_cmds::update_conversation,
+        tauri_cmds::add_conversation_agent,
+        tauri_cmds::get_agent_detail,
+        tauri_cmds::submit_message,
+        tauri_cmds::stop_conversation,
+        tauri_cmds::list_active_runs,
+        tauri_cmds::cancel_run,
+        tauri_cmds::save_attachment,
+        tauri_cmds::list_attachments,
+        tauri_cmds::delete_attachment,
+        tauri_cmds::upsert_schedule,
+        tauri_cmds::update_schedule,
+        tauri_cmds::inject_context,
+        tauri_cmds::list_injectable_sessions,
+        tauri_cmds::list_injectable_rules,
+        tauri_cmds::transcribe_audio,
+        tauri_cmds::list_asr_models,
     ])
 }
 
@@ -155,6 +186,103 @@ async fn forward_event(
     }
 }
 
+/// Spawns a background loop that tails `change_log` and publishes
+/// `change.<table>` domain events so the frontend can invalidate queries
+/// in real time (plan §5.2 — CDC tail bridge).
+fn spawn_change_stream(bus: nuomi_core::harness::EventBus, db_path: std::sync::Arc<str>) {
+    tauri::async_runtime::spawn(async move {
+        // One connection for the loop's whole life — it polls twice a second
+        // for as long as the app runs.
+        let mut conn = match open_tail_conn(&db_path).await {
+            Ok(db) => Some(db),
+            Err(e) => {
+                tracing::warn!(error = %e, "change_stream failed to open the database");
+                None
+            }
+        };
+        // Start at the current high-water mark: replaying the whole history
+        // on every boot would flood the frontend with stale `change.*` events
+        // (the table is never pruned).
+        let mut cursor = match conn.as_ref() {
+            Some(db) => latest_change_seq(db),
+            None => 0,
+        };
+        loop {
+            let path = db_path.clone();
+            let taken = conn.take();
+            let polled = tokio::task::spawn_blocking(move || {
+                let db = match taken {
+                    Some(db) => db,
+                    None => match nuomi_core::store::Db::open(&path) {
+                        Ok(db) => db,
+                        Err(e) => return (None, Err(e)),
+                    },
+                };
+                let entries = nuomi_core::store::repos::change_log::tail_after(&db.0, cursor, 200);
+                (Some(db), entries)
+            })
+            .await;
+
+            match polled {
+                Ok((db, Ok(entries))) => {
+                    conn = db;
+                    if entries.is_empty() {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        continue;
+                    }
+                    for entry in &entries {
+                        let topic = format!("change.{}", entry.table_name);
+                        let payload = serde_json::json!({
+                            "rowId": entry.row_id,
+                            "op": entry.op.as_str(),
+                        });
+                        bus.publish(nuomi_core::harness::Event::new(topic, payload));
+                    }
+                    cursor = entries.last().map(|e| e.seq).unwrap_or(cursor);
+                    // Yield between batches: a large backlog must not starve
+                    // the async runtime (or the webview) while it drains.
+                    tokio::task::yield_now().await;
+                }
+                Ok((db, Err(e))) => {
+                    conn = db;
+                    tracing::warn!(error = %e, "change_stream tail failed");
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "change_stream join failed");
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            }
+        }
+    });
+}
+
+async fn open_tail_conn(
+    db_path: &std::sync::Arc<str>,
+) -> Result<nuomi_core::store::Db, nuomi_core::store::StoreError> {
+    let path = db_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let db = nuomi_core::store::Db::open(&path)?;
+        nuomi_core::store::migrations::run(&db.0)?;
+        Ok::<_, nuomi_core::store::StoreError>(db)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        Err(nuomi_core::store::StoreError::Sqlite(
+            rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+        ))
+    })
+}
+
+/// High-water mark of `change_log`: the stream only publishes changes made
+/// after boot.
+fn latest_change_seq(db: &nuomi_core::store::Db) -> i64 {
+    db.0.query_row("SELECT COALESCE(MAX(seq), 0) FROM change_log", [], |row| {
+        row.get(0)
+    })
+    .unwrap_or(0)
+}
+
 /// Installs the fmt tracing subscriber honoring `RUST_LOG` (default `info`).
 /// Safe to call multiple times; a second install is a no-op.
 fn init_tracing() {
@@ -183,6 +311,9 @@ async fn boot_and_wire(
             let rx = state.kernel.context().subscribe();
             tauri::async_runtime::spawn(forward_event(app.clone(), rx));
 
+            // CDC change stream: tail change_log → domain events (plan §5.2).
+            spawn_change_stream(state.kernel.context().bus(), state.db_path.clone());
+
             // Scheduler background runner + notification dispatcher. Both
             // spawn tokio tasks internally — we are already inside the
             // async runtime context here (no block_on needed).
@@ -190,9 +321,11 @@ async fn boot_and_wire(
                 state.db_path.clone(),
                 std::time::Duration::from_secs(5),
             )
+            .with_bus(state.kernel.context().bus())
             .spawn();
             app.manage(runner);
             notifier::spawn(&state);
+            schedule_dispatcher::spawn(&state);
 
             let seed_db = state.db_path.clone();
             let warm_db = state.db_path.clone();

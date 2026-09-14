@@ -1,12 +1,15 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { tdState } from "./lib/ipc/test-double";
+import { seedConversation, seedProvider } from "./lib/ipc/test-double";
 import { renderWithProviders } from "./test/helpers";
 import App from "./App";
 
 describe("App shell (U8)", () => {
   it("renders the three-pane shell with nav and connection status", async () => {
-    tdState.sessions.push({ id: "s1", title: "demo session", createdAt: 1, updatedAt: 1 });
+    // The conversation surface is gated on "a Provider exists"; without one
+    // the main pane shows the provider hint instead of the chat placeholder.
+    seedProvider({ id: "p1", name: "demo provider" });
+    seedConversation({ id: "s1", title: "demo session", createdAt: 1, updatedAt: 1 });
     renderWithProviders(<App />);
 
     // Nav entries for every surface (after the workspace gate resolves).

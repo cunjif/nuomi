@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type View } from "../../lib/store/uiStore";
 import { Icon, type IconName } from "../../components/ui/Icon/Icon";
-import { SessionsList } from "./SessionsList";
+import { ConversationsList } from "../conversation/ConversationsList";
 import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
@@ -20,9 +20,6 @@ const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
 export function LeftRail(): ReactNode {
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
-  // Selecting a left-rail view reveals the chat side of the main area (the
-  // editor may be hiding it after a file was opened).
-  const setActiveArea = useUiStore((s) => s.setActiveArea);
   const { t } = useTranslation();
   return (
     <nav aria-label={t("shell.appName")} className="relative flex w-56 shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised">
@@ -33,8 +30,8 @@ export function LeftRail(): ReactNode {
             key={item.view}
             type="button"
             onClick={() => {
+              // setView already releases the editor area (see uiStore).
               setView(item.view);
-              setActiveArea("chat");
             }}
             aria-current={view === item.view ? "page" : undefined}
             className={`flex items-center gap-2 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1.5 text-left font-note-hand text-sm focus-visible:ring-2 focus-visible:ring-ink-accent ${
@@ -49,7 +46,7 @@ export function LeftRail(): ReactNode {
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-ink-muted/30">
-        <SessionsList />
+        <ConversationsList />
       </div>
       <div className="shrink-0 border-t border-ink-muted/30 p-1">
         <ThemeToggle />

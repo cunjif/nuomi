@@ -10,7 +10,7 @@ import { Icon } from "../../components/ui/Icon/Icon";
 
 const AREA_TABS: Array<{ area: ActiveArea; labelKey: string; icon: ReactNode }> = [
   { area: "chat", labelKey: "nav.chat", icon: <Icon name="chat" size={12} /> },
-  { area: "editor", labelKey: "nav.editor", icon: <Icon name="file" size={12} /> },
+  { area: "workbench", labelKey: "nav.workbench", icon: <Icon name="file" size={12} /> },
 ];
 
 /** True inside a real Tauri webview; jsdom / plain browser hides controls. */

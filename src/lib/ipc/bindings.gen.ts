@@ -182,6 +182,14 @@ async gitWorktrees() : Promise<Result<GitWorktreeDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async gitDiff(path: string, staged: boolean) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_diff", { path, staged }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createSchedule(name: string, cronExpr: string, taskTitle: string, taskDescription: string) : Promise<Result<ScheduleDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_schedule", { name, cronExpr, taskTitle, taskDescription }) };
@@ -297,6 +305,62 @@ async getWorkspace() : Promise<Result<WorkspaceInfo, IpcError>> {
 async setWorkspace(path: string) : Promise<Result<WorkspaceInfo, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_workspace", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listWorkspaces() : Promise<Result<WorkspaceEntryDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_workspaces") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async addWorkspace(path: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_workspace", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeWorkspace(id: string) : Promise<Result<RemoveWorkspaceResult, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async activateWorkspace(id: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("activate_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getActiveWorkspace() : Promise<Result<WorkspaceEntryDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_workspace") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listOrphanSessions() : Promise<Result<OrphanSessionDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_orphan_sessions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async reclaimOrphanSessions(workspaceId: string) : Promise<Result<number, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reclaim_orphan_sessions", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -557,6 +621,182 @@ async appSettingSet(key: string, value: string) : Promise<Result<null, IpcError>
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async createConversation(input: ConversationInput) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_conversation", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listConversations(kind: string | null) : Promise<Result<ConversationDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_conversations", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getConversation(sessionId: string) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setConversationAgent(sessionId: string, agent: AgentRefInput | null) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_conversation_agent", { sessionId, agent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listAgentOptions() : Promise<Result<AgentOptionDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_agent_options") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateConversation(sessionId: string, input: ConversationUpdateInput) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_conversation", { sessionId, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async addConversationAgent(sessionId: string, agent: AgentRefInput) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_conversation_agent", { sessionId, agent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getAgentDetail(agentKind: string, agentId: string) : Promise<Result<AgentDetailDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_agent_detail", { agentKind, agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async submitMessage(sessionId: string, text: string, attachmentIds: string[], routeTargetAgentIds: string[] | null, contextInjectionIds: string[] | null) : Promise<Result<RunResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("submit_message", { sessionId, text, attachmentIds, routeTargetAgentIds, contextInjectionIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopConversation(sessionId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listActiveRuns() : Promise<Result<RunDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_active_runs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelRun(runId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_run", { runId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) : Promise<Result<AttachmentDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_attachment", { sessionId, name, mime, dataBase64 }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listAttachments(sessionId: string) : Promise<Result<AttachmentDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_attachments", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteAttachment(attachmentId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_attachment", { attachmentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertSchedule(input: ScheduleInput) : Promise<Result<ScheduleDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_schedule", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateSchedule(scheduleId: string, input: ScheduleInput) : Promise<Result<ScheduleDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_schedule", { scheduleId, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async injectContext(sessionId: string, input: ContextInjectionInput) : Promise<Result<ContextInjectionDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("inject_context", { sessionId, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listInjectableSessions() : Promise<Result<InjectableSessionDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_injectable_sessions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listInjectableRules() : Promise<Result<InjectableRuleDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_injectable_rules") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async transcribeAudio(audioBase64: string, modelSource: string | null) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transcribe_audio", { audioBase64, modelSource }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listAsrModels() : Promise<Result<AsrModelDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_asr_models") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -570,15 +810,26 @@ async appSettingSet(key: string, value: string) : Promise<Result<null, IpcError>
 
 /** user-defined types **/
 
+export type AgentDetailDto = { kind: string; id: string; name: string; avatarUrl: string | null; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null; enabled: boolean }
+export type AgentOptionDto = { kind: string; id: string; name: string; enabled: boolean; builtin: boolean; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null }
 export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; createdAt: number; updatedAt: number }
 export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean }
+export type AgentRefDto = { kind: string; id: string; name: string }
+export type AgentRefInput = { kind: string; id: string }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
+export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
+export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
 /**
  * System modality capability (mirrors `nuomi_core::domain::Capability`).
  */
 export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
+export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
+export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
+export type ConversationDto = { id: string; title: string; kind: string; agent: AgentRefDto | null; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
+export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null }
+export type ConversationUpdateInput = { title: string | null; goal: string | null }
 /**
  * One `[[editor.commands]]` entry (ADR 0010).
  */
@@ -610,6 +861,8 @@ export type FileEntryDto = { name: string; isDir: boolean; size: number }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
 export type GitWorktreeDto = { path: string; head: string | null; branch: string | null; isCurrent: boolean }
+export type InjectableRuleDto = { id: string; name: string; systemPrompt: string | null }
+export type InjectableSessionDto = { id: string; title: string; kind: string; updatedAt: number }
 /**
  * IPC-safe integration view. The webhook URL crosses the boundary masked
  * only (write-only field: stored raw in SQLite per SPEC D5, never read
@@ -660,6 +913,10 @@ proxy: string | null }
  * (KiloCode-style per-model capabilities).
  */
 export type ModelEntryDto = { id: string; capabilities: CapabilityDto[] }
+/**
+ * A session whose `workspace_id` points to a removed workspace.
+ */
+export type OrphanSessionDto = { sessionId: string; workspaceId: string; title: string; updatedAt: number }
 export type PluginInfoDto = { id: string; name: string; version: string; apiVersion: number; description: string | null; 
 /**
  * env | config | user | workspace (loader SourceKind label).
@@ -718,6 +975,11 @@ models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | n
  * Per-provider local network proxy (`http://host:port`); `None` = direct.
  */
 proxy?: string | null; enabled?: boolean }
+/**
+ * Result of removing a workspace: the removed id plus the new active id
+ * (None when the registry is now empty).
+ */
+export type RemoveWorkspaceResult = { removedId: string; newActiveId: string | null }
 export type RoleDto = { id: string; name: string; providerId: string | null; providerIds: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities: CapabilityDto[]; temperature: number | null; maxTokens: number | null; params: JsonValue; builtin: boolean; generated: boolean; ephemeral: boolean; source: JsonValue; createdAt: number; updatedAt: number }
 export type RoleInput = { name: string; providerId: string | null; 
 /**
@@ -746,9 +1008,10 @@ createdTemp: boolean }
  * (persisted in `app_settings`).
  */
 export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
-export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number }
+export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number; kind: string; cancelable: boolean }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
-export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; enabled: boolean; nextTriggerAt: number | null }
+export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null }
+export type ScheduleInput = { name: string; cronExpr: string; targetKind: string; agent: AgentRefInput | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; taskTitle: string; taskDescription: string }
 /**
  * Outcome counts of a preset seeding pass.
  */
@@ -784,7 +1047,13 @@ proxy: string | null;
  * Model for the minimal chat probe; protocol defaults apply when empty.
  */
 model: string | null }
+export type TodoItemDto = { id: string; description: string; completed: boolean }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
+/**
+ * A registered workspace entry as seen by the frontend. `directory_present`
+ * is a runtime probe (the root dir may have been deleted out-of-band).
+ */
+export type WorkspaceEntryDto = { id: string; rootPath: string; colorTag: string; createdAt: number; isActive: boolean; directoryPresent: boolean }
 /**
  * Workspace contract: the active sandbox root plus whether the workspace has
  * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env

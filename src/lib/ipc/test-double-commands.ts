@@ -4,23 +4,34 @@
  * imported from the generated bindings so drift fails typecheck.
  */
 import type {
+  AgentDetailDto,
   AgentProfileInput,
+  AsrModelDto,
+  ContextInjectionDto,
+  ContextInjectionInput,
+  ConversationDto,
+  ConversationUpdateInput,
   IpcError,
+  InjectableRuleDto,
+  InjectableSessionDto,
   IntegrationDto,
   IntegrationInput,
   JsonValue,
+  OrphanSessionDto,
   PluginInfoDto,
   PluginListResultDto,
   ProviderInput,
+  RemoveWorkspaceResult,
   Result,
   RoleDto,
   RoleInput,
+  RunDto,
   ScheduleDto,
-  SessionDto,
   TaskDto,
   TeamDto,
   TeamInput,
   TeamPlanDto,
+  WorkspaceEntryDto,
 } from "./bindings.gen";
 import type { commands as Commands } from "./bindings.gen";
 import { listDir, nextId, tdState } from "./test-double-state";
@@ -89,7 +100,23 @@ export function testDoubleCommands(): CommandSet {
   const cmds: CommandSet = {
     async createSession() {
       const now = Date.now();
-      const s: SessionDto = { id: nextId("s"), title: `Session ${tdState.sessions.length + 1}`, createdAt: now, updatedAt: now };
+      const s: ConversationDto = {
+        id: nextId("s"),
+        title: `Session ${tdState.sessions.length + 1}`,
+        kind: "chat",
+        agent: null,
+        teamId: null,
+        taskId: null,
+        scheduleId: null,
+        createdAt: now,
+        updatedAt: now,
+        goal: null,
+        mainAgentId: null,
+        routeMode: null,
+        whiteboardRouteMode: null,
+        participantAgents: [],
+        todoList: [],
+      };
       tdState.sessions.unshift(s);
       return ok(s);
     },
@@ -198,6 +225,9 @@ export function testDoubleCommands(): CommandSet {
     async gitWorktrees() {
       return ok([]);
     },
+    async gitDiff(_path, _staged) {
+      return ok("");
+    },
     async getWorkspace() {
       return ok({ root: tdState.workspaceRoot, configured: tdState.workspaceConfigured });
     },
@@ -206,13 +236,66 @@ export function testDoubleCommands(): CommandSet {
       tdState.workspaceConfigured = true;
       return ok({ root: tdState.workspaceRoot, configured: true });
     },
-    async createSchedule(name, cronExpr, taskTitle, _taskDescription) {
+    async listWorkspaces() {
+      return ok(tdState.workspaces ?? []);
+    },
+    async addWorkspace(path: string) {
+      const entry: WorkspaceEntryDto = {
+        id: nextId("ws"),
+        rootPath: path,
+        colorTag: "paper-yellow",
+        createdAt: Date.now(),
+        isActive: true,
+        directoryPresent: true,
+      };
+      const existing = tdState.workspaces ?? [];
+      tdState.workspaces = existing.map((w) => ({ ...w, isActive: false }));
+      tdState.workspaces.push(entry);
+      return ok(entry);
+    },
+    async removeWorkspace(id: string) {
+      const existing = tdState.workspaces ?? [];
+      tdState.workspaces = existing.filter((w) => w.id !== id);
+      const first = tdState.workspaces[0];
+      if (first) first.isActive = true;
+      const result: RemoveWorkspaceResult = {
+        removedId: id,
+        newActiveId: first?.id ?? null,
+      };
+      return ok(result);
+    },
+    async activateWorkspace(id: string) {
+      const existing = tdState.workspaces ?? [];
+      const target = existing.find((w) => w.id === id);
+      if (!target) return err("workspace.not_found", `workspace #${id} not found`);
+      tdState.workspaces = existing.map((w) => ({ ...w, isActive: w.id === id }));
+      return ok({ ...target, isActive: true });
+    },
+    async getActiveWorkspace() {
+      const active = (tdState.workspaces ?? []).find((w) => w.isActive);
+      return ok(active ?? null);
+    },
+    async listOrphanSessions() {
+      return ok([] as OrphanSessionDto[]);
+    },
+    async reclaimOrphanSessions(_workspaceId: string) {
+      return ok(0);
+    },
+    async createSchedule(name, cronExpr, taskTitle, taskDescription) {
       const s: ScheduleDto = {
         id: nextId("sched"),
         name,
         cronExpr,
         taskTitle,
+        taskDescription,
         enabled: true,
+        targetKind: "task",
+        agent: null,
+        teamId: null,
+        sessionMode: "per_trigger",
+        sessionId: null,
+        autoDispatch: true,
+        lastTriggeredAt: null,
         nextTriggerAt: null,
       };
       tdState.schedules.unshift(s);
@@ -621,12 +704,14 @@ export function testDoubleCommands(): CommandSet {
       if (!tdState.teams.some((t) => t.id === teamId)) {
         return err("team.not_found", `team#${teamId} not found`);
       }
-      const run = {
+      const run: RunDto = {
         id: nextId("run"),
         taskId,
         sessionId: task.sessionId ?? nextId("s"),
         status: "succeeded",
         heartbeatAt: Date.now(),
+        kind: "team",
+        cancelable: false,
       };
       tdState.runs.push(run);
       return ok(run);
@@ -712,6 +797,204 @@ export function testDoubleCommands(): CommandSet {
     async appSettingSet(key: string, value: string) {
       tdState.appSettings.set(key, value);
       return ok(null);
+    },
+
+    async createConversation(input) {
+      const now = Date.now();
+      const s: ConversationDto = {
+        id: nextId("s"),
+        title: input.title ?? `Session ${tdState.sessions.length + 1}`,
+        kind: input.kind,
+        agent: null,
+        teamId: input.teamId,
+        taskId: null,
+        scheduleId: null,
+        createdAt: now,
+        updatedAt: now,
+        goal: null,
+        mainAgentId: null,
+        routeMode: null,
+        whiteboardRouteMode: null,
+        participantAgents: [],
+        todoList: [],
+      };
+      tdState.sessions.unshift(s);
+      return ok(s);
+    },
+    async listConversations(kind) {
+      const all = tdState.sessions;
+      return ok(kind === null ? [...all] : all.filter((s) => s.kind === kind));
+    },
+    async getConversation(sessionId) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      return s
+        ? ok(s)
+        : err("conversation.not_found", `session#${sessionId} not found`);
+    },
+    async setConversationAgent(sessionId, agent) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
+      const updated: ConversationDto = {
+        ...s,
+        agent: agent ? { kind: agent.kind, id: agent.id, name: agent.id } : null,
+      };
+      Object.assign(s, updated);
+      return ok(updated);
+    },
+    async listAgentOptions() {
+      return ok<import("./bindings.gen").AgentOptionDto[]>([]);
+    },
+    async updateConversation(sessionId, input: ConversationUpdateInput) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
+      if (input.title !== null) s.title = input.title;
+      if (input.goal !== null) s.goal = input.goal;
+      s.updatedAt = Date.now();
+      return ok(s);
+    },
+    async addConversationAgent(sessionId, agent) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
+      const ref = { kind: agent.kind, id: agent.id, name: agent.id };
+      if (!s.participantAgents.some((a) => a.kind === agent.kind && a.id === agent.id)) {
+        s.participantAgents.push(ref);
+      }
+      if (s.kind === "chat") {
+        s.kind = "group";
+      }
+      s.updatedAt = Date.now();
+      return ok(s);
+    },
+    async getAgentDetail(agentKind, agentId) {
+      const detail: AgentDetailDto = {
+        kind: agentKind,
+        id: agentId,
+        name: agentId,
+        avatarUrl: null,
+        role: null,
+        responsibility: null,
+        boundModel: null,
+        provider: null,
+        enabled: true,
+      };
+      return ok(detail);
+    },
+    async submitMessage(sessionId, text, _attachmentIds, _routeTargetAgentIds, _contextInjectionIds) {
+      const events = tdState.events.get(sessionId) ?? [];
+      const seq = (events.at(-1)?.seq ?? 0) + 1;
+      events.push({ seq, kind: "message", payload: { role: "user", content: text }, createdAt: Date.now() });
+      tdState.events.set(sessionId, events);
+      return ok({ finalText: "", steps: 0, truncated: false, sessionId });
+    },
+    async stopConversation(_sessionId) {
+      return ok(null);
+    },
+    async listActiveRuns() {
+      return ok<import("./bindings.gen").RunDto[]>([]);
+    },
+    async cancelRun(_runId) {
+      return ok(null);
+    },
+    async saveAttachment(_sessionId, name, _mime, _dataBase64) {
+      const now = Date.now();
+      return ok({
+        id: nextId("att"),
+        sessionId: _sessionId,
+        seq: null,
+        kind: "file",
+        name,
+        mime: _mime,
+        relPath: `.nuomi/attachments/${_sessionId}/${now}`,
+        sizeBytes: 0,
+        sha256: "",
+        createdAt: now,
+      });
+    },
+    async listAttachments(_sessionId) {
+      return ok<import("./bindings.gen").AttachmentDto[]>([]);
+    },
+    async deleteAttachment(_attachmentId) {
+      return ok(null);
+    },
+    async upsertSchedule(input) {
+      const s = {
+        id: nextId("sch"),
+        name: input.name,
+        cronExpr: input.cronExpr,
+        taskTitle: input.taskTitle,
+        taskDescription: input.taskDescription,
+        enabled: true,
+        targetKind: input.targetKind,
+        agent: null,
+        teamId: input.teamId,
+        sessionMode: input.sessionMode,
+        sessionId: input.sessionId,
+        autoDispatch: input.autoDispatch,
+        lastTriggeredAt: null,
+        nextTriggerAt: null,
+      };
+      tdState.schedules.unshift(s as unknown as ScheduleDto);
+      return ok(s as unknown as ScheduleDto);
+    },
+    async updateSchedule(scheduleId, input) {
+      const s = {
+        id: scheduleId,
+        name: input.name,
+        cronExpr: input.cronExpr,
+        taskTitle: input.taskTitle,
+        taskDescription: input.taskDescription,
+        enabled: true,
+        targetKind: input.targetKind,
+        agent: null,
+        teamId: input.teamId,
+        sessionMode: input.sessionMode,
+        sessionId: input.sessionId,
+        autoDispatch: input.autoDispatch,
+        lastTriggeredAt: null,
+        nextTriggerAt: null,
+      };
+      return ok(s as unknown as ScheduleDto);
+    },
+
+    async injectContext(sessionId, input: ContextInjectionInput) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
+      const injection: ContextInjectionDto = {
+        id: nextId("inj"),
+        sessionId,
+        type: input.type,
+        refId: input.refId,
+        text: input.text,
+        status: "pending",
+        createdAt: Date.now(),
+      };
+      return ok(injection);
+    },
+    async listInjectableSessions() {
+      const sessions: InjectableSessionDto[] = tdState.sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        kind: s.kind,
+        updatedAt: s.updatedAt,
+      }));
+      return ok(sessions);
+    },
+    async listInjectableRules() {
+      const rules: InjectableRuleDto[] = tdState.roles.map((r) => ({
+        id: r.id,
+        name: r.name,
+        systemPrompt: r.systemPromptOverride,
+      }));
+      return ok(rules);
+    },
+    async transcribeAudio(_audioBase64, _modelSource) {
+      return ok("");
+    },
+    async listAsrModels() {
+      const models: AsrModelDto[] = [
+        { id: "builtin-whisper", name: "内置 Whisper", provider: "builtin", builtin: true },
+      ];
+      return ok(models);
     },
 
     async journalRollback(_seq) {

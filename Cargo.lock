@@ -2283,12 +2283,14 @@ dependencies = [
 name = "nuomi-shell"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures",
  "keyring",
  "nuomi-core",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "specta",
  "specta-typescript",
  "tauri",

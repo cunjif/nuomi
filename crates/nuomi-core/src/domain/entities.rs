@@ -5,6 +5,62 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Discriminant for the conversation model: determines UI view and execution path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationKind {
+    Chat,
+    Group,
+    Background,
+    Scheduled,
+}
+
+impl ConversationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConversationKind::Chat => "chat",
+            ConversationKind::Group => "group",
+            ConversationKind::Background => "background",
+            ConversationKind::Scheduled => "scheduled",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "chat" => Some(ConversationKind::Chat),
+            "group" => Some(ConversationKind::Group),
+            "background" => Some(ConversationKind::Background),
+            "scheduled" => Some(ConversationKind::Scheduled),
+            _ => None,
+        }
+    }
+}
+
+/// Whether an agent binding points to a CLI agent profile or a role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRefKind {
+    Cli,
+    Role,
+}
+
+impl AgentRefKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentRefKind::Cli => "cli",
+            AgentRefKind::Role => "role",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "cli" => Some(AgentRefKind::Cli),
+            "role" => Some(AgentRefKind::Role),
+            _ => None,
+        }
+    }
+}
+
 /// A resumable conversation / transcript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -12,6 +68,110 @@ pub struct Session {
     pub title: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub kind: ConversationKind,
+    pub agent: Option<(AgentRefKind, String)>,
+    pub team_id: Option<String>,
+    pub task_id: Option<String>,
+    pub schedule_id: Option<String>,
+    /// Conversation goal (agent-summarized, user-editable).
+    pub goal: Option<String>,
+    /// Main agent identifier (e.g. "cli:agent-1" or "role:role-1").
+    pub main_agent_id: Option<String>,
+    /// Message route mode: "orchestrator_worker" or "master_slave".
+    pub route_mode: Option<String>,
+    /// Whiteboard route mode: "preemptive" or "concurrent".
+    pub whiteboard_route_mode: Option<String>,
+}
+
+impl Session {
+    /// Convenience constructor for a plain chat session with defaults.
+    pub fn new_chat(id: String, title: String, now: i64) -> Self {
+        Self {
+            id,
+            title,
+            created_at: now,
+            updated_at: now,
+            kind: ConversationKind::Chat,
+            agent: None,
+            team_id: None,
+            task_id: None,
+            schedule_id: None,
+            goal: None,
+            main_agent_id: None,
+            route_mode: None,
+            whiteboard_route_mode: None,
+        }
+    }
+}
+
+/// A todo item belonging to a conversation (agent-summarized, user-editable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoItem {
+    pub id: String,
+    pub session_id: String,
+    pub description: String,
+    pub completed: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Message route mode for multi-agent conversations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteMode {
+    OrchestratorWorker,
+    MasterSlave,
+}
+
+impl RouteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RouteMode::OrchestratorWorker => "orchestrator_worker",
+            RouteMode::MasterSlave => "master_slave",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "orchestrator_worker" => Some(RouteMode::OrchestratorWorker),
+            "master_slave" => Some(RouteMode::MasterSlave),
+            _ => None,
+        }
+    }
+}
+
+/// Whiteboard route mode for group conversations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhiteboardRouteMode {
+    Preemptive,
+    Concurrent,
+}
+
+impl WhiteboardRouteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WhiteboardRouteMode::Preemptive => "preemptive",
+            WhiteboardRouteMode::Concurrent => "concurrent",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "preemptive" => Some(WhiteboardRouteMode::Preemptive),
+            "concurrent" => Some(WhiteboardRouteMode::Concurrent),
+            _ => None,
+        }
+    }
+}
+
+/// A participant agent in a conversation (conversation_participants table).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationParticipant {
+    pub session_id: String,
+    pub agent_kind: AgentRefKind,
+    pub agent_ref_id: String,
+    pub joined_at: i64,
 }
 
 /// Append-only event log record (`events` table).
@@ -494,7 +654,60 @@ pub struct Approval {
     pub created_at: i64,
 }
 
-/// A cron/interval trigger that generates queued tasks.
+/// Target type a schedule creates when it fires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleTargetKind {
+    Task,
+    Chat,
+    Group,
+}
+
+impl ScheduleTargetKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScheduleTargetKind::Task => "task",
+            ScheduleTargetKind::Chat => "chat",
+            ScheduleTargetKind::Group => "group",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "task" => Some(ScheduleTargetKind::Task),
+            "chat" => Some(ScheduleTargetKind::Chat),
+            "group" => Some(ScheduleTargetKind::Group),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a schedule creates a new session per trigger or reuses one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleSessionMode {
+    PerTrigger,
+    Reuse,
+}
+
+impl ScheduleSessionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScheduleSessionMode::PerTrigger => "per_trigger",
+            ScheduleSessionMode::Reuse => "reuse",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "per_trigger" => Some(ScheduleSessionMode::PerTrigger),
+            "reuse" => Some(ScheduleSessionMode::Reuse),
+            _ => None,
+        }
+    }
+}
+
+/// A cron/interval trigger that generates queued tasks or conversations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schedule {
     pub id: String,
@@ -508,6 +721,12 @@ pub struct Schedule {
     pub next_trigger_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub target_kind: ScheduleTargetKind,
+    pub agent: Option<(AgentRefKind, String)>,
+    pub team_id: Option<String>,
+    pub session_mode: ScheduleSessionMode,
+    pub session_id: Option<String>,
+    pub auto_dispatch: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -621,4 +840,50 @@ pub struct Integration {
     pub enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// Attachment kind — how the file entered the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    File,
+    Image,
+    Paste,
+    Text,
+}
+
+impl AttachmentKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AttachmentKind::File => "file",
+            AttachmentKind::Image => "image",
+            AttachmentKind::Paste => "paste",
+            AttachmentKind::Text => "text",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "file" => Some(AttachmentKind::File),
+            "image" => Some(AttachmentKind::Image),
+            "paste" => Some(AttachmentKind::Paste),
+            "text" => Some(AttachmentKind::Text),
+            _ => None,
+        }
+    }
+}
+
+/// Per-session attachment metadata (content-addressed on disk).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    pub id: String,
+    pub session_id: String,
+    pub seq: Option<i64>,
+    pub kind: AttachmentKind,
+    pub name: String,
+    pub mime: String,
+    pub rel_path: String,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub created_at: i64,
 }

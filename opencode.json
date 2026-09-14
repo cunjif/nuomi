@@ -1,41 +1,16 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "AGENTS.md",
-    ".opencode/rules/typescript-react.md",
-    ".opencode/rules/rust-core.md",
-    ".opencode/rules/ipc-contract.md",
-    ".opencode/rules/testing.md",
-    ".opencode/rules/git-workflow.md"
-  ],
+  "skills": { "paths": [".aidlc/skills"] },
+  "instructions": ["aidlc/spaces/default/memory/**/*.md"],
   "permission": {
-    "edit": "allow",
+    "edit": {
+      "*": "allow",
+      ".aidlc/tools/**": "ask",
+      ".aidlc/hooks/**": "ask"
+    },
     "bash": {
       "*": "ask",
-      "rm -rf *": "deny",
-      "sudo *": "deny",
-      "git status*": "allow",
-      "git diff*": "allow",
-      "git log*": "allow",
-      "git show*": "allow",
-      "git branch*": "allow",
-      "git add *": "ask",
-      "git commit*": "ask",
-      "git push*": "ask",
-      "git push --force*": "deny",
-      "pnpm install": "allow",
-      "pnpm *": "allow",
-      "pnpm publish*": "deny",
-      "npm publish*": "deny",
-      "cargo build*": "allow",
-      "cargo check*": "allow",
-      "cargo test*": "allow",
-      "cargo clippy*": "allow",
-      "cargo fmt*": "allow",
-      "cargo publish*": "deny",
-      "cargo install*": "ask"
-    },
-    "webfetch": "allow",
-    "websearch": "allow"
+      "aidlc engine *": "allow"
+    }
   }
 }

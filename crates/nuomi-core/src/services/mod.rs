@@ -3,6 +3,7 @@
 //! Each service owns its own `thiserror` error type.
 
 pub mod capability_router;
+pub mod conversation_service;
 pub mod git_service;
 pub mod presets;
 pub mod role_director;
@@ -10,10 +11,20 @@ pub mod scheduler_service;
 pub mod team_former;
 pub mod team_runner;
 pub mod workspace;
+pub mod workspace_guard;
+pub mod workspace_palette;
+pub mod nuomi_dir;
+pub mod codebase_memory_migrator;
+pub mod workspace_registry;
+pub mod workspace_migration;
 
 pub use capability_router::{
     cleanup_expired_temps, cleanup_temp, load_routing_rules, route, save_routing_rules,
     RouteOutcome, RouteRequest, RoutingError, RoutingRules, ROUTING_RULES_KEY,
+};
+pub use conversation_service::{
+    compose_user_message, create_conversation, name_agent_ref, resolve_agent,
+    resolve_default_agent, set_agent, AgentRef, ResolvedAgent, DEFAULT_AGENT_KEY,
 };
 pub use git_service::{
     create_worktree, merge_base_into_worktree, merge_worktree_into_base, recover_merges,
@@ -30,3 +41,16 @@ pub use scheduler_service::{
 pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMember};
 pub use team_runner::{materialize, run_team, MaterializedProviders, TeamRunOutcome};
 pub use workspace::{FileEntry, WorkspaceError, WorkspaceService};
+pub use workspace_palette::{color_for, hash as palette_hash, ColorTag, PALETTE};
+pub use workspace_guard::{canonicalize as guard_canonicalize, is_blacklisted, PathGuardError};
+pub use nuomi_dir::{codebase_memory_dir, ensure_nuomi_dir, NuomiDirError, NUOMI_DIR_NAME};
+pub use codebase_memory_migrator::{
+    is_migrated, migrate as migrate_codebase_memory, MigrationError, MigrationResult,
+};
+pub use workspace_registry::{
+    RemoveResult as WorkspaceRemoveResult, WorkspaceEntryWithPresence, WorkspaceRegistry,
+    RegistryError,
+};
+pub use workspace_migration::{
+    run_if_needed as run_workspace_migration, MigrationOrchestrationError, MigrationOutcome,
+};

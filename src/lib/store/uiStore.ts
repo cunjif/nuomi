@@ -8,10 +8,18 @@ export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler
 
 /**
  * Which surface owns the main content area: the conversation view (whatever
- * `view` selects) or the full-area workspace editor. Mutually exclusive —
- * opening a workspace file flips to "editor", Alt+H toggles back.
+ * `view` selects) or the workbench (workspace list + file editor). Mutually
+ * exclusive — opening a workspace file flips to "workbench" with sub-tab
+ * "editor", Alt+H toggles back to "chat".
  */
-export type ActiveArea = "chat" | "editor";
+export type ActiveArea = "chat" | "workbench";
+
+/**
+ * Second-level tab within the workbench area: the workspace list panel or
+ * the single-workspace file editor. Persisted alongside `activeArea` so
+ * Alt+H round-trips restore the last workbench sub-tab.
+ */
+export type WorkbenchSubTab = "workspaceList" | "editor";
 
 /**
  * The four hand-drawn themes (review §9.2). `paper-light`/`grid-notebook` are
@@ -62,9 +70,16 @@ export function resolveInitialTheme(): Theme {
   return "chalkboard-dark";
 }
 
+/** Per-workspace editor tab snapshot, saved on switch and restored on return. */
+interface WorkspaceTabSnapshot {
+  openFiles: string[];
+  activeFile: string | null;
+}
+
 interface UiState {
   view: View;
   activeArea: ActiveArea;
+  workbenchSubTab: WorkbenchSubTab;
   theme: Theme;
   selectedSessionId: string | null;
   openFiles: string[];
@@ -72,8 +87,13 @@ interface UiState {
   runDrawerTaskId: string | null;
   /** Volatile per-file edit dirtiness keyed by path (content itself lives in the Query cache). */
   dirtyPaths: Record<string, boolean>;
+  /** Currently active workspace id (mirrors the backend active workspace). */
+  activeWorkspaceId: string | null;
+  /** Per-workspace editor tab snapshots, keyed by workspace id. */
+  workspaceTabs: Record<string, WorkspaceTabSnapshot>;
   setView: (view: View) => void;
   setActiveArea: (area: ActiveArea) => void;
+  setWorkbenchSubTab: (sub: WorkbenchSubTab) => void;
   setTheme: (theme: Theme) => void;
   selectSession: (sessionId: string) => void;
   openFile: (path: string) => void;
@@ -81,19 +101,39 @@ interface UiState {
   setActiveFile: (path: string) => void;
   setRunDrawerTask: (taskId: string | null) => void;
   markDirty: (path: string, dirty: boolean) => void;
+  /** Sets the active workspace id (called after IPC activate/add succeeds). */
+  setActiveWorkspaceId: (id: string | null) => void;
+  /**
+   * Saves the current workspace's editor tabs, clears the tab bar, then
+   * restores the target workspace's previously saved tabs. If the target
+   * has saved tabs the workbench switches to the editor sub-tab; otherwise
+   * it stays on (or falls back to) the workspace list.
+   */
+  switchWorkspace: (workspaceId: string) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   view: "chat",
   activeArea: "chat",
+  workbenchSubTab: "workspaceList",
   theme: resolveInitialTheme(),
   selectedSessionId: null,
   openFiles: [],
   activeFile: null,
   runDrawerTaskId: null,
   dirtyPaths: {},
-  setView: (view) => set({ view }),
+  activeWorkspaceId: null,
+  workspaceTabs: {},
+  /**
+   * Switch the view surface. Also releases the main area from the workbench:
+   * `activeArea === "workbench"` short-circuits `renderView` in Shell, so a
+   * bare view change while a file is open would silently do nothing. The
+   * workbench is an *area*, not a view — no caller that sets a view wants
+   * to stay in it.
+   */
+  setView: (view) => set({ view, activeArea: "chat" }),
   setActiveArea: (activeArea) => set({ activeArea }),
+  setWorkbenchSubTab: (workbenchSubTab) => set({ workbenchSubTab }),
   // Pure state flip only — DOM class + persistence side effects live in useTheme.
   setTheme: (theme) => set({ theme }),
   selectSession: (sessionId) => set({ selectedSessionId: sessionId, activeArea: "chat" }),
@@ -101,9 +141,10 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => ({
       openFiles: s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path],
       activeFile: path,
-      // Opening a workspace file always reveals the editor area (nav rework:
-      // the editor is a full-area surface toggled with the 对话/文件编辑 tabs).
-      activeArea: "editor",
+      // Opening a workspace file reveals the workbench area with the editor
+      // sub-tab (nav rework: the editor is a sub-surface of the workbench).
+      activeArea: "workbench",
+      workbenchSubTab: "editor",
     })),
   closeFile: (path) =>
     set((s) => {
@@ -128,5 +169,30 @@ export const useUiStore = create<UiState>((set) => ({
       if (dirty) dirtyPaths[path] = true;
       else delete dirtyPaths[path];
       return { dirtyPaths };
+    }),
+  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
+  switchWorkspace: (workspaceId) =>
+    set((s) => {
+      const workspaceTabs = { ...s.workspaceTabs };
+      // Save the current workspace's editor tab snapshot.
+      if (s.activeWorkspaceId) {
+        workspaceTabs[s.activeWorkspaceId] = {
+          openFiles: s.openFiles,
+          activeFile: s.activeFile,
+        };
+      }
+      // Restore the target workspace's saved tabs (or start fresh).
+      const snapshot = workspaceTabs[workspaceId];
+      const openFiles = snapshot?.openFiles ?? [];
+      const activeFile = snapshot?.activeFile ?? null;
+      return {
+        activeWorkspaceId: workspaceId,
+        openFiles,
+        activeFile,
+        // Always switch to the editor sub-tab so the user sees the file tree
+        // after clicking a workspace item, regardless of saved tabs.
+        workbenchSubTab: "editor",
+        workspaceTabs,
+      };
     }),
 }));

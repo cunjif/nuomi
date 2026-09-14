@@ -37,6 +37,8 @@ fn is_domain_topic(topic: &str) -> bool {
         || topic.starts_with("approval.")
         || topic.starts_with("schedule.")
         || topic.starts_with("team.")
+        || topic.starts_with("change.")
+        || topic.starts_with("conversation.")
 }
 
 fn extract(event: &Event) -> (Option<String>, Option<String>, Option<String>, Option<i64>) {

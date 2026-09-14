@@ -26,6 +26,9 @@ pub enum StoreError {
     #[error("not found: {entity}#{id}")]
     NotFound { entity: &'static str, id: String },
 
+    #[error("already exists: {entity}#{value}")]
+    AlreadyExists { entity: &'static str, value: String },
+
     #[error("conflict on {entity}#{id}: expected status '{expected}'")]
     Conflict {
         entity: &'static str,

@@ -5,9 +5,30 @@
  */
 import {
   commands as production,
+  type AgentDetailDto,
+  type AgentOptionDto,
+  type AgentRefDto,
+  type AgentRefInput,
+  type AsrModelDto,
+  type AttachmentDto,
+  type ContextInjectionDto,
+  type ContextInjectionInput,
+  type ConversationDto,
+  type ConversationInput,
+  type ConversationUpdateInput,
+  type EventDto,
+  type InjectableRuleDto,
+  type InjectableSessionDto,
   type IpcError,
   type JsonValue,
+  type OrphanSessionDto,
+  type RemoveWorkspaceResult,
   type Result,
+  type RunDto,
+  type ScheduleDto,
+  type ScheduleInput,
+  type TodoItemDto,
+  type WorkspaceEntryDto,
 } from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
@@ -74,6 +95,7 @@ export const ipc = {
   gitCommit: (message: string) => unwrap(current.gitCommit(message)),
   gitPush: (remote: string, branch: string) => unwrap(current.gitPush(remote, branch)),
   gitWorktrees: () => unwrap(current.gitWorktrees()),
+  gitDiff: (path: string, staged: boolean) => unwrap(current.gitDiff(path, staged)),
   getWorkspace: () => unwrap(current.getWorkspace()),
   setWorkspace: (path: string) => unwrap(current.setWorkspace(path)),
   createSchedule: (name: string, cronExpr: string, taskTitle: string, taskDescription: string) =>
@@ -135,6 +157,82 @@ export const ipc = {
     unwrap(current.pluginEditorCall(pluginId, method, params)),
   appSettingGet: (key: string) => unwrap(current.appSettingGet(key)),
   appSettingSet: (key: string, value: string) => unwrap(current.appSettingSet(key, value)),
+  createConversation: (input: ConversationInput) => unwrap(current.createConversation(input)),
+  listConversations: (kind: string | null) => unwrap(current.listConversations(kind)),
+  getConversation: (sessionId: string) => unwrap(current.getConversation(sessionId)),
+  setConversationAgent: (sessionId: string, agent: AgentRefInput | null) =>
+    unwrap(current.setConversationAgent(sessionId, agent)),
+  listAgentOptions: () => unwrap(current.listAgentOptions()),
+  updateConversation: (sessionId: string, input: ConversationUpdateInput) =>
+    unwrap(current.updateConversation(sessionId, input)),
+  addConversationAgent: (sessionId: string, agent: AgentRefInput) =>
+    unwrap(current.addConversationAgent(sessionId, agent)),
+  getAgentDetail: (agentKind: string, agentId: string) =>
+    unwrap(current.getAgentDetail(agentKind, agentId)),
+  submitMessage: (
+    sessionId: string,
+    text: string,
+    attachmentIds: string[],
+    routeTargetAgentIds?: string[] | null,
+    contextInjectionIds?: string[] | null,
+  ) =>
+    unwrap(
+      current.submitMessage(
+        sessionId,
+        text,
+        attachmentIds,
+        routeTargetAgentIds ?? null,
+        contextInjectionIds ?? null,
+      ),
+    ),
+  stopConversation: (sessionId: string) => unwrap(current.stopConversation(sessionId)),
+  listActiveRuns: () => unwrap(current.listActiveRuns()),
+  cancelRun: (runId: string) => unwrap(current.cancelRun(runId)),
+  saveAttachment: (sessionId: string, name: string, mime: string, dataBase64: string) =>
+    unwrap(current.saveAttachment(sessionId, name, mime, dataBase64)),
+  listAttachments: (sessionId: string) => unwrap(current.listAttachments(sessionId)),
+  deleteAttachment: (attachmentId: string) => unwrap(current.deleteAttachment(attachmentId)),
+  upsertSchedule: (input: ScheduleInput) => unwrap(current.upsertSchedule(input)),
+  updateSchedule: (scheduleId: string, input: ScheduleInput) =>
+    unwrap(current.updateSchedule(scheduleId, input)),
+  injectContext: (sessionId: string, input: ContextInjectionInput) =>
+    unwrap(current.injectContext(sessionId, input)),
+  listInjectableSessions: () => unwrap(current.listInjectableSessions()),
+  listInjectableRules: () => unwrap(current.listInjectableRules()),
+  transcribeAudio: (audioBase64: string, modelSource?: string | null) =>
+    unwrap(current.transcribeAudio(audioBase64, modelSource ?? null)),
+  listAsrModels: () => unwrap(current.listAsrModels()),
+  listWorkspaces: () => unwrap(current.listWorkspaces()),
+  addWorkspace: (path: string) => unwrap(current.addWorkspace(path)),
+  removeWorkspace: (id: string) => unwrap(current.removeWorkspace(id)),
+  activateWorkspace: (id: string) => unwrap(current.activateWorkspace(id)),
+  getActiveWorkspace: () => unwrap(current.getActiveWorkspace()),
+  listOrphanSessions: () => unwrap(current.listOrphanSessions()),
+  reclaimOrphanSessions: (workspaceId: string) =>
+    unwrap(current.reclaimOrphanSessions(workspaceId)),
 };
 
 export type Ipc = typeof ipc;
+export type {
+  AgentDetailDto,
+  AgentOptionDto,
+  AgentRefDto,
+  AgentRefInput,
+  AsrModelDto,
+  AttachmentDto,
+  ContextInjectionDto,
+  ContextInjectionInput,
+  ConversationDto,
+  ConversationInput,
+  ConversationUpdateInput,
+  EventDto,
+  InjectableRuleDto,
+  InjectableSessionDto,
+  RunDto,
+  ScheduleDto,
+  ScheduleInput,
+  TodoItemDto,
+  WorkspaceEntryDto,
+  RemoveWorkspaceResult,
+  OrphanSessionDto,
+};

@@ -8,14 +8,15 @@ import { ErrorBoundary } from "../../components/ui/ErrorBoundary";
 import { useUiStore, type View } from "../../lib/store/uiStore";
 import { ApprovalsView } from "../approvals/ApprovalsView";
 import { BoardView } from "../board/BoardView";
-import { ChatView } from "../chat/ChatView";
+import { ConversationView } from "../conversation/ConversationView";
 import { SchedulerView } from "../scheduler/SchedulerView";
 import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
 import { AreaNav } from "./AreaNav";
-import { EditorArea } from "./EditorArea";
+import { BackgroundTray } from "./BackgroundTray";
+import { WorkbenchArea } from "./WorkbenchArea";
 import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge";
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
@@ -77,8 +78,8 @@ function BootScreen({ error }: { error?: string }): ReactNode {
  * Global navigation chords (需求 5), handled at window keydown CAPTURE phase
  * so no inner surface (Monaco keybindings, inputs, composer) can see or
  * override them. 不可覆盖 constraint:
- * - Alt+H toggles the main area between editor and chat (both directions);
- * - Alt+E switches to the editor area (symmetric counterpart).
+ * - Alt+H toggles the main area between workbench and chat (both directions);
+ * - Alt+E switches to the workbench area with the editor sub-tab.
  * Monaco never registers these chords by default, and MonacoTab adds none —
  * see the note there. preventDefault + stopImmediatePropagation guarantee
  * nothing else on the window even observes the event.
@@ -88,16 +89,18 @@ function useGlobalNavShortcuts(): void {
   handler.current = (e: KeyboardEvent): void => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (e.code === "KeyH") {
-      // 不可覆盖: toggle editor ↔ chat.
+      // 不可覆盖: toggle workbench ↔ chat.
       e.preventDefault();
       e.stopImmediatePropagation();
       const { activeArea, setActiveArea } = useUiStore.getState();
-      setActiveArea(activeArea === "editor" ? "chat" : "editor");
+      setActiveArea(activeArea === "workbench" ? "chat" : "workbench");
     } else if (e.code === "KeyE") {
-      // 不可覆盖: focus the editor area.
+      // 不可覆盖: focus the workbench area with the editor sub-tab.
       e.preventDefault();
       e.stopImmediatePropagation();
-      useUiStore.getState().setActiveArea("editor");
+      const { setActiveArea, setWorkbenchSubTab } = useUiStore.getState();
+      setActiveArea("workbench");
+      setWorkbenchSubTab("editor");
     }
   };
   useEffect(() => {
@@ -197,14 +200,15 @@ export function Shell(): ReactNode {
   return (
     <div className="flex h-screen flex-col bg-surface text-ink">
       <AreaNav />
+      <BackgroundTray />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {/* Mutually exclusive surfaces (需求 5): the editor occupies the
+          {/* Mutually exclusive surfaces (需求 5): the workbench occupies the
           same area as the conversation view; opening a file flips
-          activeArea, Alt+H flips it back. */}
-          <ErrorBoundary key={activeArea === "editor" ? "editor" : view}>
-            {activeArea === "editor" ? <EditorArea /> : renderView(view)}
+          activeArea to "workbench" with sub-tab "editor", Alt+H flips back. */}
+          <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
+            {activeArea === "workbench" ? <WorkbenchArea /> : renderView(view)}
           </ErrorBoundary>
         </main>
       </div>
@@ -217,7 +221,7 @@ export function Shell(): ReactNode {
 function renderView(view: View): ReactNode {
   switch (view) {
     case "chat":
-      return <ChatView />;
+      return <ConversationView />;
     case "board":
       return <BoardView />;
     case "trace":

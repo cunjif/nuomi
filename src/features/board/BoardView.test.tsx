@@ -236,7 +236,7 @@ describe("BoardView — batch operations (批次二②)", () => {
 
   it("deletes a task after the two-step confirm and refreshes the board", async () => {
     seedTask("t-del", "待删任务", "backlog");
-    tdState.runs.push({ id: "r-del", taskId: "t-del", sessionId: "s1", status: "failed", heartbeatAt: 1 });
+    tdState.runs.push({ id: "r-del", taskId: "t-del", sessionId: "s1", status: "failed", heartbeatAt: 1, kind: "task", cancelable: false });
     const base = testDoubleCommands();
     const deleteTask = vi.fn(base.deleteTask);
     injectIpcCommands({ ...base, deleteTask });

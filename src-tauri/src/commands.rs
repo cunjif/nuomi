@@ -5,7 +5,7 @@
 //! The `#[tauri::command]`/invoke wiring is applied in `lib.rs`; the inner
 //! `impl_*` free functions are testable without a Tauri runtime.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
-    AgentProfile, CliFlavor, EventRecord, Integration, IntegrationKind, ProviderConfig,
-    ProviderProtocol, Role, RunState, Schedule, Task, TaskStatus, Team, TeamTopology,
+    AgentProfile, AgentRefKind, CliFlavor, ConversationKind, EventRecord, Integration,
+    IntegrationKind, ProviderConfig, ProviderProtocol, Role, RunState, Schedule,
+    ScheduleSessionMode, ScheduleTargetKind, Session, Task, TaskStatus, Team, TeamTopology,
     WhiteBoardNote,
 };
 use nuomi_core::evolution::research::{
@@ -33,7 +34,7 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 
 use crate::ipc_error::IpcError;
-use crate::state::AppState;
+use crate::state::{join_err, AppState};
 
 // ---------- sessions / chat ----------
 
@@ -90,18 +91,48 @@ pub async fn impl_list_events(
     Ok(records.into_iter().map(EventDto::from).collect())
 }
 
-pub async fn impl_submit_task(
+/// Runs one conversation turn against an explicit session: history is
+/// loaded from (and persisted to) that session, so two conversations can
+/// run concurrently and a message never lands in the wrong transcript.
+///
+/// The run registers a cooperative cancellation token under its session id
+/// so `/stop` and the background tray can abort it; the loop returns at the
+/// next step boundary and whatever it produced is persisted.
+pub async fn run_conversation_turn(
     state: &AppState,
-    _session_id: String,
-    input: String,
+    session_id: &str,
+    text: &str,
 ) -> Result<RunResultDto, IpcError> {
-    let result = state.kernel.run_task(&input).await?;
+    if session_id.trim().is_empty() {
+        return Err(IpcError::new(
+            "session.invalid_id",
+            "session id must not be empty",
+        ));
+    }
+    let token = state.session_cancels.begin(session_id);
+    let outcome = state
+        .kernel
+        .run_task_in_session(session_id, text, Some(token.clone()))
+        .await;
+    // A cancelled run was already deregistered by the canceller.
+    if !token.is_cancelled() {
+        state.session_cancels.finish(session_id);
+    }
+    let result = outcome?;
     Ok(RunResultDto {
         final_text: result.final_text,
         steps: result.steps,
         truncated: result.truncated,
-        session_id: state.kernel.session_id().await,
+        session_id: session_id.to_string(),
     })
+}
+
+pub async fn impl_submit_task(
+    state: &AppState,
+    session_id: String,
+    input: String,
+) -> Result<RunResultDto, IpcError> {
+    run_conversation_turn(state, &session_id, &input).await
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -160,6 +191,119 @@ pub struct SessionDto {
     pub title: String,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRefDto {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItemDto {
+    pub id: String,
+    pub description: String,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDto {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub agent: Option<AgentRefDto>,
+    pub team_id: Option<String>,
+    pub task_id: Option<String>,
+    pub schedule_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub goal: Option<String>,
+    pub main_agent_id: Option<String>,
+    pub route_mode: Option<String>,
+    pub whiteboard_route_mode: Option<String>,
+    pub participant_agents: Vec<AgentRefDto>,
+    pub todo_list: Vec<TodoItemDto>,
+}
+
+impl From<Session> for ConversationDto {
+    fn from(s: Session) -> Self {
+        Self {
+            id: s.id,
+            title: s.title,
+            kind: s.kind.as_str().to_string(),
+            agent: s.agent.map(|(k, id)| AgentRefDto {
+                kind: k.as_str().to_string(),
+                id,
+                name: String::new(),
+            }),
+            team_id: s.team_id,
+            task_id: s.task_id,
+            schedule_id: s.schedule_id,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+            goal: s.goal,
+            main_agent_id: s.main_agent_id,
+            route_mode: s.route_mode,
+            whiteboard_route_mode: s.whiteboard_route_mode,
+            participant_agents: Vec::new(),
+            todo_list: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRefInput {
+    pub kind: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationInput {
+    pub kind: String,
+    pub title: Option<String>,
+    pub agent: Option<AgentRefInput>,
+    pub team_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOptionDto {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub builtin: bool,
+    pub role: Option<String>,
+    pub responsibility: Option<String>,
+    pub bound_model: Option<String>,
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDetailDto {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub role: Option<String>,
+    pub responsibility: Option<String>,
+    pub bound_model: Option<String>,
+    pub provider: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationUpdateInput {
+    pub title: Option<String>,
+    pub goal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -405,6 +549,31 @@ pub(crate) fn transition_run_with_detail(
     Ok(next)
 }
 
+/// Like [`transition_run_with_detail`] but also publishes `run.state_changed`
+/// to the kernel bus when `bus` is provided (plan §5.3).
+pub(crate) fn transition_run_and_notify(
+    conn: &rusqlite::Connection,
+    bus: Option<&nuomi_core::harness::EventBus>,
+    run_id: &str,
+    expected: RunState,
+    ev: RunEvent,
+    error_message: Option<&str>,
+) -> Result<RunState, IpcError> {
+    let next = transition_run_with_detail(conn, run_id, expected, ev, error_message)?;
+    if let Some(bus) = bus {
+        let mut payload = serde_json::json!({
+            "runId": run_id,
+            "from": expected.as_str(),
+            "to": next.as_str(),
+        });
+        if let Some(msg) = error_message {
+            payload["error"] = serde_json::Value::String(msg.to_string());
+        }
+        bus.publish(nuomi_core::harness::Event::new("run.state_changed", payload));
+    }
+    Ok(next)
+}
+
 // ---------- runs ----------
 
 pub async fn impl_get_run(state: &AppState, run_id: String) -> Result<RunDto, IpcError> {
@@ -563,6 +732,21 @@ pub async fn impl_git_worktrees(state: &AppState) -> Result<Vec<GitWorktreeDto>,
         .collect())
 }
 
+pub async fn impl_git_diff(
+    state: &AppState,
+    path: String,
+    staged: bool,
+) -> Result<String, IpcError> {
+    let out = state.git().diff_for_path(&path, staged).await?;
+    if out.trim().is_empty() {
+        // Untracked files have no diff at all (they only ever appear in the
+        // status list), so synthesize one against /dev/null. A tracked file
+        // with an empty diff is not in the status list in the first place.
+        return Ok(state.git().diff_untracked(&path).await?);
+    }
+    Ok(out)
+}
+
 // ---------- schedules ----------
 
 pub async fn impl_create_schedule(
@@ -586,6 +770,12 @@ pub async fn impl_create_schedule(
         next_trigger_at: None,
         created_at: now_ms(),
         updated_at: now_ms(),
+        target_kind: ScheduleTargetKind::Task,
+        agent: None,
+        team_id: None,
+        session_mode: ScheduleSessionMode::PerTrigger,
+        session_id: None,
+        auto_dispatch: true,
     };
     let clone = schedule.clone();
     let path = state.db_path.clone();
@@ -607,13 +797,30 @@ pub async fn impl_create_schedule(
 
 pub async fn impl_list_schedules(state: &AppState) -> Result<Vec<ScheduleDto>, IpcError> {
     let path = state.db_path.clone();
-    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<Schedule>, IpcError> {
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ScheduleDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        Ok(repos::tasks_runs::list_schedules(&db.0, 200)?)
+        let schedules = repos::tasks_runs::list_schedules(&db.0, 200)?;
+        let mut out = Vec::with_capacity(schedules.len());
+        for schedule in &schedules {
+            let mut dto = ScheduleDto::from(schedule.clone());
+            // Same display-name fill as the conversation list: a row should
+            // read "Codex", not "cli:<id>".
+            if let Some(agent) =
+                nuomi_core::services::name_agent_ref(&db.0, schedule.agent.as_ref())?
+            {
+                dto.agent = Some(AgentRefDto {
+                    kind: agent.kind.as_str().to_string(),
+                    id: agent.id,
+                    name: agent.name,
+                });
+            }
+            out.push(dto);
+        }
+        Ok(out)
     })
     .await??;
-    Ok(rows.into_iter().map(ScheduleDto::from).collect())
+    Ok(rows)
 }
 
 pub async fn impl_toggle_schedule(
@@ -2338,7 +2545,9 @@ pub async fn impl_run_team_on_task(
         team_id,
         prepared.task_text,
     );
-    Ok(prepared.run.into())
+    let mut dto = RunDto::from(prepared.run);
+    dto.kind = "team".to_string();
+    Ok(dto)
 }
 
 enum TeamSettlement {
@@ -2853,6 +3062,1041 @@ fn now_ms() -> i64 {
     nuomi_core::domain::now_ms()
 }
 
+// ---------------------------------------------------------------- conversations
+
+pub async fn impl_create_conversation(
+    state: &AppState,
+    input: ConversationInput,
+) -> Result<ConversationDto, IpcError> {
+    let kind = ConversationKind::parse(&input.kind).ok_or_else(|| {
+        IpcError::new("conversation.invalid_kind", format!("unknown kind: {}", input.kind))
+    })?;
+    let agent = input
+        .agent
+        .as_ref()
+        .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
+    let title = input.title.clone().unwrap_or_default();
+    let team_id = input.team_id.clone();
+    let path = state.db_path.clone();
+    let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let agent_ref = agent.as_ref().map(|(k, id)| (*k, id.as_str()));
+        let session = nuomi_core::services::create_conversation(
+            &db.0,
+            kind,
+            &title,
+            agent_ref,
+            team_id.as_deref(),
+            None,
+        )?;
+        let active_ws =
+            repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        if !active_ws.is_empty() {
+            repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
+        }
+        Ok(session)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(ConversationDto::from(session))
+}
+
+pub async fn impl_list_conversations(
+    state: &AppState,
+    kind: Option<String>,
+) -> Result<Vec<ConversationDto>, IpcError> {
+    let path = state.db_path.clone();
+    let filter = kind.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ConversationDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let active_ws = repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
+        let sessions = repos::sessions::list(&db.0, filter_ws, 200)?;
+        // Steps 2–4 of the agent chain are session-independent: resolve them
+        // once instead of re-running the chain for every row.
+        let fallback = nuomi_core::services::resolve_default_agent(&db.0)?;
+        let mut out = Vec::with_capacity(sessions.len());
+        for session in &sessions {
+            if filter
+                .as_ref()
+                .map_or(false, |k| session.kind.as_str() != k.as_str())
+            {
+                continue;
+            }
+            let mut dto = ConversationDto::from(session.clone());
+            let resolved = if session.agent.is_some() {
+                nuomi_core::services::resolve_agent(&db.0, session)?
+            } else {
+                fallback.clone()
+            };
+            if let Some(agent) = resolved {
+                dto.agent = Some(AgentRefDto {
+                    kind: agent.kind.as_str().to_string(),
+                    id: agent.id,
+                    name: agent.name,
+                });
+            }
+            out.push(dto);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(rows)
+}
+
+pub async fn impl_get_conversation(
+    state: &AppState,
+    session_id: String,
+) -> Result<ConversationDto, IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let (session, resolved, participants, todos) =
+        tokio::task::spawn_blocking(move || -> Result<(Session, Option<nuomi_core::services::ResolvedAgent>, Vec<(nuomi_core::domain::AgentRefKind, String)>, Vec<nuomi_core::domain::TodoItem>), IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let session = repos::sessions::get(&db.0, &sid)?;
+            let resolved = nuomi_core::services::resolve_agent(&db.0, &session)?;
+            let participants = repos::sessions::list_participants(&db.0, &sid)?;
+            let todos = repos::sessions::list_todos(&db.0, &sid)?;
+            Ok((session, resolved, participants, todos))
+        })
+        .await
+        .map_err(join_err)??;
+    let mut dto = ConversationDto::from(session);
+    if let Some(agent) = resolved {
+        dto.agent = Some(AgentRefDto {
+            kind: agent.kind.as_str().to_string(),
+            id: agent.id,
+            name: agent.name,
+        });
+    }
+    dto.participant_agents = participants
+        .into_iter()
+        .map(|(k, id)| AgentRefDto {
+            kind: k.as_str().to_string(),
+            id,
+            name: String::new(),
+        })
+        .collect();
+    dto.todo_list = todos
+        .into_iter()
+        .map(|t| TodoItemDto {
+            id: t.id,
+            description: t.description,
+            completed: t.completed,
+        })
+        .collect();
+    Ok(dto)
+}
+
+pub async fn impl_set_conversation_agent(
+    state: &AppState,
+    session_id: String,
+    agent: Option<AgentRefInput>,
+) -> Result<ConversationDto, IpcError> {
+    let agent_owned = agent
+        .as_ref()
+        .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let agent_ref = agent_owned.as_ref().map(|(k, id)| (*k, id.as_str()));
+        Ok(nuomi_core::services::set_agent(&db.0, &sid, agent_ref)?)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(ConversationDto::from(session))
+}
+
+// ----------------------------------------------- update_conversation
+
+pub async fn impl_update_conversation(
+    state: &AppState,
+    session_id: String,
+    input: ConversationUpdateInput,
+) -> Result<ConversationDto, IpcError> {
+    if let Some(ref title) = input.title {
+        if title.chars().count() > 100 {
+            return Err(IpcError::new(
+                "validation",
+                "title must be at most 100 characters",
+            ));
+        }
+    }
+    if let Some(ref goal) = input.goal {
+        if goal.chars().count() > 500 {
+            return Err(IpcError::new(
+                "validation",
+                "goal must be at most 500 characters",
+            ));
+        }
+    }
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        if let Some(ref title) = input.title {
+            repos::sessions::update_title(&db.0, &sid, title)?;
+        }
+        if input.goal.is_some() {
+            let session = repos::sessions::get(&db.0, &sid)?;
+            repos::sessions::update_meta(
+                &db.0,
+                &sid,
+                input.goal.as_deref(),
+                session.main_agent_id.as_deref(),
+                session.route_mode.as_deref(),
+                session.whiteboard_route_mode.as_deref(),
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    impl_get_conversation(state, session_id).await
+}
+
+// ----------------------------------------------- add_conversation_agent
+
+pub async fn impl_add_conversation_agent(
+    state: &AppState,
+    session_id: String,
+    agent: AgentRefInput,
+) -> Result<ConversationDto, IpcError> {
+    let agent_kind = AgentRefKind::parse(&agent.kind)
+        .ok_or_else(|| IpcError::new("validation", format!("unknown agent kind: {}", agent.kind)))?;
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let agent_id = agent.id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let session = repos::sessions::get(&db.0, &sid)?;
+        if repos::sessions::is_participant(&db.0, &sid, agent_kind, &agent_id)? {
+            return Err(IpcError::new(
+                "already_exists",
+                "agent already in conversation",
+            ));
+        }
+        let now = nuomi_core::domain::now_ms();
+        repos::sessions::add_participant(&db.0, &sid, agent_kind, &agent_id, now)?;
+        // Single chat → group chat upgrade.
+        if session.kind == nuomi_core::domain::ConversationKind::Chat {
+            repos::sessions::update_kind(
+                &db.0,
+                &sid,
+                nuomi_core::domain::ConversationKind::Group,
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    impl_get_conversation(state, session_id).await
+}
+
+// ----------------------------------------------- get_agent_detail
+
+pub async fn impl_get_agent_detail(
+    state: &AppState,
+    agent_kind: String,
+    agent_id: String,
+) -> Result<AgentDetailDto, IpcError> {
+    let path = state.db_path.clone();
+    let result =
+        tokio::task::spawn_blocking(move || -> Result<AgentDetailDto, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            match agent_kind.as_str() {
+                "cli" => {
+                    let p = repos::agent_profiles::get(&db.0, &agent_id)?;
+                    Ok(AgentDetailDto {
+                        kind: "cli".to_string(),
+                        id: p.id.clone(),
+                        name: p.name.clone(),
+                        avatar_url: None,
+                        role: Some(p.adapter.clone()),
+                        responsibility: None,
+                        bound_model: None,
+                        provider: None,
+                        enabled: p.enabled,
+                    })
+                }
+                "role" => {
+                    let r = repos::roles::get(&db.0, &agent_id)?;
+                    Ok(AgentDetailDto {
+                        kind: "role".to_string(),
+                        id: r.id.clone(),
+                        name: r.name.clone(),
+                        avatar_url: None,
+                        role: Some("role".to_string()),
+                        responsibility: r.system_prompt_override.as_deref().map(|s| {
+                            if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
+                        }),
+                        bound_model: r.provider_id.clone(),
+                        provider: r.provider_ids.first().cloned(),
+                        enabled: true,
+                    })
+                }
+                _ => Err(IpcError::new(
+                    "validation",
+                    format!("unknown agent kind: {agent_kind}"),
+                )),
+            }
+        })
+        .await
+        .map_err(join_err)??;
+    Ok(result)
+}
+
+pub async fn impl_list_agent_options(state: &AppState) -> Result<Vec<AgentOptionDto>, IpcError> {
+    let path = state.db_path.clone();
+    let result =
+        tokio::task::spawn_blocking(move || -> Result<Vec<AgentOptionDto>, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let mut options = Vec::new();
+            for p in repos::agent_profiles::list(&db.0)? {
+                options.push(AgentOptionDto {
+                    kind: "cli".to_string(),
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    enabled: p.enabled,
+                    builtin: false,
+                    role: Some(p.adapter.clone()),
+                    responsibility: None,
+                    bound_model: None,
+                    provider: None,
+                });
+            }
+            for r in repos::roles::list(&db.0)? {
+                options.push(AgentOptionDto {
+                    kind: "role".to_string(),
+                    id: r.id.clone(),
+                    name: r.name.clone(),
+                    enabled: true,
+                    builtin: r.builtin,
+                    role: Some("role".to_string()),
+                    responsibility: r.system_prompt_override.as_deref().map(|s| {
+                        if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
+                    }),
+                    bound_model: r.provider_id.clone(),
+                    provider: r.provider_ids.first().cloned(),
+                });
+            }
+            Ok(options)
+        })
+        .await
+        .map_err(join_err)??;
+    Ok(result)
+}
+
+// ---------------------------------------------------------------- attachments
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentDto {
+    pub id: String,
+    pub session_id: String,
+    pub seq: Option<i64>,
+    pub kind: String,
+    pub name: String,
+    pub mime: String,
+    pub rel_path: String,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::domain::Attachment> for AttachmentDto {
+    fn from(a: nuomi_core::domain::Attachment) -> Self {
+        Self {
+            id: a.id,
+            session_id: a.session_id,
+            seq: a.seq,
+            kind: a.kind.as_str().to_string(),
+            name: a.name,
+            mime: a.mime,
+            rel_path: a.rel_path,
+            size_bytes: a.size_bytes,
+            sha256: a.sha256,
+            created_at: a.created_at,
+        }
+    }
+}
+
+// ---------------------------------------------------------------- schedule input
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleInput {
+    pub name: String,
+    pub cron_expr: String,
+    pub target_kind: String,
+    pub agent: Option<AgentRefInput>,
+    pub team_id: Option<String>,
+    pub session_mode: String,
+    pub session_id: Option<String>,
+    pub auto_dispatch: bool,
+    pub task_title: String,
+    pub task_description: String,
+}
+
+fn parse_schedule_input(input: ScheduleInput) -> Result<Schedule, IpcError> {
+    parse_schedule(&input.cron_expr)
+        .map_err(|e| IpcError::new("scheduler.bad_expression", e.to_string()))?;
+    let target_kind = ScheduleTargetKind::parse(&input.target_kind).ok_or_else(|| {
+        IpcError::new(
+            "schedule.invalid_target_kind",
+            format!("unknown target_kind: {}", input.target_kind),
+        )
+    })?;
+    let session_mode = ScheduleSessionMode::parse(&input.session_mode).ok_or_else(|| {
+        IpcError::new(
+            "schedule.invalid_session_mode",
+            format!("unknown session_mode: {}", input.session_mode),
+        )
+    })?;
+    let agent = input
+        .agent
+        .as_ref()
+        .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
+    let now = now_ms();
+    Ok(Schedule {
+        id: nuomi_core::domain::new_id(),
+        name: input.name,
+        cron_expr: input.cron_expr,
+        task_title: input.task_title,
+        task_description: input.task_description,
+        enabled: true,
+        last_triggered_at: None,
+        next_trigger_at: None,
+        created_at: now,
+        updated_at: now,
+        target_kind,
+        agent,
+        team_id: input.team_id,
+        session_mode,
+        session_id: input.session_id,
+        auto_dispatch: input.auto_dispatch,
+    })
+}
+
+// ---------------------------------------------------------------- submit_message
+
+pub async fn impl_submit_message(
+    state: &AppState,
+    session_id: String,
+    text: String,
+    attachment_ids: Vec<String>,
+    route_target_agent_ids: Option<Vec<String>>,
+    _context_injection_ids: Option<Vec<String>>,
+) -> Result<RunResultDto, IpcError> {
+    // Validate @route targets: all must be participants in the current conversation.
+    if let Some(ref targets) = route_target_agent_ids {
+        if !targets.is_empty() {
+            let path = state.db_path.clone();
+            let sid = session_id.clone();
+            let targets_clone = targets.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+                let db = Db::open(&path)?;
+                migrations::run(&db.0)?;
+                let participants = repos::sessions::list_participants(&db.0, &sid)?;
+                let participant_ids: std::collections::HashSet<&str> =
+                    participants.iter().map(|(_, id)| id.as_str()).collect();
+                for target in &targets_clone {
+                    if !participant_ids.contains(target.as_str()) {
+                        return Err(IpcError::new(
+                            "invalid_route_target",
+                            format!("agent '{target}' is not a participant in this conversation"),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(join_err)??;
+        }
+    }
+    // Attachments ride along as inline references; the model sees the path
+    // inside the workspace and reads it with the normal file tools.
+    let composed = compose_with_attachments(state, &session_id, &text, &attachment_ids).await?;
+    let result = run_conversation_turn(state, &session_id, &composed).await?;
+    bind_attachments_to_user_message(state, &session_id, &attachment_ids).await?;
+    Ok(result)
+}
+
+/// Loads the referenced attachments and appends `[name](rel_path)` refs to
+/// the outgoing message. Unknown ids are ignored (the message still sends).
+async fn compose_with_attachments(
+    state: &AppState,
+    session_id: &str,
+    text: &str,
+    attachment_ids: &[String],
+) -> Result<String, IpcError> {
+    if attachment_ids.is_empty() {
+        return Ok(text.to_string());
+    }
+    let path = state.db_path.clone();
+    let ids = attachment_ids.to_vec();
+    let sid = session_id.to_string();
+    let refs = tokio::task::spawn_blocking(move || -> Result<Vec<(String, String)>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let own = repos::attachments::list_by_session(&db.0, &sid)?;
+        Ok(own
+            .into_iter()
+            .filter(|a| ids.contains(&a.id))
+            .map(|a| (a.name, a.rel_path))
+            .collect())
+    })
+    .await
+    .map_err(join_err)??;
+
+    let borrowed: Vec<(&str, &str)> = refs
+        .iter()
+        .map(|(name, rel)| (name.as_str(), rel.as_str()))
+        .collect();
+    Ok(nuomi_core::services::compose_user_message(text, &borrowed))
+}
+
+/// Stamps `attachments.seq` with the `events.seq` of the user message this
+/// turn just persisted, so an attachment can be traced back to its message.
+async fn bind_attachments_to_user_message(
+    state: &AppState,
+    session_id: &str,
+    attachment_ids: &[String],
+) -> Result<(), IpcError> {
+    if attachment_ids.is_empty() {
+        return Ok(());
+    }
+    let path = state.db_path.clone();
+    let ids = attachment_ids.to_vec();
+    let sid = session_id.to_string();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let events = repos::events::list_by_aggregate(&db.0, "session", &sid, None)?;
+        let user_seq = events.iter().rev().find_map(|e| {
+            (e.kind == "message"
+                && e.payload
+                    .get("role")
+                    .and_then(|r| r.as_str())
+                    .map(|r| r == "user")
+                    .unwrap_or(false))
+            .then_some(e.seq)
+        });
+        match user_seq {
+            Some(seq) => {
+                for id in &ids {
+                    // A stale id is not an error: the message is already sent.
+                    let _ = repos::attachments::update_seq(&db.0, id, seq);
+                }
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ----------------------------------------------- context injection
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextInjectionDto {
+    pub id: String,
+    pub session_id: String,
+    pub r#type: String,
+    pub ref_id: Option<String>,
+    pub text: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextInjectionInput {
+    pub r#type: String,
+    pub ref_id: Option<String>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InjectableSessionDto {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InjectableRuleDto {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: Option<String>,
+}
+
+pub async fn impl_inject_context(
+    state: &AppState,
+    session_id: String,
+    input: ContextInjectionInput,
+) -> Result<ContextInjectionDto, IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<ContextInjectionDto, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        let id = nuomi_core::domain::new_id();
+        db.0.execute(
+            "INSERT INTO context_injections (id, session_id, type, ref_id, text, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)",
+            rusqlite::params![id, sid, input.r#type, input.ref_id, input.text, now],
+        ).map_err(nuomi_core::store::StoreError::from)?;
+        Ok(ContextInjectionDto {
+            id,
+            session_id: sid,
+            r#type: input.r#type,
+            ref_id: input.ref_id,
+            text: input.text,
+            status: "active".to_string(),
+            created_at: now,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_list_injectable_sessions(
+    state: &AppState,
+) -> Result<Vec<InjectableSessionDto>, IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<InjectableSessionDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let active_ws = repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
+        let sessions = repos::sessions::list(&db.0, filter_ws, 50)?;
+        Ok(sessions
+            .into_iter()
+            .map(|s| InjectableSessionDto {
+                id: s.id,
+                title: s.title,
+                kind: s.kind.as_str().to_string(),
+                updated_at: s.updated_at,
+            })
+            .collect())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_list_injectable_rules(
+    state: &AppState,
+) -> Result<Vec<InjectableRuleDto>, IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<InjectableRuleDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let roles = repos::roles::list(&db.0)?;
+        Ok(roles
+            .into_iter()
+            .map(|r| InjectableRuleDto {
+                id: r.id,
+                name: r.name,
+                system_prompt: r.system_prompt_override,
+            })
+            .collect())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ----------------------------------------------- voice recognition
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceAsrConfigDto {
+    pub model_source: String,  // "builtin" | "custom"
+    pub custom_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrModelDto {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub builtin: bool,
+}
+
+pub async fn impl_transcribe_audio(
+    _state: &AppState,
+    _audio_base64: String,
+    _model_source: Option<String>,
+) -> Result<String, IpcError> {
+    // Stub: actual ASR engine integration is deferred to the voice input
+    // frontend module. Returns an error so the frontend can show a message.
+    Err(IpcError::new(
+        "asr_not_available",
+        "voice recognition is not yet configured; please set up a model in settings",
+    ))
+}
+
+pub async fn impl_list_asr_models(_state: &AppState) -> Result<Vec<AsrModelDto>, IpcError> {
+    // Return the builtin model plus any provider models that support audio.
+    Ok(vec![AsrModelDto {
+        id: "builtin".to_string(),
+        name: "Built-in ASR".to_string(),
+        provider: "builtin".to_string(),
+        builtin: true,
+    }])
+}
+
+// ---------------------------------------------------------------- stop / cancel
+
+pub async fn impl_stop_conversation(
+    state: &AppState,
+    session_id: String,
+) -> Result<(), IpcError> {
+    // Chat runs have no `runs` row — they are supervised under the session
+    // id, so this is the only handle that can actually stop the loop.
+    state.session_cancels.cancel(&session_id);
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let run_cancels = state.run_cancels.clone();
+    let bus = state.kernel.context().bus();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let runs = repos::tasks_runs::list_active_runs_by_session(&db.0, &sid)?;
+        for run in runs {
+            // Team/background runs of this session are supervised by run id.
+            run_cancels.cancel_by_run(&run.id);
+            let current = run.status;
+            if transition_run_and_notify(&db.0, Some(&bus), &run.id, current, RunEvent::Cancel, None)
+                .is_ok()
+            {
+                let _ = append_domain_event(
+                    &db.0,
+                    "run.cancelled",
+                    serde_json::json!({ "runId": run.id, "sessionId": sid }),
+                    now_ms(),
+                );
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(())
+}
+
+pub async fn impl_list_active_runs(state: &AppState) -> Result<Vec<RunDto>, IpcError> {
+    let path = state.db_path.clone();
+    let runs = tokio::task::spawn_blocking(move || -> Result<Vec<RunDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let mut all = Vec::new();
+        for s in [RunState::Running, RunState::Queued, RunState::AwaitingApproval] {
+            for r in repos::tasks_runs::list_runs_by_status(&db.0, s)? {
+                all.push(RunDto::from(r));
+            }
+        }
+        Ok(all)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(runs)
+}
+
+pub async fn impl_cancel_run(state: &AppState, run_id: String) -> Result<(), IpcError> {
+    // Signal the supervised executor first: without this the DB row flips to
+    // `cancelled` while the loop keeps streaming and later overwrites the
+    // terminal state with `succeeded`.
+    state.run_cancels.cancel_by_run(&run_id);
+    let path = state.db_path.clone();
+    let rid = run_id.clone();
+    let bus = state.kernel.context().bus();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let run = repos::tasks_runs::get_run(&db.0, &rid)?;
+        transition_run_and_notify(&db.0, Some(&bus), &rid, run.status, RunEvent::Cancel, None)?;
+        let _ = append_domain_event(
+            &db.0,
+            "run.cancelled",
+            serde_json::json!({ "runId": rid }),
+            now_ms(),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(())
+}
+
+// ---------------------------------------------------------------- attachments CRUD
+
+/// Max accepted attachment size (25 MB), mirrored by the frontend
+/// (`lib/conversation/attachmentModel.ts`).
+const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+/// Same budget expressed in base64 characters (4/3 of the byte size).
+const MAX_ATTACHMENT_BASE64_LEN: usize = MAX_ATTACHMENT_BYTES / 3 * 4;
+
+/// True for a single path segment safe to embed in a filesystem path:
+/// alphanumeric plus `-`/`_`, no separators and no `.` (blocks `..`).
+fn is_safe_path_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// MIME allowlist (mirror of the frontend whitelist): the value is used to
+/// derive a file extension, so it must not carry arbitrary characters.
+fn is_allowed_mime(mime: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "application/pdf",
+        "application/json",
+        "application/x-yaml",
+        "application/yaml",
+        "application/javascript",
+        "application/typescript",
+        "application/x-sh",
+        "application/x-python",
+        "application/x-rust",
+        "application/x-go",
+        "application/x-toml",
+        "application/xml",
+        "application/csv",
+    ];
+    if EXACT.contains(&mime) {
+        return true;
+    }
+    mime.starts_with("image/") || mime.starts_with("text/")
+}
+
+/// File extension for a whitelisted MIME type. Anything unrecognised falls
+/// back to `bin` — never the raw MIME substring.
+fn file_ext_for_mime(mime: &str) -> &'static str {
+    match mime.rsplit('/').next().unwrap_or("") {
+        "png" => "png",
+        "jpeg" | "jpg" => "jpg",
+        "gif" => "gif",
+        "webp" => "webp",
+        "svg+xml" => "svg",
+        "plain" => "txt",
+        "markdown" => "md",
+        "json" => "json",
+        "pdf" => "pdf",
+        "csv" => "csv",
+        "xml" => "xml",
+        "yaml" | "x-yaml" => "yaml",
+        "javascript" | "typescript" | "x-python" | "x-rust" | "x-go" | "x-sh" | "x-toml" => "txt",
+        _ => "bin",
+    }
+}
+
+pub async fn impl_save_attachment(
+    state: &AppState,
+    session_id: String,
+    name: String,
+    mime: String,
+    data_base64: String,
+) -> Result<AttachmentDto, IpcError> {
+    use base64::Engine;
+    // Session ids are generated by `domain::new_id` — anything else is a
+    // forged id, and it lands in a filesystem path below.
+    if !is_safe_path_segment(&session_id) {
+        return Err(IpcError::new(
+            "attachment.invalid_session",
+            "session id must be a plain id",
+        ));
+    }
+    if !is_allowed_mime(&mime) {
+        return Err(IpcError::new(
+            "attachment.invalid_mime",
+            format!("mime not allowed: {mime}"),
+        ));
+    }
+    // 4/3 of the base64 length is the decoded size — check before decoding
+    // so a huge payload never lands in memory.
+    if data_base64.len() > MAX_ATTACHMENT_BASE64_LEN {
+        return Err(IpcError::new(
+            "attachment.too_large",
+            format!("attachment exceeds {} bytes", MAX_ATTACHMENT_BYTES),
+        ));
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(&data_base64)
+        .map_err(|e| IpcError::new("attachment.invalid_base64", e.to_string()))?;
+    if data.is_empty() {
+        return Err(IpcError::new("attachment.empty", "decoded data is empty"));
+    }
+    if data.len() > MAX_ATTACHMENT_BYTES {
+        return Err(IpcError::new(
+            "attachment.too_large",
+            format!("attachment exceeds {} bytes", MAX_ATTACHMENT_BYTES),
+        ));
+    }
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&data);
+    let hash = hasher.finalize();
+    let sha256 = format!("{:x}", hash);
+
+    let kind = if mime.starts_with("image/") {
+        nuomi_core::domain::AttachmentKind::Image
+    } else {
+        nuomi_core::domain::AttachmentKind::File
+    };
+    let ext = file_ext_for_mime(&mime);
+    let rel_path = format!(".nuomi/attachments/{}/{}.{}", session_id, sha256, ext);
+    let size_bytes = data.len() as i64;
+    let now = now_ms();
+    let id = nuomi_core::domain::new_id();
+    let ws = state.current_workspace().to_path_buf();
+    let attachment = nuomi_core::domain::Attachment {
+        id: id.clone(),
+        session_id: session_id.clone(),
+        seq: None,
+        kind,
+        name: name.clone(),
+        mime: mime.clone(),
+        rel_path: rel_path.clone(),
+        size_bytes,
+        sha256: sha256.clone(),
+        created_at: now,
+    };
+    let path = state.db_path.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<AttachmentDto, IpcError> {
+        let disk_dir = ws.join(format!(".nuomi/attachments/{}", session_id));
+        std::fs::create_dir_all(&disk_dir)
+            .map_err(|e| IpcError::new("attachment.io_error", e.to_string()))?;
+        let disk_path = ws.join(&rel_path);
+        // Defence in depth: the write must stay inside the session dir even
+        // if a future refactor lets an unsanitised segment through.
+        if !disk_path.starts_with(&disk_dir) {
+            return Err(IpcError::new(
+                "attachment.invalid_path",
+                "attachment path escapes the session directory",
+            ));
+        }
+        std::fs::write(&disk_path, &data)
+            .map_err(|e| IpcError::new("attachment.io_error", e.to_string()))?;
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::attachments::insert(&db.0, &attachment)?;
+        Ok(AttachmentDto::from(attachment))
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(result)
+}
+
+pub async fn impl_list_attachments(
+    state: &AppState,
+    session_id: String,
+) -> Result<Vec<AttachmentDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<AttachmentDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::attachments::list_by_session(&db.0, &session_id)?
+            .into_iter()
+            .map(AttachmentDto::from)
+            .collect())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(rows)
+}
+
+pub async fn impl_delete_attachment(
+    state: &AppState,
+    attachment_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let ws = state.current_workspace().to_path_buf();
+    let aid = attachment_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let att = repos::attachments::get(&db.0, &aid)?;
+        repos::attachments::delete(&db.0, &aid)?;
+        let disk_path = ws.join(&att.rel_path);
+        let _ = std::fs::remove_file(&disk_path);
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(())
+}
+
+// ---------------------------------------------------------------- schedule upsert/update
+
+pub async fn impl_upsert_schedule(
+    state: &AppState,
+    input: ScheduleInput,
+) -> Result<ScheduleDto, IpcError> {
+    let schedule = parse_schedule_input(input)?;
+    let clone = schedule.clone();
+    let path = state.db_path.clone();
+    let created = tokio::task::spawn_blocking(move || -> Result<Schedule, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::tasks_runs::insert_schedule(&db.0, &schedule)?;
+        append_domain_event(
+            &db.0,
+            "schedule.created",
+            serde_json::json!({ "scheduleId": clone.id }),
+            clone.created_at,
+        )?;
+        Ok(clone)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(ScheduleDto::from(created))
+}
+
+pub async fn impl_update_schedule(
+    state: &AppState,
+    schedule_id: String,
+    input: ScheduleInput,
+) -> Result<ScheduleDto, IpcError> {
+    let mut schedule = parse_schedule_input(input)?;
+    schedule.id = schedule_id.clone();
+    schedule.updated_at = now_ms();
+    let clone = schedule.clone();
+    let path = state.db_path.clone();
+    let updated = tokio::task::spawn_blocking(move || -> Result<Schedule, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::tasks_runs::update_schedule(&db.0, &schedule)?;
+        append_domain_event(
+            &db.0,
+            "schedule.updated",
+            serde_json::json!({ "scheduleId": clone.id }),
+            clone.updated_at,
+        )?;
+        Ok(clone)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(ScheduleDto::from(updated))
+}
+
 fn append_domain_event(
     conn: &rusqlite::Connection,
     topic: &str,
@@ -2895,16 +4139,28 @@ pub struct RunDto {
     pub session_id: String,
     pub status: String,
     pub heartbeat_at: i64,
+    pub kind: String,
+    pub cancelable: bool,
 }
 
 impl From<nuomi_core::domain::Run> for RunDto {
     fn from(r: nuomi_core::domain::Run) -> Self {
+        let cancelable = matches!(
+            r.status,
+            nuomi_core::domain::RunState::Running
+                | nuomi_core::domain::RunState::Queued
+                | nuomi_core::domain::RunState::AwaitingApproval
+        );
         Self {
             id: r.id,
             task_id: r.task_id,
             session_id: r.session_id,
             status: r.status.as_str().to_string(),
             heartbeat_at: r.heartbeat_at,
+            // Default is a single-agent run; team runs override it (see
+            // `impl_run_team_on_task`) — the domain `Run` carries no kind.
+            kind: "single".to_string(),
+            cancelable,
         }
     }
 }
@@ -2969,7 +4225,15 @@ pub struct ScheduleDto {
     pub name: String,
     pub cron_expr: String,
     pub task_title: String,
+    pub task_description: String,
     pub enabled: bool,
+    pub target_kind: String,
+    pub agent: Option<AgentRefDto>,
+    pub team_id: Option<String>,
+    pub session_mode: String,
+    pub session_id: Option<String>,
+    pub auto_dispatch: bool,
+    pub last_triggered_at: Option<i64>,
     pub next_trigger_at: Option<i64>,
 }
 
@@ -2980,13 +4244,25 @@ impl From<Schedule> for ScheduleDto {
             name: s.name,
             cron_expr: s.cron_expr,
             task_title: s.task_title,
+            task_description: s.task_description,
             enabled: s.enabled,
+            target_kind: s.target_kind.as_str().to_string(),
+            agent: s.agent.map(|(k, id)| AgentRefDto {
+                kind: k.as_str().to_string(),
+                id,
+                name: String::new(),
+            }),
+            team_id: s.team_id,
+            session_mode: s.session_mode.as_str().to_string(),
+            session_id: s.session_id,
+            auto_dispatch: s.auto_dispatch,
+            last_triggered_at: s.last_triggered_at,
             next_trigger_at: s.next_trigger_at,
         }
     }
 }
 
-// ---------- workspace switch ----------
+// ---------- workspace registry ----------
 
 /// Workspace contract: the active sandbox root plus whether the workspace has
 /// been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env
@@ -2998,32 +4274,258 @@ pub struct WorkspaceInfo {
     pub configured: bool,
 }
 
-pub async fn impl_get_workspace(state: &AppState) -> Result<WorkspaceInfo, IpcError> {
-    Ok(WorkspaceInfo {
-        root: state.current_workspace().to_string_lossy().to_string(),
-        configured: state.workspace_env_configured || workspace_persisted(state)?,
+/// A registered workspace entry as seen by the frontend. `directory_present`
+/// is a runtime probe (the root dir may have been deleted out-of-band).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEntryDto {
+    pub id: String,
+    pub root_path: String,
+    pub color_tag: String,
+    pub created_at: i64,
+    pub is_active: bool,
+    pub directory_present: bool,
+}
+
+/// Result of removing a workspace: the removed id plus the new active id
+/// (None when the registry is now empty).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveWorkspaceResult {
+    pub removed_id: String,
+    pub new_active_id: Option<String>,
+}
+
+/// A session whose `workspace_id` points to a removed workspace.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanSessionDto {
+    pub session_id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub updated_at: i64,
+}
+
+pub async fn impl_list_workspaces(
+    state: &AppState,
+) -> Result<Vec<WorkspaceEntryDto>, IpcError> {
+    let reg = state.workspace_registry.clone();
+    let entries = tokio::task::spawn_blocking(move || reg.list())
+        .await
+        .map_err(join_err)??;
+    Ok(entries
+        .into_iter()
+        .map(|wp| WorkspaceEntryDto {
+            id: wp.entry.id,
+            root_path: wp.entry.root_path,
+            color_tag: wp.entry.color_tag,
+            created_at: wp.entry.created_at,
+            is_active: wp.entry.is_active,
+            directory_present: wp.directory_present,
+        })
+        .collect())
+}
+
+pub async fn impl_add_workspace(
+    state: &AppState,
+    path: String,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let reg = state.workspace_registry.clone();
+    let entry = tokio::task::spawn_blocking(move || reg.register(std::path::Path::new(&path)))
+        .await
+        .map_err(join_err)??;
+    // If this was the first workspace (auto-activated), sync the in-memory root.
+    if entry.is_active {
+        let _ = state.switch_workspace(PathBuf::from(&entry.root_path));
+    }
+    let directory_present = PathBuf::from(&entry.root_path).is_dir();
+    Ok(WorkspaceEntryDto {
+        id: entry.id,
+        root_path: entry.root_path,
+        color_tag: entry.color_tag,
+        created_at: entry.created_at,
+        is_active: entry.is_active,
+        directory_present,
     })
 }
 
+pub async fn impl_remove_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<RemoveWorkspaceResult, IpcError> {
+    let reg = state.workspace_registry.clone();
+    let result = tokio::task::spawn_blocking(move || reg.remove(&id))
+        .await
+        .map_err(join_err)??;
+    // If activation transferred, sync the in-memory root.
+    if result.new_active_id.is_some() {
+        let reg2 = state.workspace_registry.clone();
+        let new_entry = tokio::task::spawn_blocking(move || reg2.current_active())
+            .await
+            .map_err(join_err)??;
+        if let Some(active) = new_entry {
+            let _ = state.switch_workspace(PathBuf::from(&active.root_path));
+        }
+    }
+    Ok(RemoveWorkspaceResult {
+        removed_id: result.removed_id,
+        new_active_id: result.new_active_id,
+    })
+}
+
+pub async fn impl_activate_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let reg = state.workspace_registry.clone();
+    let entry = tokio::task::spawn_blocking(move || reg.activate(&id))
+        .await
+        .map_err(join_err)??;
+    // Update the in-memory workspace root.
+    let root = PathBuf::from(&entry.root_path);
+    let _ = state.switch_workspace(root.clone());
+    // Append a workspace.activated event for audit.
+    let db_path = state.db_path.clone();
+    let entry_id = entry.id.clone();
+    let entry_root = entry.root_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&db_path)?;
+        repos::events::append(
+            &db.0,
+            "domain",
+            "global",
+            "workspace.activated",
+            &serde_json::json!({ "workspaceId": entry_id, "rootPath": entry_root }),
+            nuomi_core::domain::now_ms(),
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(WorkspaceEntryDto {
+        id: entry.id,
+        root_path: entry.root_path,
+        color_tag: entry.color_tag,
+        created_at: entry.created_at,
+        is_active: true,
+        directory_present: root.is_dir(),
+    })
+}
+
+pub async fn impl_get_active_workspace(
+    state: &AppState,
+) -> Result<Option<WorkspaceEntryDto>, IpcError> {
+    let reg = state.workspace_registry.clone();
+    let active = tokio::task::spawn_blocking(move || reg.current_active())
+        .await
+        .map_err(join_err)??;
+    Ok(active.map(|entry| {
+        let directory_present = PathBuf::from(&entry.root_path).is_dir();
+        WorkspaceEntryDto {
+            id: entry.id,
+            root_path: entry.root_path,
+            color_tag: entry.color_tag,
+            created_at: entry.created_at,
+            is_active: entry.is_active,
+            directory_present,
+        }
+    }))
+}
+
+pub async fn impl_list_orphan_sessions(
+    state: &AppState,
+) -> Result<Vec<OrphanSessionDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let orphans = tokio::task::spawn_blocking(move || -> Result<Vec<OrphanSessionDto>, IpcError> {
+        let db = Db::open(&db_path)?;
+        let mut stmt = db.0.prepare(
+            "SELECT s.id, s.workspace_id, s.title, s.updated_at
+             FROM sessions s
+             WHERE s.workspace_id NOT IN (SELECT id FROM workspaces)
+             ORDER BY s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(OrphanSessionDto {
+                session_id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let collected: Result<Vec<_>, rusqlite::Error> = rows.collect();
+        Ok(collected.map_err(StoreError::Sqlite)?)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(orphans)
+}
+
+pub async fn impl_reclaim_orphan_sessions(
+    state: &AppState,
+    workspace_id: String,
+) -> Result<u64, IpcError> {
+    let db_path = state.db_path.clone();
+    let target_id = workspace_id.clone();
+    // Verify the target workspace exists.
+    let check_path = state.db_path.clone();
+    let check_id = workspace_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&check_path)?;
+        if repos::workspaces::find_by_id(&db.0, &check_id)?.is_none() {
+            return Err(IpcError::new(
+                "workspace.not_found",
+                format!("workspace #{check_id} not found"),
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    let count = tokio::task::spawn_blocking(move || -> Result<u64, IpcError> {
+        let db = Db::open(&db_path)?;
+        let n = db.0.execute(
+            "UPDATE sessions SET workspace_id = ?1
+             WHERE workspace_id NOT IN (SELECT id FROM workspaces)",
+            rusqlite::params![target_id],
+        )?;
+        Ok(n as u64)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(count)
+}
+
+// ---------- workspace switch (legacy compat) ----------
+
+pub async fn impl_get_workspace(state: &AppState) -> Result<WorkspaceInfo, IpcError> {
+    // Compose from the new registry: root from the active workspace (or the
+    // in-memory fallback), configured = registry non-empty OR env pinned.
+    let active = impl_get_active_workspace(state).await?;
+    let root = active
+        .as_ref()
+        .map(|ws| ws.root_path.clone())
+        .unwrap_or_else(|| state.current_workspace().to_string_lossy().to_string());
+    let configured = active.is_some() || state.workspace_env_configured || workspace_persisted(state)?;
+    Ok(WorkspaceInfo { root, configured })
+}
+
 pub async fn impl_set_workspace(state: &AppState, path: String) -> Result<WorkspaceInfo, IpcError> {
-    let previous = state
-        .switch_workspace(PathBuf::from(&path))
-        .map_err(IpcError::from)?;
-    let db = Db::open(&state.db_path)?;
-    repos::events::append(
-        &db.0,
-        "domain",
-        "global",
-        "workspace.switched",
-        &serde_json::json!({ "path": path, "previous": previous.to_string_lossy() }),
-        nuomi_core::domain::now_ms(),
-    )?;
-    // Persist AFTER a successful switch so a restart restores this root.
-    repos::settings::set(
-        &db.0,
-        repos::settings::WORKSPACE_ROOT,
-        &state.current_workspace().to_string_lossy(),
-    )?;
+    // Legacy compat: if the path is already registered, just activate it.
+    // Otherwise register (which auto-activates if first) then activate.
+    let reg = state.workspace_registry.clone();
+    let existing = {
+        let p = path.clone();
+        tokio::task::spawn_blocking(move || reg.find_by_path(std::path::Path::new(&p)))
+            .await
+            .map_err(join_err)??
+    };
+    let target_id = if let Some(entry) = existing {
+        entry.id
+    } else {
+        let ws = impl_add_workspace(state, path.clone()).await?;
+        ws.id
+    };
+    impl_activate_workspace(state, target_id).await?;
     Ok(WorkspaceInfo {
         root: state.current_workspace().to_string_lossy().to_string(),
         configured: true,

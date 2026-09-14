@@ -220,6 +220,32 @@ impl GitService {
         self.exec(&["diff"]).await
     }
 
+    /// Diff for a specific path. `staged` selects `--cached` (index vs HEAD)
+    /// vs the default working-tree-vs-index diff. `--` blocks option injection.
+    pub async fn diff_for_path(&self, path: &str, staged: bool) -> Result<String, GitError> {
+        if staged {
+            self.exec(&["diff", "--cached", "--", path]).await
+        } else {
+            self.exec(&["diff", "--", path]).await
+        }
+    }
+
+    /// Diff of a file git does not track yet. `git diff` reports nothing for
+    /// untracked paths, so compare against `/dev/null`; that form exits 1
+    /// whenever it finds differences, which is the expected outcome here.
+    pub async fn diff_untracked(&self, path: &str) -> Result<String, GitError> {
+        let (success, stdout, stderr) = self
+            .exec_raw(&["diff", "--no-index", "--", "/dev/null", path])
+            .await?;
+        if !success && stdout.trim().is_empty() {
+            return Err(GitError::CommandFailed {
+                cmd: format!("diff --no-index -- /dev/null {path}"),
+                stderr,
+            });
+        }
+        Ok(stdout)
+    }
+
     pub fn repo_root(&self) -> &std::path::Path {
         &self.repo_root
     }

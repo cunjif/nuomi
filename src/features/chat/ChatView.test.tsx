@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { emitTestEvent } from "../../lib/events/transport";
 import { sessionChannel } from "../../lib/events/types";
-import { tdState } from "../../lib/ipc/test-double";
+import { seedConversation, tdState } from "../../lib/ipc/test-double";
 import { renderWithProviders } from "../../test/helpers";
 import "../../i18n";
 import { ChatView } from "./ChatView";
@@ -12,7 +12,7 @@ import { useUiStore } from "../../lib/store/uiStore";
 
 describe("ChatView — live token stream (AC10)", () => {
   it("appends streamed deltas as an assistant bubble", async () => {
-    tdState.sessions.push({ id: "s1", title: "demo", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s1", title: "demo", createdAt: 1, updatedAt: 1 });
     useUiStore.getState().selectSession("s1");
 
     renderWithProviders(<ChatView />);
@@ -39,7 +39,7 @@ describe("ChatView — live token stream (AC10)", () => {
   });
 
   it("renders persisted history events", async () => {
-    tdState.sessions.push({ id: "s2", title: "hist", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s2", title: "hist", createdAt: 1, updatedAt: 1 });
     tdState.events.set("s2", [
       { seq: 1, kind: "message", payload: { role: "user", content: "帮我看看这个 bug" }, createdAt: 1 },
       {
@@ -57,7 +57,7 @@ describe("ChatView — live token stream (AC10)", () => {
   });
 
   it("swaps the live buffer for the persisted message without duplication", async () => {
-    tdState.sessions.push({ id: "s5", title: "swap", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s5", title: "swap", createdAt: 1, updatedAt: 1 });
     useUiStore.getState().selectSession("s5");
 
     const qc = new QueryClient({
@@ -121,7 +121,7 @@ describe("ChatView — live token stream (AC10)", () => {
   });
 
   it("backfilled history after refetch renders each message exactly once", async () => {
-    tdState.sessions.push({ id: "s6", title: "backfill", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s6", title: "backfill", createdAt: 1, updatedAt: 1 });
     tdState.events.set("s6", [
       { seq: 1, kind: "message", payload: { role: "user", content: "第一条" }, createdAt: 1 },
     ]);

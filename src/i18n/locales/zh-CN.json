@@ -17,7 +17,13 @@
     "switched": "已切换工作区",
     "log": "提交历史",
     "notRepo": "不是 git 仓库或 git 不可用",
-    "actionFailed": "Git 操作失败"
+    "actionFailed": "Git 操作失败",
+    "commitHint": "Ctrl+Enter 提交",
+    "selectFile": "选择文件查看差异",
+    "selectFileHint": "点击左侧变更列表中的文件",
+    "diffEmpty": "暂无差异",
+    "diffEmptyHint": "该文件没有差异内容",
+    "diffBinary": "二进制文件无法显示差异"
   },
   "common": {
     "retry": "重试",
@@ -77,7 +83,10 @@
     "noMessages": "暂无消息，发送第一条试试。",
     "toolCall": "工具调用",
     "toolResult": "工具结果",
-    "running": "正在执行…"
+    "running": "正在执行…",
+    "noProvider": "请先配置 Provider",
+    "noProviderHint": "未检测到已配置的 Provider，对话功能不可用。请先在设置中添加至少一个 Provider。",
+    "goToSettings": "前往设置"
   },
   "commands": {
     "panelLabel": "命令补全",
@@ -100,13 +109,167 @@
     "theme": {
       "description": "更改界面主题"
     },
+    "agent": {
+      "description": "切换当前会话的 Agent",
+      "usage": "[name]"
+    },
+    "attach": {
+      "description": "添加工作区文件为附件",
+      "usage": "<path>"
+    },
+    "stop": {
+      "description": "停止当前会话的运行"
+    },
+    "background": {
+      "description": "新建后台任务会话",
+      "usage": "<title>"
+    },
+    "group": {
+      "description": "新建多 Agent 群聊"
+    },
+    "schedule": {
+      "description": "新建定时任务",
+      "usage": "<cron>"
+    },
     "unknown": "未知命令 /{{name}}，相近命令：{{suggestions}}",
     "unknownNone": "未知命令 /{{name}}",
     "helpTitle": "可用命令：",
     "workspaceRequired": "用法：/workspace <path>",
     "workspaceDone": "工作区已切换：{{path}}",
     "sessionCreated": "已新建会话",
-    "themeToggled": "主题已切换"
+    "themeToggled": "主题已切换",
+    "newInvalidKind": "无效的会话类型：{{kind}}",
+    "agentNoSession": "请先选择一个会话",
+    "agentNotFound": "未找到 Agent：{{name}}",
+    "agentSwitched": "已切换到 Agent：{{name}}",
+    "attachRequired": "用法：/attach <path>",
+    "attachNoSession": "请先选择一个会话",
+    "attachAdded": "已添加附件：{{path}}",
+    "stopNoSession": "请先选择一个会话",
+    "stopped": "已停止",
+    "backgroundRequired": "请提供任务标题",
+    "backgroundCreated": "已创建后台任务：{{title}}",
+    "noMatch": "无匹配命令"
+  },
+  "composer": {
+    "mentionPanelLabel": "提及补全",
+    "mentionFile": "工作区文件",
+    "mentionAgent": "Agent",
+    "mentionSession": "已有会话",
+    "agentChipLabel": "当前 Agent",
+    "agentPickerTitle": "切换 Agent",
+    "agentPickerSearch": "搜索 Agent…",
+    "agentPickerSetDefault": "设为默认",
+    "attachmentShelfLabel": "附件",
+    "attachmentRemove": "移除附件",
+    "attachmentFailed": "上传失败",
+    "attachmentTooLarge": "文件过大（上限 25 MB）",
+    "attachmentInvalidMime": "不支持的文件类型",
+    "pasteFolded": "大文本已折叠为附件（{{size}}）",
+    "toolbar": {
+      "voice": "语音输入",
+      "functionMenu": "功能列表",
+      "attachment": "添加附件"
+    },
+    "voice": {
+      "emptyResult": "语音识别返回空结果",
+      "failed": "语音识别失败：{{message}}",
+      "micDenied": "麦克风访问被拒绝"
+    },
+    "functionMenu": {
+      "title": "功能列表",
+      "importSession": "引入其他聊天信息",
+      "useRule": "手工使用规则",
+      "customPrompt": "注入自定义 SystemPrompt",
+      "session": "选择会话",
+      "rule": "选择规则",
+      "prompt": "自定义 SystemPrompt",
+      "promptPlaceholder": "输入自定义 SystemPrompt…",
+      "confirmPrompt": "确认注入（防提示注入风险）",
+      "empty": "无可用选项",
+      "injected": "已注入上下文"
+    },
+    "injection": {
+      "label": "上下文注入",
+      "sessionRef": "会话引用",
+      "rule": "规则",
+      "customPrompt": "自定义 Prompt"
+    }
+  },
+  "conversation": {
+    "filterAll": "全部",
+    "filterChat": "对话",
+    "filterGroup": "群聊",
+    "filterBackground": "后台",
+    "filterScheduled": "定时",
+    "teamBadge": "团队",
+    "noProviderTitle": "尚未配置 Provider",
+    "noProviderConfirm": "未检测到已配置的 Provider，该会话暂时无法调用模型。请先前往「设置」完成 Provider 配置。",
+    "kindPlaceholder": "{{kind}} 会话 — 即将推出",
+    "newMenuLabel": "新建会话",
+    "newChat": "普通对话",
+    "newGroup": "多 Agent 群聊",
+    "newBackground": "后台任务",
+    "newScheduled": "定时任务",
+    "newDialogTitle": "新建会话",
+    "newDialogKind": "类型",
+    "newDialogTitleLabel": "标题",
+    "newDialogAgent": "Agent",
+    "newDialogTeam": "团队",
+    "newDialogCreate": "创建",
+    "newDialogCancel": "取消",
+    "handoff": "Handoff",
+    "whiteboard": "WhiteBoard",
+    "whiteboardEmpty": "暂无 WhiteBoard 笔记",
+    "stop": "停止",
+    "continue": "继续",
+    "activeRuns": "活跃运行",
+    "runId": "运行",
+    "enabled": "已启用",
+    "disabled": "已停用",
+    "noNextRun": "无下次运行",
+    "triggering": "触发中…",
+    "nextRunIn": "下次运行还有",
+    "runHistory": "运行历史",
+    "noRunHistory": "暂无运行记录",
+    "agentSidebar": {
+      "title": "Agent 详情",
+      "open": "打开 Agent 侧边栏"
+    },
+    "agentAvatar": {
+      "add": "添加 Agent"
+    },
+    "addAgent": {
+      "title": "添加 Agent",
+      "search": "搜索 Agent…",
+      "empty": "无可添加的 Agent",
+      "failed": "添加 Agent 失败：{{message}}"
+    },
+    "agentDetail": {
+      "title": "Agent 详情",
+      "name": "名称",
+      "role": "角色",
+      "responsibility": "职责",
+      "boundModel": "绑定模型",
+      "provider": "Provider",
+      "notSet": "未设置"
+    },
+    "info": {
+      "title": "标题",
+      "goal": "目标",
+      "goalEmpty": "点击设置目标",
+      "todoList": "待办列表",
+      "mainAgent": "主 Agent",
+      "routeMode": "消息路由模式",
+      "wbRouteMode": "白板路由模式",
+      "notSet": "未设置",
+      "routeOrchestratorWorker": "编排-工作者",
+      "routeMasterSlave": "主-从",
+      "wbRoutePreemptive": "抢占式",
+      "wbRouteConcurrent": "并发式",
+      "titleTooLong": "标题超过最大长度 {{max}} 字符",
+      "goalTooLong": "目标超过最大长度 {{max}} 字符"
+    }
   },
   "board": {
     "newTask": "新建任务",
@@ -462,7 +625,8 @@
   "nav": {
     "areaLabel": "主区域切换",
     "chat": "对话",
-    "editor": "文件编辑"
+    "editor": "文件编辑",
+    "workbench": "工作台"
   },
   "editor": {
     "languageLabel": "语言",
@@ -544,6 +708,7 @@
     "pathLabel": "工作区目录",
     "confirm": "确认",
     "switchWorkspace": "切换工作区",
+    "backToList": "返回工作区列表",
     "current": "工作区",
     "setupFailed": "设置工作区失败",
     "currentDir": "当前工作目录",
@@ -551,7 +716,29 @@
     "choose": "选择",
     "save": "保存",
     "switched": "已切换工作区",
-    "pickUnavailable": "目录选择器不可用，请手动输入路径"
+    "pickUnavailable": "目录选择器不可用，请手动输入路径",
+    "listTitle": "工作区列表",
+    "addNew": "新增工作区",
+    "added": "工作区已新增",
+    "addFailed": "新增工作区失败",
+    "remove": "移除",
+    "removeConfirm": "确认移除此工作区？关联会话将保留为孤儿会话。",
+    "confirmRemove": "移除",
+    "cancelRemove": "取消",
+    "removed": "工作区已移除",
+    "removeFailed": "移除工作区失败",
+    "switch": "切换",
+    "switchFailed": "切换工作区失败",
+    "empty": "尚未纳管任何工作区，请选择目录新增",
+    "directoryMissing": "目录缺失",
+    "loading": "加载中…",
+    "orphanSessions": "孤儿会话",
+    "reclaimInto": "归入此工作区"
+  },
+  "workbench": {
+    "subTabLabel": "工作台子页签",
+    "workspaceList": "工作区列表",
+    "editor": "文件编辑"
   },
   "capability": {
     "reasoning": "推理",

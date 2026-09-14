@@ -260,6 +260,16 @@ pub async fn git_worktrees(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn git_diff(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    staged: bool,
+) -> Result<String, IpcError> {
+    commands::impl_git_diff(&state, path, staged).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_schedule(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -388,6 +398,66 @@ pub async fn set_workspace(
     path: String,
 ) -> Result<commands::WorkspaceInfo, IpcError> {
     commands::impl_set_workspace(&state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workspaces(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::WorkspaceEntryDto>, IpcError> {
+    commands::impl_list_workspaces(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn add_workspace(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_add_workspace(&state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<commands::RemoveWorkspaceResult, IpcError> {
+    commands::impl_remove_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn activate_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_activate_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_active_workspace(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<commands::WorkspaceEntryDto>, IpcError> {
+    commands::impl_get_active_workspace(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_orphan_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::OrphanSessionDto>, IpcError> {
+    commands::impl_list_orphan_sessions(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reclaim_orphan_sessions(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> Result<u64, IpcError> {
+    commands::impl_reclaim_orphan_sessions(&state, workspace_id).await
 }
 
 #[tauri::command]
@@ -612,4 +682,219 @@ pub async fn test_integration(
 #[specta::specta]
 pub async fn journal_rollback(state: tauri::State<'_, AppState>, seq: u64) -> Result<(), IpcError> {
     commands::impl_journal_rollback(&state, seq).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn create_conversation(
+    state: tauri::State<'_, AppState>,
+    input: commands::ConversationInput,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_create_conversation(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_conversations(
+    state: tauri::State<'_, AppState>,
+    kind: Option<String>,
+) -> Result<Vec<commands::ConversationDto>, IpcError> {
+    commands::impl_list_conversations(&state, kind).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_get_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_conversation_agent(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    agent: Option<commands::AgentRefInput>,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_set_conversation_agent(&state, session_id, agent).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_agent_options(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::AgentOptionDto>, IpcError> {
+    commands::impl_list_agent_options(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    input: commands::ConversationUpdateInput,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_update_conversation(&state, session_id, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn add_conversation_agent(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    agent: commands::AgentRefInput,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_add_conversation_agent(&state, session_id, agent).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_agent_detail(
+    state: tauri::State<'_, AppState>,
+    agent_kind: String,
+    agent_id: String,
+) -> Result<commands::AgentDetailDto, IpcError> {
+    commands::impl_get_agent_detail(&state, agent_kind, agent_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn submit_message(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    text: String,
+    attachment_ids: Vec<String>,
+    route_target_agent_ids: Option<Vec<String>>,
+    context_injection_ids: Option<Vec<String>>,
+) -> Result<commands::RunResultDto, IpcError> {
+    commands::impl_submit_message(
+        &state,
+        session_id,
+        text,
+        attachment_ids,
+        route_target_agent_ids,
+        context_injection_ids,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_stop_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_active_runs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::RunDto>, IpcError> {
+    commands::impl_list_active_runs(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_run(
+    state: tauri::State<'_, AppState>,
+    run_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_cancel_run(&state, run_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_attachment(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    name: String,
+    mime: String,
+    data_base64: String,
+) -> Result<commands::AttachmentDto, IpcError> {
+    commands::impl_save_attachment(&state, session_id, name, mime, data_base64).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_attachments(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<commands::AttachmentDto>, IpcError> {
+    commands::impl_list_attachments(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_attachment(
+    state: tauri::State<'_, AppState>,
+    attachment_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_attachment(&state, attachment_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_schedule(
+    state: tauri::State<'_, AppState>,
+    input: commands::ScheduleInput,
+) -> Result<commands::ScheduleDto, IpcError> {
+    commands::impl_upsert_schedule(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_schedule(
+    state: tauri::State<'_, AppState>,
+    schedule_id: String,
+    input: commands::ScheduleInput,
+) -> Result<commands::ScheduleDto, IpcError> {
+    commands::impl_update_schedule(&state, schedule_id, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn inject_context(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    input: commands::ContextInjectionInput,
+) -> Result<commands::ContextInjectionDto, IpcError> {
+    commands::impl_inject_context(&state, session_id, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_injectable_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::InjectableSessionDto>, IpcError> {
+    commands::impl_list_injectable_sessions(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_injectable_rules(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::InjectableRuleDto>, IpcError> {
+    commands::impl_list_injectable_rules(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn transcribe_audio(
+    state: tauri::State<'_, AppState>,
+    audio_base64: String,
+    model_source: Option<String>,
+) -> Result<String, IpcError> {
+    commands::impl_transcribe_audio(&state, audio_base64, model_source).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_asr_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::AsrModelDto>, IpcError> {
+    commands::impl_list_asr_models(&state).await
 }

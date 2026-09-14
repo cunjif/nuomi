@@ -161,6 +161,19 @@ pub(crate) async fn record_turn(
     wb.with_db(move |c| repos::events::append(c, "session", &sid, "message", &payload, now_ms()))
         .await
         .map_err(|e| super::OrchestratorError::Store(e.to_string()))?;
+
+    if let Some(bus) = &wb.bus {
+        bus.publish(crate::harness::Event::new(
+            "session.message",
+            serde_json::json!({
+                "sessionId": session_id,
+                "roleId": role.id,
+                "roleName": role.name,
+                "content": body,
+            }),
+        ));
+    }
+
     Ok(())
 }
 
@@ -266,12 +279,7 @@ mod tests {
         crate::store::migrations::run(&conn.0).unwrap();
         repos::sessions::insert(
             &conn.0,
-            &crate::domain::Session {
-                id: SESSION.into(),
-                title: String::new(),
-                created_at: 1,
-                updated_at: 1,
-            },
+            &crate::domain::Session::new_chat(SESSION.into(), String::new(), 1),
         )
         .unwrap();
         drop(conn);

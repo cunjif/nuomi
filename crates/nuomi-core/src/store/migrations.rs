@@ -81,6 +81,62 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0010_role_capabilities.sql"
         )),
     ),
+    (
+        11,
+        "0011_conversation_kind",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0011_conversation_kind.sql"
+        )),
+    ),
+    (
+        12,
+        "0012_attachments",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0012_attachments.sql"
+        )),
+    ),
+    (
+        13,
+        "0013_schedule_conversations",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0013_schedule_conversations.sql"
+        )),
+    ),
+    (
+        14,
+        "0014_conversation_meta",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0014_conversation_meta.sql"
+        )),
+    ),
+    (
+        15,
+        "0015_context_injections",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0015_context_injections.sql"
+        )),
+    ),
+    (
+        16,
+        "0016_workspaces",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0016_workspaces.sql"
+        )),
+    ),
+    (
+        17,
+        "0017_sessions_workspace",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0017_sessions_workspace.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -153,6 +209,8 @@ mod tests {
             "schedules",
             "agent_profiles",
             "integrations",
+            "attachments",
+            "workspaces",
         ] {
             let n: i64 = conn
                 .query_row(
@@ -182,5 +240,129 @@ mod tests {
         .unwrap();
         assert!(conn.execute("UPDATE events SET kind='x'", []).is_err());
         assert!(conn.execute("DELETE FROM events", []).is_err());
+    }
+
+    #[test]
+    fn workspaces_root_path_unique_and_placeholder_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+        // root_path UNIQUE 约束：插入重复路径必须失败。
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active)
+             VALUES ('w1', 'C:\\ws', 'paper-yellow', 1, 1)",
+            [],
+        )
+        .unwrap();
+        let dup = conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active)
+             VALUES ('w2', 'C:\\ws', 'paper-yellow', 2, 0)",
+            [],
+        );
+        assert!(dup.is_err(), "root_path UNIQUE must reject duplicates");
+
+        // 占位 INSERT 幂等：在已有 app_settings.workspace_root 且 workspaces 非空时，
+        // 重新执行 0016 SQL 的 INSERT 子句不应产生新行（NOT EXISTS 守卫）。
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at)
+             VALUES ('workspace_root', 'C:\\ws', 1)",
+            [],
+        )
+        .unwrap();
+        let before: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        // 模拟迁移 runner 重跑 0016 的 INSERT 语句（NOT EXISTS 守卫生效）。
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active)
+             SELECT lower(hex(randomblob(16))), value, 'paper-yellow',
+                    strftime('%s', 'now') * 1000, 1
+             FROM app_settings
+             WHERE key = 'workspace_root'
+               AND NOT EXISTS (SELECT 1 FROM workspaces);",
+        )
+        .unwrap();
+        let after: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, after, "placeholder INSERT must be idempotent");
+    }
+
+    #[test]
+    fn workspaces_placeholder_inserted_from_legacy_workspace_root() {
+        // 存量迁移：先建库到 0015（含 app_settings），写入 workspace_root，
+        // 再执行 0016，验证占位行从 app_settings 迁入 workspaces 表。
+        let conn = Connection::open_in_memory().unwrap();
+        // 手动跑前 15 个迁移（到 0015），跳过 0016。
+        for &(version, name, sql) in MIGRATIONS.iter().filter(|(v, _, _)| *v < 16) {
+            conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", version).unwrap();
+            conn.execute_batch("COMMIT;").unwrap();
+            let _ = name;
+        }
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at)
+             VALUES ('workspace_root', 'D:\\projects\\demo', 1)",
+            [],
+        )
+        .unwrap();
+        // 执行 0016 SQL。
+        let sql_0016 = MIGRATIONS
+            .iter()
+            .find(|(v, _, _)| *v == 16)
+            .map(|(_, _, s)| *s)
+            .unwrap();
+        conn.execute_batch(sql_0016).unwrap();
+        // 占位行应已从 app_settings 迁入。
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "placeholder row must be inserted from legacy root");
+        let (root, active): (String, i64) = conn
+            .query_row(
+                "SELECT root_path, is_active FROM workspaces",
+                [],
+                |r| {
+                    let root: String = r.get(0)?;
+                    let active: i64 = r.get(1)?;
+                    Ok((root, active))
+                },
+            )
+            .unwrap();
+        assert_eq!(root, "D:\\projects\\demo");
+        assert_eq!(active, 1);
+    }
+
+    #[test]
+    fn sessions_workspace_id_column_and_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+        // 列存在：INSERT 不指定 workspace_id 应成功（列存在且有默认值）。
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1','','1','1')",
+            [],
+        )
+        .unwrap();
+        // 默认值为 '__migrated__'。
+        let wid: String = conn
+            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(wid, "__migrated__", "default must be '__migrated__'");
+        // NOT NULL 约束：显式插入 NULL 必须失败。
+        let null_err = conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, workspace_id)
+             VALUES ('s2','','1','1', NULL)",
+            [],
+        );
+        assert!(null_err.is_err(), "workspace_id must be NOT NULL");
+        // 索引存在。
+        let idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1, "idx_sessions_workspace must exist");
     }
 }

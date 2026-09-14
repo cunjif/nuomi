@@ -61,6 +61,8 @@ impl From<CoreError> for IpcError {
             CoreError::Orchestrator(err) => Self::new("orchestrator.failed", err.to_string()),
             CoreError::Evolution(err) => Self::new("evolution.failed", err.to_string()),
             CoreError::Workspace(err) => map_workspace(&err),
+            CoreError::WorkspaceRegistry(err) => map_registry_error(&err),
+            CoreError::WorkspaceMigration(err) => map_migration_error(&err),
             CoreError::Git(err) => map_git(&err),
             CoreError::Scheduler(err) => Self::new("scheduler.failed", err.to_string()),
         }
@@ -74,6 +76,27 @@ fn map_workspace(err: &nuomi_core::services::workspace::WorkspaceError) -> IpcEr
         E::InvalidPath(_) | E::NotADirectory(_) => {
             IpcError::new("workspace.invalid_path", err.to_string())
         }
+        E::Io(_) => IpcError::new("workspace.io", err.to_string()),
+    }
+}
+
+fn map_registry_error(err: &nuomi_core::services::RegistryError) -> IpcError {
+    use nuomi_core::services::RegistryError as E;
+    match err {
+        E::InvalidPath(_) => IpcError::new("workspace.invalid_path", err.to_string()),
+        E::Blacklisted(_) => IpcError::new("workspace.escape_denied", err.to_string()),
+        E::AlreadyExists(_) => IpcError::new("workspace.already_exists", err.to_string()),
+        E::NotFound(_) => IpcError::new("workspace.not_found", err.to_string()),
+        E::DirectoryMissing(_) => IpcError::new("workspace.directory_missing", err.to_string()),
+        E::Io(_) => IpcError::new("workspace.io", err.to_string()),
+        E::Store(_) => IpcError::new("store.failed", err.to_string()),
+    }
+}
+
+fn map_migration_error(err: &nuomi_core::services::MigrationOrchestrationError) -> IpcError {
+    use nuomi_core::services::MigrationOrchestrationError as E;
+    match err {
+        E::Store(_) => IpcError::new("store.failed", err.to_string()),
         E::Io(_) => IpcError::new("workspace.io", err.to_string()),
     }
 }
@@ -110,8 +133,26 @@ impl From<StoreError> for IpcError {
     }
 }
 
+impl From<rusqlite::Error> for IpcError {
+    fn from(e: rusqlite::Error) -> Self {
+        StoreError::Sqlite(e).into()
+    }
+}
+
 impl From<nuomi_core::services::WorkspaceError> for IpcError {
     fn from(e: nuomi_core::services::WorkspaceError) -> Self {
+        CoreError::from(e).into()
+    }
+}
+
+impl From<nuomi_core::services::RegistryError> for IpcError {
+    fn from(e: nuomi_core::services::RegistryError) -> Self {
+        CoreError::from(e).into()
+    }
+}
+
+impl From<nuomi_core::services::MigrationOrchestrationError> for IpcError {
+    fn from(e: nuomi_core::services::MigrationOrchestrationError) -> Self {
         CoreError::from(e).into()
     }
 }
@@ -140,6 +181,10 @@ pub mod codes {
     pub const ORCHESTRATOR_FAILED: &str = "orchestrator.failed";
     pub const EVOLUTION_FAILED: &str = "evolution.failed";
     pub const WORKSPACE_ESCAPE_DENIED: &str = "workspace.escape_denied";
+    pub const WORKSPACE_ALREADY_EXISTS: &str = "workspace.already_exists";
+    pub const WORKSPACE_NOT_FOUND: &str = "workspace.not_found";
+    pub const WORKSPACE_DIRECTORY_MISSING: &str = "workspace.directory_missing";
+    pub const WORKSPACE_IO: &str = "workspace.io";
     pub const GIT_COMMAND_NOT_ALLOWED: &str = "git.command_not_allowed";
     pub const GIT_NOT_A_REPOSITORY: &str = "git.not_a_repository";
     pub const SCHEDULER_FAILED: &str = "scheduler.failed";

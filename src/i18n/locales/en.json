@@ -17,7 +17,13 @@
     "switched": "Workspace switched",
     "log": "History",
     "notRepo": "Not a git repository or git unavailable",
-    "actionFailed": "Git action failed"
+    "actionFailed": "Git action failed",
+    "commitHint": "Ctrl+Enter to commit",
+    "selectFile": "Select a file to view diff",
+    "selectFileHint": "Click a file in the changes list",
+    "diffEmpty": "No changes",
+    "diffEmptyHint": "This file has no diff content",
+    "diffBinary": "Binary file diff not shown"
   },
   "common": {
     "retry": "Retry",
@@ -77,7 +83,10 @@
     "noMessages": "No messages yet — say hello.",
     "toolCall": "Tool call",
     "toolResult": "Tool result",
-    "running": "Running…"
+    "running": "Running…",
+    "noProvider": "Please configure a Provider first",
+    "noProviderHint": "No Provider configured. The conversation feature is unavailable. Please add at least one Provider in Settings.",
+    "goToSettings": "Go to Settings"
   },
   "commands": {
     "panelLabel": "Command completions",
@@ -100,13 +109,167 @@
     "theme": {
       "description": "Change the UI theme"
     },
+    "agent": {
+      "description": "Switch the current session's Agent",
+      "usage": "[name]"
+    },
+    "attach": {
+      "description": "Add a workspace file as attachment",
+      "usage": "<path>"
+    },
+    "stop": {
+      "description": "Stop the current session's run"
+    },
+    "background": {
+      "description": "Create a background task session",
+      "usage": "<title>"
+    },
+    "group": {
+      "description": "Create a multi-agent group chat"
+    },
+    "schedule": {
+      "description": "Create a scheduled task",
+      "usage": "<cron>"
+    },
     "unknown": "Unknown command /{{name}}. Closest: {{suggestions}}",
     "unknownNone": "Unknown command /{{name}}",
     "helpTitle": "Available commands:",
     "workspaceRequired": "Usage: /workspace <path>",
     "workspaceDone": "Workspace switched to {{path}}",
     "sessionCreated": "Session created",
-    "themeToggled": "Theme switched"
+    "themeToggled": "Theme switched",
+    "newInvalidKind": "Invalid session kind: {{kind}}",
+    "agentNoSession": "Select a session first",
+    "agentNotFound": "Agent not found: {{name}}",
+    "agentSwitched": "Switched to Agent: {{name}}",
+    "attachRequired": "Usage: /attach <path>",
+    "attachNoSession": "Select a session first",
+    "attachAdded": "Attachment added: {{path}}",
+    "stopNoSession": "Select a session first",
+    "stopped": "Stopped",
+    "backgroundRequired": "Please provide a task title",
+    "backgroundCreated": "Background task created: {{title}}",
+    "noMatch": "No matching commands"
+  },
+  "composer": {
+    "mentionPanelLabel": "Mention completions",
+    "mentionFile": "File from workspace",
+    "mentionAgent": "Agent",
+    "mentionSession": "Existing session",
+    "agentChipLabel": "Current agent",
+    "agentPickerTitle": "Switch agent",
+    "agentPickerSearch": "Search agents…",
+    "agentPickerSetDefault": "Set as default",
+    "attachmentShelfLabel": "Attachments",
+    "attachmentRemove": "Remove attachment",
+    "attachmentFailed": "Upload failed",
+    "attachmentTooLarge": "File too large (max 25 MB)",
+    "attachmentInvalidMime": "File type not allowed",
+    "pasteFolded": "Folded large text into attachment ({{size}})",
+    "toolbar": {
+      "voice": "Voice input",
+      "functionMenu": "Function menu",
+      "attachment": "Add attachment"
+    },
+    "voice": {
+      "emptyResult": "Voice recognition returned empty result",
+      "failed": "Voice recognition failed: {{message}}",
+      "micDenied": "Microphone access denied"
+    },
+    "functionMenu": {
+      "title": "Function menu",
+      "importSession": "Import chat info",
+      "useRule": "Apply rule",
+      "customPrompt": "Inject custom SystemPrompt",
+      "session": "Select session",
+      "rule": "Select rule",
+      "prompt": "Custom SystemPrompt",
+      "promptPlaceholder": "Enter custom SystemPrompt…",
+      "confirmPrompt": "Confirm injection (prompt injection risk)",
+      "empty": "No options available",
+      "injected": "Context injected"
+    },
+    "injection": {
+      "label": "Context injections",
+      "sessionRef": "Session",
+      "rule": "Rule",
+      "customPrompt": "Custom Prompt"
+    }
+  },
+  "conversation": {
+    "filterAll": "All",
+    "filterChat": "Chat",
+    "filterGroup": "Group",
+    "filterBackground": "Background",
+    "filterScheduled": "Scheduled",
+    "teamBadge": "Team",
+    "noProviderTitle": "No Provider configured",
+    "noProviderConfirm": "No Provider is configured yet, so this conversation cannot call a model. Please go to Settings to configure a Provider first.",
+    "kindPlaceholder": "{{kind}} conversations — coming soon",
+    "newMenuLabel": "New conversation",
+    "newChat": "Chat",
+    "newGroup": "Group chat",
+    "newBackground": "Background task",
+    "newScheduled": "Scheduled task",
+    "newDialogTitle": "New conversation",
+    "newDialogKind": "Type",
+    "newDialogTitleLabel": "Title",
+    "newDialogAgent": "Agent",
+    "newDialogTeam": "Team",
+    "newDialogCreate": "Create",
+    "newDialogCancel": "Cancel",
+    "handoff": "Handoff",
+    "whiteboard": "WhiteBoard",
+    "whiteboardEmpty": "No WhiteBoard notes yet",
+    "stop": "Stop",
+    "continue": "Continue",
+    "activeRuns": "Active runs",
+    "runId": "Run",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "noNextRun": "No next run scheduled",
+    "triggering": "Triggering…",
+    "nextRunIn": "Next run in",
+    "runHistory": "Run history",
+    "noRunHistory": "No runs yet",
+    "agentSidebar": {
+      "title": "Agent Details",
+      "open": "Open agent sidebar"
+    },
+    "agentAvatar": {
+      "add": "Add agent"
+    },
+    "addAgent": {
+      "title": "Add Agent",
+      "search": "Search agents…",
+      "empty": "No agents to add",
+      "failed": "Failed to add agent: {{message}}"
+    },
+    "agentDetail": {
+      "title": "Agent Detail",
+      "name": "Name",
+      "role": "Role",
+      "responsibility": "Responsibility",
+      "boundModel": "Bound Model",
+      "provider": "Provider",
+      "notSet": "Not set"
+    },
+    "info": {
+      "title": "Title",
+      "goal": "Goal",
+      "goalEmpty": "Click to set goal",
+      "todoList": "Todo List",
+      "mainAgent": "Main Agent",
+      "routeMode": "Route Mode",
+      "wbRouteMode": "Whiteboard Route Mode",
+      "notSet": "Not set",
+      "routeOrchestratorWorker": "Orchestrator-Worker",
+      "routeMasterSlave": "Master-Slave",
+      "wbRoutePreemptive": "Preemptive",
+      "wbRouteConcurrent": "Concurrent",
+      "titleTooLong": "Title exceeds max length {{max}} chars",
+      "goalTooLong": "Goal exceeds max length {{max}} chars"
+    }
   },
   "board": {
     "newTask": "New task",
@@ -539,6 +702,7 @@
     "pathLabel": "Workspace directory",
     "confirm": "Confirm",
     "switchWorkspace": "Switch workspace",
+    "backToList": "Back to workspace list",
     "current": "Workspace",
     "setupFailed": "Failed to set workspace",
     "currentDir": "Current directory",
@@ -546,7 +710,29 @@
     "choose": "Browse…",
     "save": "Save",
     "switched": "Workspace switched",
-    "pickUnavailable": "Directory picker unavailable — type the path manually"
+    "pickUnavailable": "Directory picker unavailable — type the path manually",
+    "listTitle": "Workspaces",
+    "addNew": "Add workspace",
+    "added": "Workspace added",
+    "addFailed": "Failed to add workspace",
+    "remove": "Remove",
+    "removeConfirm": "Remove this workspace? Associated sessions are kept as orphans.",
+    "confirmRemove": "Remove",
+    "cancelRemove": "Cancel",
+    "removed": "Workspace removed",
+    "removeFailed": "Failed to remove workspace",
+    "switch": "Switch",
+    "switchFailed": "Failed to switch workspace",
+    "empty": "No workspaces registered. Choose a directory to add one.",
+    "directoryMissing": "Directory missing",
+    "loading": "Loading…",
+    "orphanSessions": "Orphan sessions",
+    "reclaimInto": "Reclaim into this workspace"
+  },
+  "workbench": {
+    "subTabLabel": "Workbench sub-tab",
+    "workspaceList": "Workspaces",
+    "editor": "Editor"
   },
   "capability": {
     "reasoning": "Reasoning",
@@ -590,6 +776,7 @@
   "nav": {
     "areaLabel": "Main area",
     "chat": "Chat",
-    "editor": "Files"
+    "editor": "Files",
+    "workbench": "Workbench"
   }
 }

@@ -10,6 +10,13 @@ import type { ReactNode, SVGProps } from "react";
 type Glyph = (props: SVGProps<SVGSVGElement>) => ReactNode;
 
 // ── navigation / shell ────────────────────────────────────────────────────
+const HomeIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M4.5 11.5L12 5l7.5 6.5" />
+    <path d="M6.5 10.8v8.4h11v-8.4" />
+    <path d="M10 19.2v-4.2h4v4.2" />
+  </svg>
+);
 const ChatIcon: Glyph = (p) => (
   <svg {...p}>
     <path d="M5 5.5h13.5v9.5H9.5l-3.6 3.2v-3.2H5z" />
@@ -245,6 +252,37 @@ const InfoIcon: Glyph = (p) => (
   </svg>
 );
 
+// ── git actions ───────────────────────────────────────────────────────────
+const CommitIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M12 4.5v4M12 15.5v4" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const PullIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M12 4.5v9M8.5 11 12 14.5 15.5 11M5 19h14" />
+  </svg>
+);
+const DiscardIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M8 8H6A2.5 2.5 0 0 0 3.5 10.5v3A2.5 2.5 0 0 0 6 16h10" />
+    <path d="M13 13l3 3-3 3" />
+  </svg>
+);
+const HistoryIcon: Glyph = (p) => (
+  <svg {...p}>
+    <circle cx="12" cy="12" r="7.5" />
+    <path d="M12 7.5v4.5l3 2" />
+  </svg>
+);
+const DiffIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M5 9h5M7.5 6.5v5" />
+    <path d="M14 15h5" />
+  </svg>
+);
+
 // ── theme thumbnails (review §9.3) ───────────────────────────────────────
 const PaperIcon: Glyph = (p) => (
   <svg {...p}>
@@ -286,6 +324,7 @@ export const iconRegistry = {
   chat: ChatIcon,
   board: BoardIcon,
   trace: TraceIcon,
+  home: HomeIcon,
   git: GitIcon,
   scheduler: SchedulerIcon,
   approvals: ApprovalsIcon,
@@ -322,6 +361,11 @@ export const iconRegistry = {
   "drag-handle": DragHandleIcon,
   note: NoteIcon,
   info: InfoIcon,
+  commit: CommitIcon,
+  pull: PullIcon,
+  discard: DiscardIcon,
+  history: HistoryIcon,
+  diff: DiffIcon,
   paper: PaperIcon,
   grid: GridIcon,
   chalkboard: ChalkboardIcon,

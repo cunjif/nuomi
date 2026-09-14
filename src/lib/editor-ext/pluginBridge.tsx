@@ -165,8 +165,9 @@ function makePluginExtension(info: PluginInfoDto): EditorExtension | null {
         ctx.registerCommand({
           // Namespace by plugin id: /upper.ask.
           name: `${info.id}.${command.name}`,
+          category: "plugin",
           description: command.title.length > 0 ? command.title : command.tool,
-          args: "optional",
+          args: "text",
           async run(args) {
             let params: Record<string, JsonValue> = {};
             const trimmed = args.trim();

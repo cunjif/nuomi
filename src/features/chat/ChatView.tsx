@@ -9,7 +9,7 @@ import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useTheme } from "../../lib/store/useTheme";
 import { useUiStore } from "../../lib/store/uiStore";
-import { ChatInput } from "./ChatInput";
+import { Composer } from "../conversation/composer/Composer";
 import { MessageList } from "./MessageList";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
 
@@ -71,10 +71,11 @@ export function ChatView(): ReactNode {
           <MessageList entries={entries} streamingId={submitMut.isPending ? STREAM_ENTRY_ID : null} />
         </AsyncBoundary>
       </div>
-      <ChatInput
+      <Composer
         disabled={false}
         pending={submitMut.isPending}
         commandContext={commandContext}
+        sessionId={sessionId}
         onSubmit={async (input) => {
           await submitMut.mutateAsync(input);
         }}

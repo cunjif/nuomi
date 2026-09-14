@@ -233,9 +233,17 @@ fn start_telemetry_exporter(integration: &Integration, bus: EventBus) -> Option<
 
 /// Domain topics eligible for default dispatch (ADR-0002 global namespace).
 fn is_domain_topic(topic: &str) -> bool {
-    ["task.", "run.", "approval.", "schedule.", "team."]
-        .iter()
-        .any(|prefix| topic.starts_with(prefix))
+    [
+        "task.",
+        "run.",
+        "approval.",
+        "schedule.",
+        "team.",
+        "change.",
+        "conversation.",
+    ]
+    .iter()
+    .any(|prefix| topic.starts_with(prefix))
 }
 
 /// Whitelist match: exact topics only; an empty list matches every domain

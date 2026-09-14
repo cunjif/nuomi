@@ -4,7 +4,10 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::domain::{Approval, ApprovalDecision, Run, RunState, Schedule, Task, TaskStatus};
+use crate::domain::{
+    AgentRefKind, Approval, ApprovalDecision, Run, RunState, Schedule, ScheduleSessionMode,
+    ScheduleTargetKind, Task, TaskStatus,
+};
 use crate::store::StoreError;
 
 // ---------------------------------------------------------------- tasks
@@ -181,6 +184,21 @@ pub fn list_runs_by_status(conn: &Connection, status: RunState) -> Result<Vec<Ru
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Lists active runs (running or queued or awaiting_approval) for a session.
+pub fn list_active_runs_by_session(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<Run>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, session_id, status, heartbeat_at, created_at, updated_at
+         FROM runs
+         WHERE session_id = ?1 AND status IN ('running', 'queued', 'awaiting_approval')
+         ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![session_id], row_to_run)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// Removes every run of a task; returns how many rows went away. Approvals
 /// referencing those runs must be deleted first (see
 /// [`delete_approvals_for_task`]).
@@ -270,8 +288,9 @@ pub fn insert_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError
     conn.execute(
         "INSERT INTO schedules
          (id, name, cron_expr, task_title, task_description, enabled,
-          last_triggered_at, next_trigger_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          last_triggered_at, next_trigger_at, created_at, updated_at,
+          target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             s.id,
             s.name,
@@ -282,7 +301,14 @@ pub fn insert_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError
             s.last_triggered_at,
             s.next_trigger_at,
             s.created_at,
-            s.updated_at
+            s.updated_at,
+            s.target_kind.as_str(),
+            s.agent.as_ref().map(|(k, _)| k.as_str()),
+            s.agent.as_ref().map(|(_, id)| id.as_str()),
+            s.team_id,
+            s.session_mode.as_str(),
+            s.session_id,
+            s.auto_dispatch as i64,
         ],
     )?;
     Ok(())
@@ -318,7 +344,9 @@ pub fn get_schedule_by_name(conn: &Connection, name: &str) -> Result<Schedule, S
 pub fn update_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError> {
     let n = conn.execute(
         "UPDATE schedules SET name = ?2, cron_expr = ?3, task_title = ?4, task_description = ?5,
-         enabled = ?6, last_triggered_at = ?7, next_trigger_at = ?8, updated_at = ?9
+         enabled = ?6, last_triggered_at = ?7, next_trigger_at = ?8, updated_at = ?9,
+         target_kind = ?10, agent_kind = ?11, agent_ref_id = ?12, team_id = ?13,
+         session_mode = ?14, session_id = ?15, auto_dispatch = ?16
          WHERE id = ?1",
         params![
             s.id,
@@ -329,7 +357,14 @@ pub fn update_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError
             s.enabled as i64,
             s.last_triggered_at,
             s.next_trigger_at,
-            s.updated_at
+            s.updated_at,
+            s.target_kind.as_str(),
+            s.agent.as_ref().map(|(k, _)| k.as_str()),
+            s.agent.as_ref().map(|(_, id)| id.as_str()),
+            s.team_id,
+            s.session_mode.as_str(),
+            s.session_id,
+            s.auto_dispatch as i64,
         ],
     )?;
     if n == 0 {
@@ -406,7 +441,8 @@ pub fn list_schedules(conn: &Connection, limit: u32) -> Result<Vec<Schedule>, St
 fn schedule_select(where_clause: &str) -> String {
     format!(
         "SELECT id, name, cron_expr, task_title, task_description, enabled,
-         last_triggered_at, next_trigger_at, created_at, updated_at
+         last_triggered_at, next_trigger_at, created_at, updated_at,
+         target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch
          FROM schedules {where_clause}"
     )
 }
@@ -477,6 +513,18 @@ fn row_to_approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<Approval> {
 }
 
 fn row_to_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
+    let target_kind_str: String = row.get(10)?;
+    let target_kind =
+        ScheduleTargetKind::parse(&target_kind_str).unwrap_or(ScheduleTargetKind::Task);
+    let agent_kind: Option<String> = row.get(11)?;
+    let agent_ref_id: Option<String> = row.get(12)?;
+    let agent = match (agent_kind.as_deref(), agent_ref_id) {
+        (Some(k), Some(id)) => AgentRefKind::parse(k).map(|kind| (kind, id)),
+        _ => None,
+    };
+    let session_mode_str: String = row.get(14)?;
+    let session_mode =
+        ScheduleSessionMode::parse(&session_mode_str).unwrap_or(ScheduleSessionMode::PerTrigger);
     Ok(Schedule {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -488,6 +536,12 @@ fn row_to_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
         next_trigger_at: row.get(7)?,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
+        target_kind,
+        agent,
+        team_id: row.get(13)?,
+        session_mode,
+        session_id: row.get(15)?,
+        auto_dispatch: row.get::<_, i64>(16)? != 0,
     })
 }
 
@@ -550,6 +604,12 @@ mod tests {
             next_trigger_at: Some(100),
             created_at: 1,
             updated_at: 1,
+            target_kind: ScheduleTargetKind::Task,
+            agent: None,
+            team_id: None,
+            session_mode: ScheduleSessionMode::PerTrigger,
+            session_id: None,
+            auto_dispatch: true,
         }
     }
 

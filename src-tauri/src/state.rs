@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use nuomi_core::facade::{NuomiConfig, NuomiKernel, ProviderSource};
 use nuomi_core::providers::{OsKeyring, SecretStore};
-use nuomi_core::services::{GitService, WorkspaceService};
+use nuomi_core::services::{
+    workspace_migration, workspace_registry::WorkspaceRegistry, GitService, WorkspaceService,
+};
 use nuomi_core::{CoreError, CoreResult};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -54,9 +56,73 @@ impl RunCancelRegistry {
         }
         hits
     }
+
+    /// Cancels the executor of a single run; returns whether a live token
+    /// was found (false = the run was already settled or never supervised).
+    pub(crate) fn cancel_by_run(&self, run_id: &str) -> bool {
+        let mut map = self.entries.lock().expect("cancel registry poisoned");
+        match map.remove(run_id) {
+            Some((_, token)) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Tracks in-flight conversation runs (`session_id → token`) so `/stop`
+/// and the tray can abort a chat run that has no `runs` row of its own.
+#[derive(Clone, Default)]
+pub struct SessionCancelRegistry {
+    tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl SessionCancelRegistry {
+    /// Starts a new supervised run for `session_id`, cancelling a previous
+    /// one (only one live run per conversation is meaningful).
+    pub(crate) fn begin(&self, session_id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        let previous = self
+            .tokens
+            .lock()
+            .expect("session cancel registry poisoned")
+            .insert(session_id.to_string(), token.clone());
+        if let Some(prev) = previous {
+            prev.cancel();
+        }
+        token
+    }
+
+    /// Signals the running conversation loop to stop at its next step
+    /// boundary; returns whether one was in flight.
+    pub(crate) fn cancel(&self, session_id: &str) -> bool {
+        match self
+            .tokens
+            .lock()
+            .expect("session cancel registry poisoned")
+            .remove(session_id)
+        {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Deregisters a finished run. A no-op when the run was cancelled
+    /// (the canceller already removed it).
+    pub(crate) fn finish(&self, session_id: &str) {
+        self.tokens
+            .lock()
+            .expect("session cancel registry poisoned")
+            .remove(session_id);
+    }
 }
 
 /// Everything a command handler needs, testable without a Tauri runtime.
+#[derive(Clone)]
 pub struct AppState {
     /// Shared so background run dispatchers can outlive a command call.
     pub kernel: std::sync::Arc<NuomiKernel>,
@@ -65,16 +131,21 @@ pub struct AppState {
     pub db_path: Arc<str>,
     /// Sandboxed filesystem root exposed to the UI. Swappable at runtime
     /// (worktree switch): services re-point without a kernel restart.
-    pub workspace_root: std::sync::RwLock<PathBuf>,
+    pub workspace_root: std::sync::Arc<std::sync::RwLock<PathBuf>>,
     /// Whether the workspace root was pinned via `NUOMI_WORKSPACE_ROOT` at
     /// boot. When set, the UI treats the workspace as configured even if the
     /// persisted settings row is absent (the env always wins).
     pub workspace_env_configured: bool,
+    /// Workspace registry service handle. Constructed from `db_path` at boot;
+    /// each call opens a fresh connection (cheap to clone — just a PathBuf).
+    pub workspace_registry: WorkspaceRegistry,
     /// Secret store backing provider keyring references. OS keyring in prod;
     /// tests/demo inject an in-memory store.
     pub secrets: Arc<dyn SecretStore>,
     /// Cancellation tokens for supervised background team runs.
     pub run_cancels: RunCancelRegistry,
+    /// Cancellation tokens for conversation runs (chat has no `runs` row).
+    pub session_cancels: SessionCancelRegistry,
     /// Generation counter bumped by every integration upsert/delete; the
     /// notifier dispatcher watches this to hot-reload its sinks without an
     /// app restart.
@@ -123,17 +194,40 @@ impl AppState {
         .await?;
         let kernel_boot_ms = boot_started.elapsed().as_millis() as u64;
         let db_path: Arc<str> = Arc::from(db_path.to_string_lossy().to_string());
-        // Workspace priority: `NUOMI_WORKSPACE_ROOT` env > persisted setting
-        // (migration 0008 `app_settings`) > the caller's default. The env
-        // flag marks the workspace as configured regardless of persistence.
+        // Phase 2: legacy single-workspace migration. Runs after kernel boot
+        // (which applied migrations 0016/0017) and before workspace resolution.
+        // Corrects the placeholder row from 0016 with a real uuid-v7 id,
+        // reparents `__migrated__` sessions and migrates codebase-memory.
+        let migration_started = std::time::Instant::now();
+        {
+            let path = db_path.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
+                let db = nuomi_core::store::Db::open(&path)?;
+                nuomi_core::store::migrations::run(&db.0)?;
+                let _ = workspace_migration::run_if_needed(&db.0)?;
+                Ok(())
+            })
+            .await
+            .map_err(join_err)??;
+        }
+        let migration_ms = migration_started.elapsed().as_millis() as u64;
+        // Workspace priority: `NUOMI_WORKSPACE_ROOT` env > active registry row
+        // > persisted setting (migration 0008 `app_settings`) > caller default.
+        // The env flag marks the workspace as configured regardless of persistence.
         let env_root = std::env::var_os("NUOMI_WORKSPACE_ROOT").map(PathBuf::from);
         let workspace_env_configured = env_root.is_some();
-        // Phase 2: persisted workspace root read. Deliberately kept AFTER
-        // kernel boot: the `app_settings` table only exists once migrations
-        // ran, so this read depends on phase 1 (parallelizing would race the
-        // first-boot migration for no measurable gain — the read itself is a
-        // single indexed lookup on a freshly opened connection).
+        // Phase 3: resolve workspace root. Read the active registry row first;
+        // fall back to env > persisted setting > caller default. Deliberately
+        // after kernel boot + migration: the `workspaces` table only exists
+        // once migrations 0016/0017 ran.
         let settings_started = std::time::Instant::now();
+        let registry = WorkspaceRegistry::new(PathBuf::from(db_path.to_string()));
+        let active_from_registry = {
+            let reg = registry.clone();
+            tokio::task::spawn_blocking(move || reg.current_active())
+                .await
+                .map_err(join_err)??
+        };
         let persisted = {
             let path = db_path.clone();
             tokio::task::spawn_blocking(move || -> Result<Option<String>, CoreError> {
@@ -148,6 +242,7 @@ impl AppState {
         };
         let workspace_resolve_ms = settings_started.elapsed().as_millis() as u64;
         let workspace_root = env_root
+            .or_else(|| active_from_registry.map(|e| PathBuf::from(e.root_path)))
             .or_else(|| persisted.map(PathBuf::from))
             .unwrap_or(default_workspace);
         // The resolved root must exist: team-run CLI members spawn with it as
@@ -157,6 +252,7 @@ impl AppState {
         let (integrations_reload_tx, integrations_reload) = watch::channel(0u64);
         tracing::info!(
             kernel_boot_ms,
+            migration_ms,
             workspace_resolve_ms,
             total_ms = boot_started.elapsed().as_millis() as u64,
             "AppState boot complete"
@@ -164,10 +260,12 @@ impl AppState {
         Ok(Self {
             kernel: Arc::new(kernel),
             db_path,
-            workspace_root: std::sync::RwLock::new(workspace_root),
+            workspace_root: std::sync::Arc::new(std::sync::RwLock::new(workspace_root)),
             workspace_env_configured,
+            workspace_registry: registry,
             secrets,
             run_cancels: RunCancelRegistry::default(),
+            session_cancels: SessionCancelRegistry::default(),
             integrations_reload_tx,
             integrations_reload,
         })
@@ -182,6 +280,9 @@ impl AppState {
     }
 
     /// Validates and switches the sandbox root (must be an existing dir).
+    /// Best-effort syncs the registry active state: if the path matches a
+    /// registered workspace, its `is_active` flag is transferred. Unregistered
+    /// paths (legacy / env override) skip the registry update.
     pub fn switch_workspace(&self, path: PathBuf) -> CoreResult<PathBuf> {
         if !path.is_dir() {
             return Err(CoreError::Workspace(
@@ -189,6 +290,14 @@ impl AppState {
                     path.to_string_lossy().to_string(),
                 ),
             ));
+        }
+        // Best-effort: activate the matching registry row. Failures (path not
+        // registered, db locked) are logged but do not block the switch — the
+        // in-memory root is the source of truth for the running process.
+        if let Ok(Some(entry)) = self.workspace_registry.find_by_path(&path) {
+            if let Err(e) = self.workspace_registry.activate(&entry.id) {
+                tracing::warn!(error = %e, "registry activate on switch failed");
+            }
         }
         let mut root = self
             .workspace_root
@@ -209,7 +318,7 @@ impl AppState {
 
 /// Maps a cancelled/panicked `spawn_blocking` task into a store-backed
 /// `CoreError` (same shape as `facade::join_err`, kept local on purpose).
-fn join_err(e: tokio::task::JoinError) -> CoreError {
+pub(crate) fn join_err(e: tokio::task::JoinError) -> CoreError {
     CoreError::Store(nuomi_core::store::StoreError::Sqlite(
         rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
     ))

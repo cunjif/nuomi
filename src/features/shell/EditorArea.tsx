@@ -10,10 +10,11 @@ import {
   useEditorExtVersion,
 } from "../../lib/editor-ext";
 import { ExtensionsPanel } from "../../lib/editor-ext/ExtensionsPanel";
+import { Icon } from "../../components/ui/Icon/Icon";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { MonacoTab } from "./MonacoTab";
-import { WorkspaceDialog } from "./WorkspaceDialog";
+import { WorkspaceListDialog } from "./WorkspaceListDialog";
 import { useUiStore } from "../../lib/store/uiStore";
 
 // Register + contribute the builtin editor extensions once at module load so
@@ -41,6 +42,14 @@ export function EditorToolbar(): ReactNode {
       <div className="flex items-center gap-1 p-1.5">
         <button
           type="button"
+          aria-label={t("workspace.backToList")}
+          onClick={() => useUiStore.getState().setWorkbenchSubTab("workspaceList")}
+          className="rounded p-1 text-ink-muted hover:bg-surface-overlay hover:text-ink-accent focus-visible:ring-2 focus-visible:ring-ink-accent"
+        >
+          <Icon name="home" size={14} />
+        </button>
+        <button
+          type="button"
           onClick={() => setSwitchOpen(true)}
           className="sketch-btn px-2 py-0.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
         >
@@ -53,7 +62,7 @@ export function EditorToolbar(): ReactNode {
       </div>
       {/* 切换工作区 now opens the modal dialog (用户 SVG one.svg) instead of
       the inline sidebar form. */}
-      <WorkspaceDialog open={switchOpen} initialRoot={root} onClose={() => setSwitchOpen(false)} />
+      <WorkspaceListDialog open={switchOpen} onClose={() => setSwitchOpen(false)} />
       <div className="flex items-center gap-1 border-t border-ink-muted/30 px-2 py-1 text-xs">
         <span className="shrink-0 font-semibold uppercase tracking-wide text-ink-muted">{t("workspace.current")}</span>
         <span className="min-w-0 truncate font-mono text-ink-muted" title={root}>

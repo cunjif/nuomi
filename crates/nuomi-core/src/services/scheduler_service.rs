@@ -16,7 +16,12 @@ use thiserror::Error;
 use time::{OffsetDateTime, Time};
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::{new_id, now_ms, Schedule, Task, TaskStatus};
+use crate::domain::{
+    new_id, now_ms, ConversationKind, Schedule, ScheduleSessionMode, ScheduleTargetKind, Task,
+    TaskStatus,
+};
+use crate::harness::bus::{Event, EventBus};
+use crate::services::conversation_service;
 use crate::store::{migrations, repos, Db, StoreError};
 
 /// Upper bound for the minute-scan forward search (366 days).
@@ -223,6 +228,7 @@ fn unix_ms_to_dt(ms: i64) -> Result<OffsetDateTime, SchedulerError> {
 pub struct SchedulerRunner {
     db_path: Arc<str>,
     check_interval: Duration,
+    bus: Option<EventBus>,
 }
 
 impl SchedulerRunner {
@@ -230,13 +236,21 @@ impl SchedulerRunner {
         Self {
             db_path: db_path.into(),
             check_interval,
+            bus: None,
         }
+    }
+
+    /// Attaches a bus so [`tick`] can publish `schedule.triggered` events.
+    pub fn with_bus(mut self, bus: EventBus) -> Self {
+        self.bus = Some(bus);
+        self
     }
 
     /// Spawns the scan loop; drop/cancel the handle to stop it.
     pub fn spawn(self) -> SchedulerHandle {
         let token = CancellationToken::new();
-        let join = tokio::spawn(run_loop(self.db_path, self.check_interval, token.clone()));
+        let join =
+            tokio::spawn(run_loop(self.db_path, self.check_interval, self.bus, token.clone()));
         SchedulerHandle { token, join }
     }
 }
@@ -259,14 +273,19 @@ impl SchedulerHandle {
     }
 }
 
-async fn run_loop(db_path: Arc<str>, interval: Duration, token: CancellationToken) -> u64 {
+async fn run_loop(
+    db_path: Arc<str>,
+    interval: Duration,
+    bus: Option<EventBus>,
+    token: CancellationToken,
+) -> u64 {
     let mut fired_total = 0u64;
     loop {
         tokio::select! {
             _ = token.cancelled() => break,
             _ = tokio::time::sleep(interval) => {}
         }
-        match tick(&db_path).await {
+        match tick(&db_path, bus.as_ref()).await {
             Ok(n) => fired_total += n,
             Err(e) => tracing::warn!(error = %e, "scheduler tick failed"),
         }
@@ -275,10 +294,12 @@ async fn run_loop(db_path: Arc<str>, interval: Duration, token: CancellationToke
 }
 
 /// One scan pass: fire every enabled schedule whose `next_trigger_at <= now`.
-/// Each fire creates a queued Task, appends a `schedule_triggered` event and
-/// advances last/next trigger bookkeeping.
-pub async fn tick(db_path: &Arc<str>) -> Result<u64, SchedulerError> {
+/// Each fire creates a queued Task (with a session for chat/group targets),
+/// appends a `schedule_triggered` event, publishes `schedule.triggered` on the
+/// bus (if attached), and advances last/next trigger bookkeeping.
+pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, SchedulerError> {
     let path = db_path.clone();
+    let bus_owned = bus.cloned();
     let fired = tokio::task::spawn_blocking(move || -> Result<u64, SchedulerError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
@@ -295,9 +316,48 @@ pub async fn tick(db_path: &Arc<str>) -> Result<u64, SchedulerError> {
                     continue;
                 }
             };
+
+            // Session creation: chat/group targets get a Scheduled conversation;
+            // task targets keep the legacy session_id = None behaviour.
+            let session_id = if s.target_kind != ScheduleTargetKind::Task {
+                match (s.session_mode, &s.session_id) {
+                    (ScheduleSessionMode::Reuse, Some(existing_sid)) => {
+                        Some(existing_sid.clone())
+                    }
+                    _ => {
+                        let session = conversation_service::create_conversation(
+                            conn,
+                            ConversationKind::Scheduled,
+                            &s.task_title,
+                            s.agent.as_ref().map(|(k, id)| (*k, id.as_str())),
+                            s.team_id.as_deref(),
+                            // Anchor the conversation to its schedule so a
+                            // scheduled session can be traced back later.
+                            Some(s.id.as_str()),
+                        )?;
+                        let new_sid = session.id.clone();
+                        let active_ws = repos::workspaces::find_active(conn)?
+                            .map(|e| e.id)
+                            .unwrap_or_default();
+                        if !active_ws.is_empty() {
+                            repos::sessions::set_workspace_id(conn, &session.id, &active_ws)?;
+                        }
+                        if s.session_mode == ScheduleSessionMode::Reuse {
+                            let mut updated = s.clone();
+                            updated.session_id = Some(new_sid.clone());
+                            updated.updated_at = now;
+                            repos::tasks_runs::update_schedule(conn, &updated)?;
+                        }
+                        Some(new_sid)
+                    }
+                }
+            } else {
+                None
+            };
+
             let task = Task {
                 id: new_id(),
-                session_id: None,
+                session_id: session_id.clone(),
                 title: s.task_title.clone(),
                 description: s.task_description.clone(),
                 status: TaskStatus::Queued,
@@ -310,9 +370,34 @@ pub async fn tick(db_path: &Arc<str>) -> Result<u64, SchedulerError> {
                 "schedule",
                 &s.id,
                 "schedule_triggered",
-                &json!({ "task_id": task.id, "cron_expr": s.cron_expr }),
+                &json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "cron_expr": s.cron_expr,
+                    "target_kind": s.target_kind.as_str(),
+                    "auto_dispatch": s.auto_dispatch,
+                }),
                 now,
             )?;
+
+            if let Some(bus) = bus_owned.as_ref() {
+                bus.publish(Event::new(
+                    "schedule.triggered",
+                    json!({
+                        "schedule_id": s.id,
+                        "task_id": task.id,
+                        "session_id": session_id,
+                        "target_kind": s.target_kind.as_str(),
+                        "agent_kind": s.agent.as_ref().map(|(k, _)| k.as_str()),
+                        "agent_ref_id": s.agent.as_ref().map(|(_, id)| id.as_str()),
+                        "team_id": s.team_id,
+                        "auto_dispatch": s.auto_dispatch,
+                        "task_title": s.task_title,
+                        "task_description": s.task_description,
+                    }),
+                ));
+            }
+
             repos::tasks_runs::mark_schedule_triggered(conn, &s.id, now, next_at)?;
             fired += 1;
         }
@@ -347,6 +432,12 @@ pub fn new_schedule_row(
         next_trigger_at,
         created_at: now,
         updated_at: now,
+        target_kind: ScheduleTargetKind::Task,
+        agent: None,
+        team_id: None,
+        session_mode: ScheduleSessionMode::PerTrigger,
+        session_id: None,
+        auto_dispatch: true,
     }
 }
 
@@ -610,7 +701,7 @@ mod tests {
         let db_path: Arc<str> = Arc::from(db_file.to_string_lossy().to_string());
         // drive several ticks manually instead of spawning
         for _ in 0..3 {
-            tick(&db_path).await.unwrap();
+            tick(&db_path, None).await.unwrap();
         }
         assert_eq!(
             count_queued_tasks(dir.path().join("sched.db").as_path()).await,
@@ -635,7 +726,7 @@ mod tests {
             repos::tasks_runs::insert_schedule(&conn, &row).unwrap();
         }
         let db_path: Arc<str> = Arc::from(db_file.to_string_lossy().to_string());
-        let fired = tick(&db_path).await.unwrap();
+        let fired = tick(&db_path, None).await.unwrap();
         assert_eq!(fired, 1);
 
         let conn = rusqlite::Connection::open(&db_file).unwrap();
@@ -650,6 +741,6 @@ mod tests {
 
         // second tick does nothing (trigger moved to tomorrow 09:00)
         let db_path2: Arc<str> = Arc::from(db_file.to_string_lossy().to_string());
-        assert_eq!(tick(&db_path2).await.unwrap(), 0);
+        assert_eq!(tick(&db_path2, None).await.unwrap(), 0);
     }
 }

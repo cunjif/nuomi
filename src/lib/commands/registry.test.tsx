@@ -1,5 +1,5 @@
 /**
- * Slash-command registry + composer integration tests. Renders ChatInput
+ * Slash-command registry + composer integration tests. Renders Composer
  * directly with a hand-built CommandContext (renderWithProviders pattern);
  * IPC goes through the test double / injected overrides.
  */
@@ -7,13 +7,13 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { i18n } from "../../i18n";
-import { ChatInput } from "../../features/chat/ChatInput";
+import { Composer } from "../../features/conversation/composer/Composer";
 import { injectIpcCommands, ipc } from "../../lib/ipc/client";
 import { tdState } from "../../lib/ipc/test-double";
 import { renderWithProviders } from "../../test/helpers";
 import { parseInput, suggestCommands, type CommandContext } from "./registry";
 
-// Importing ChatInput registers the built-in commands (side effect).
+// Importing Composer registers the built-in commands (side effect).
 const LABEL = "输入消息，Enter 发送（Shift+Enter 换行）";
 
 /** Inspectable vitest mock function. */
@@ -86,9 +86,9 @@ describe("parseInput", () => {
   });
 });
 
-describe("ChatInput — completion panel keyboard navigation", () => {
+describe("Composer — completion panel keyboard navigation", () => {
   it("lists commands for /, completes with Enter, dismisses with Escape", () => {
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={makeContext().ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={makeContext().ctx} onSubmit={vi.fn()} />);
     const textarea = typeIntoTextarea("/");
     expect(screen.getAllByRole("option").length).toBeGreaterThanOrEqual(6);
 
@@ -99,7 +99,7 @@ describe("ChatInput — completion panel keyboard navigation", () => {
     expect(options[1]).toHaveAttribute("aria-selected", "true");
 
     pressKey(textarea, "Enter");
-    expect((screen.getByLabelText(LABEL) as HTMLTextAreaElement).value).toBe("/new ");
+    expect((screen.getByLabelText(LABEL) as HTMLTextAreaElement).value).toBe("/sessions ");
 
     // Typing again reopens; Escape closes the panel until the draft changes.
     fireEvent.change(screen.getByLabelText(LABEL), { target: { value: "/the" } });
@@ -109,7 +109,7 @@ describe("ChatInput — completion panel keyboard navigation", () => {
   });
 
   it("completes with Tab and filters while typing", () => {
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={makeContext().ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={makeContext().ctx} onSubmit={vi.fn()} />);
     const textarea = typeIntoTextarea("/se");
     const options = screen.getAllByRole("option");
     expect(options).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("ChatInput — completion panel keyboard navigation", () => {
   });
 });
 
-describe("ChatInput — command execution", () => {
+describe("Composer — command execution", () => {
   it("/workspace switches workspace, toasts success and clears the draft", async () => {
     const { ctx, mocks } = makeContext();
     const calls: string[] = [];
@@ -129,7 +129,7 @@ describe("ChatInput — command execution", () => {
         return { status: "ok", data: { root: path, configured: true } };
       },
     });
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/workspace D:/tmp");
     pressKey(textarea, "Enter");
@@ -147,7 +147,7 @@ describe("ChatInput — command execution", () => {
         throw new Error("boom");
       },
     });
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/workspace D:/tmp");
     pressKey(textarea, "Enter");
@@ -159,7 +159,7 @@ describe("ChatInput — command execution", () => {
 
   it("/workspace without a path toasts the usage hint", async () => {
     const { ctx, mocks } = makeContext();
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/workspace ");
     pressKey(textarea, "Enter");
@@ -170,7 +170,7 @@ describe("ChatInput — command execution", () => {
 
   it("unknown command toasts the closest matches", async () => {
     const { ctx, mocks } = makeContext();
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/helpme");
     pressKey(textarea, "Enter");
@@ -183,7 +183,7 @@ describe("ChatInput — command execution", () => {
 
   it("/help lists every registered command with descriptions", async () => {
     const { ctx, mocks } = makeContext();
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/help ");
     pressKey(textarea, "Enter");
@@ -197,7 +197,7 @@ describe("ChatInput — command execution", () => {
 
   it("/clear empties the draft", async () => {
     const { ctx, mocks } = makeContext();
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/clear ");
     pressKey(textarea, "Enter");
@@ -208,7 +208,7 @@ describe("ChatInput — command execution", () => {
 
   it("/new creates a session and selects it", async () => {
     const { ctx, mocks } = makeContext();
-    renderWithProviders(<ChatInput disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
+    renderWithProviders(<Composer disabled={false} pending={false} commandContext={ctx} onSubmit={vi.fn()} />);
 
     const textarea = typeIntoTextarea("/new ");
     pressKey(textarea, "Enter");

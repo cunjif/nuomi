@@ -1,0 +1,87 @@
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import { ipc } from "../../../lib/ipc/client";
+import { AsyncBoundary } from "../../../components/ui/AsyncBoundary";
+
+export interface AgentBottomSheetProps {
+  agentKind: string;
+  agentId: string;
+  onClose: () => void;
+}
+
+/**
+ * Bottom sheet showing a single agent's detail (role, responsibility,
+ * bound model, provider). Slides up from the bottom of the sidebar,
+ * covering the lower half. 250ms transition.
+ */
+export function AgentBottomSheet({ agentKind, agentId, onClose }: AgentBottomSheetProps): ReactNode {
+  const { t } = useTranslation();
+
+  const detailQuery = useQuery({
+    queryKey: ["agentDetail", agentKind, agentId],
+    queryFn: () => ipc.getAgentDetail(agentKind, agentId),
+    staleTime: 60_000,
+  });
+
+  return (
+    <div
+      className="absolute inset-x-0 bottom-0 z-20 flex max-h-[60%] flex-col rounded-t border-t border-ink-muted/40 bg-surface-raised shadow-lg transition-transform duration-[250ms] ease-out"
+      role="dialog"
+      aria-label={t("conversation.agentDetail.title")}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-ink-muted/30 px-3 py-2">
+        <span className="text-sm font-medium text-ink">{t("conversation.agentDetail.title")}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-ink-muted hover:text-ink"
+          aria-label={t("common.close")}
+        >
+          ✕
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <AsyncBoundary
+          isLoading={detailQuery.isLoading}
+          error={detailQuery.error}
+          isEmpty={false}
+          onRetry={() => void detailQuery.refetch()}
+        >
+          {detailQuery.data && (
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.name")}</div>
+                <div className="text-sm text-ink">{detailQuery.data.name}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.role")}</div>
+                <div className="text-sm text-ink">
+                  {detailQuery.data.role ?? t("conversation.agentDetail.notSet")}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.responsibility")}</div>
+                <div className="text-sm text-ink">
+                  {detailQuery.data.responsibility ?? t("conversation.agentDetail.notSet")}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.boundModel")}</div>
+                <div className="text-sm text-ink">
+                  {detailQuery.data.boundModel ?? t("conversation.agentDetail.notSet")}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.provider")}</div>
+                <div className="text-sm text-ink">
+                  {detailQuery.data.provider ?? t("conversation.agentDetail.notSet")}
+                </div>
+              </div>
+            </div>
+          )}
+        </AsyncBoundary>
+      </div>
+    </div>
+  );
+}

@@ -4,12 +4,14 @@
 //! SPEC T10 / AC17–AC18. The CLI reads `NUOMI_API_KEY` from the environment;
 //! keys are never persisted or logged.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::json;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::domain::{new_id, now_ms, EventRecord, ProviderProtocol, Session};
 use crate::harness::sideload::{
@@ -120,6 +122,11 @@ pub struct NuomiKernel {
     /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
     boot_report: BootReport,
     delta_cb: Option<DeltaCallback>,
+    /// Live-delta ordinals keyed by session id. Kept outside `SessionState`
+    /// so the ordinal stays monotonic per session across resumes and across
+    /// the isolated `run_task_in_session` path (a per-call counter restarted
+    /// at 1 on every message and broke the frontend's delta dedupe).
+    delta_seqs: Mutex<HashMap<String, Arc<AtomicU64>>>,
     state: Mutex<SessionState>,
 }
 
@@ -134,13 +141,14 @@ impl NuomiKernel {
             tokio::task::spawn_blocking(move || -> Result<String, CoreError> {
                 let db = Db::open(&path)?;
                 migrations::run(&db.0)?;
-                let session = Session {
-                    id: new_id(),
-                    title: DEFAULT_SESSION_TITLE.into(),
-                    created_at: now_ms(),
-                    updated_at: now_ms(),
-                };
+                let _ = crate::services::workspace_migration::run_if_needed(&db.0)?;
+                let active_ws =
+                    repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+                let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
                 repos::sessions::insert(&db.0, &session)?;
+                if !active_ws.is_empty() {
+                    repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
+                }
                 Ok(session.id)
             })
             .await
@@ -250,6 +258,7 @@ impl NuomiKernel {
             memory,
             boot_report,
             delta_cb: None,
+            delta_seqs: Mutex::new(HashMap::new()),
             state: Mutex::new(SessionState {
                 session_id,
                 history: Vec::new(),
@@ -289,19 +298,90 @@ impl NuomiKernel {
     /// as append-only session events, and extends the in-memory history.
     pub async fn run_task(&self, task: &str) -> CoreResult<LoopRunResult> {
         let mut state = self.state.lock().await;
-        let session_id_for_delta = state.session_id.clone();
-        let delta_counter = state.delta_seq.clone();
+        let session_id = state.session_id.clone();
+        // One ordinal per session (not per SessionState) so it survives
+        // resume/switch and matches the isolated session path below.
+        let delta_counter = self.delta_counter(&session_id).await;
+        state.delta_seq = delta_counter.clone();
+
+        let history = std::mem::take(&mut state.history);
+        let result = self
+            .run_turn(&session_id, history, task, delta_counter.clone(), None)
+            .await?;
+        state.history = result.transcript.clone();
+        Ok(result)
+    }
+
+    /// Returns the live-delta ordinal counter for `session_id`, creating it
+    /// on first use. Shared across turns so the ordinal keeps increasing for
+    /// the whole session (consumers dedupe/order `session.delta` by it).
+    async fn delta_counter(&self, session_id: &str) -> Arc<AtomicU64> {
+        let mut map = self.delta_seqs.lock().await;
+        map.entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .clone()
+    }
+
+    /// Runs a task in an isolated session context — loads history from DB,
+    /// runs the Loop Engine without holding the global state lock, and
+    /// persists results to the specified session. Allows concurrent runs
+    /// in different sessions (D1, conversation-ux-plan §2.4).
+    ///
+    /// `cancel` is a cooperative stop signal: the loop returns at the next
+    /// step boundary (an in-flight provider stream is not aborted mid-token)
+    /// and whatever was produced is persisted before returning.
+    pub async fn run_task_in_session(
+        &self,
+        session_id: &str,
+        task: &str,
+        cancel: Option<CancellationToken>,
+    ) -> CoreResult<LoopRunResult> {
+        let session_id = session_id.to_string();
+        let task = task.to_string();
+
+        let path = self.db_path.clone();
+        let sid_for_load = session_id.clone();
+        let history =
+            tokio::task::spawn_blocking(move || -> Result<Vec<ChatMessage>, CoreError> {
+                let db = Db::open(&path)?;
+                repos::sessions::get(&db.0, &sid_for_load)?;
+                let events =
+                    repos::events::list_by_aggregate(&db.0, "session", &sid_for_load, None)?;
+                Ok(rebuild_history(&events))
+            })
+            .await
+            .map_err(join_err)??;
+
+        let delta_counter = self.delta_counter(&session_id).await;
+        self.run_turn(&session_id, history, &task, delta_counter, cancel)
+            .await
+    }
+
+    /// Shared core of [`run_task`] and [`run_task_in_session`]: bridges
+    /// deltas onto the bus, runs the loop, persists only the new messages
+    /// and republishes them with their authoritative `events.seq`.
+    async fn run_turn(
+        &self,
+        session_id: &str,
+        history: Vec<ChatMessage>,
+        task: &str,
+        delta_counter: Arc<AtomicU64>,
+        cancel: Option<CancellationToken>,
+    ) -> CoreResult<LoopRunResult> {
+        let history_len = history.len();
         // Bridge streaming deltas onto the kernel bus so the shell's event
         // bridge can forward them on `event://session/{id}` (ADR-0002).
         //
         // The injected `seq` is a NON-PERSISTENT live-stream ordinal (1-based,
-        // in-memory counter reset per session). It lets the frontend dedupe
-        // replayed deltas and restore ordering within one live stream; it has
-        // no relationship to the durable `seq` of rows in the `events` table.
+        // per session). It lets the frontend dedupe replayed deltas and
+        // restore ordering within one live stream; it has no relationship to
+        // the durable `seq` of rows in the `events` table.
+        let delta_counter_for_closure = delta_counter.clone();
+        let session_id_for_delta = session_id.to_string();
         let user_cb = self.delta_cb.clone();
         let ctx = self.ctx.clone();
         let delta_bridge: Option<DeltaCallback> = Some(Arc::new(move |delta: String| {
-            let seq = delta_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = delta_counter_for_closure.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(cb) = &user_cb {
                 cb(delta.clone());
             }
@@ -310,6 +390,7 @@ impl NuomiKernel {
                 serde_json::json!({ "sessionId": session_id_for_delta, "text": delta, "seq": seq }),
             ));
         }));
+
         let engine = LoopEngine::new(
             self.provider.clone(),
             LoopConfig {
@@ -318,9 +399,11 @@ impl NuomiKernel {
             },
         )
         .with_delta_callback(delta_bridge);
+        let engine = match cancel {
+            Some(token) => engine.with_cancel(token),
+            None => engine,
+        };
 
-        let history = std::mem::take(&mut state.history);
-        let history_len = history.len();
         let result = engine
             .run_with_history(
                 &self.ctx,
@@ -332,33 +415,28 @@ impl NuomiKernel {
             )
             .await?;
 
-        // Persist only the new messages — replayed history is already in
-        // the append-only log. The auto-title rides the same persistence
-        // phase: one spawn_blocking round-trip, check-then-update so the
-        // derived name is written exactly once and never overwritten.
+        // Persist only the new messages — replayed history is already in the
+        // append-only log (and injected memory digests are prepended after
+        // the history boundary, never before it). The auto-title rides the
+        // same persistence phase: one spawn_blocking round-trip,
+        // check-then-update so the derived name is written exactly once.
         let auto_title = derive_title(task);
+        let fresh = result.transcript.get(history_len..).unwrap_or_default();
         let appended = self
-            .persist_transcript(
-                &state.session_id,
-                &result.transcript[history_len..],
-                &auto_title,
-            )
+            .persist_transcript(session_id, fresh, &auto_title)
             .await?;
-        state.history = result.transcript.clone();
 
         // Publish what was just persisted (iron rule: persist first, then
         // emit). Each record rides the session channel carrying its
         // AUTHORITATIVE `seq` — the per-aggregate `events`-table seq used for
-        // gap recovery via `listEvents(afterSeq)` — which is a different,
-        // unrelated number from the live delta ordinal above. Assistant
-        // messages additionally carry `deltaTo`: the live-delta high-water
-        // mark this answer covers, so the UI can swap buffer→full text and
-        // retire exactly that delta range in one step.
-        let total_deltas = state.delta_seq.load(Ordering::Relaxed);
+        // gap recovery via `listEvents(afterSeq)`. Assistant messages
+        // additionally carry `deltaTo`: the live-delta high-water mark this
+        // answer covers, so the UI can swap buffer→full text in one step.
+        let total_deltas = delta_counter.load(Ordering::Relaxed);
         for rec in &appended {
             let mut body = rec.payload.clone();
             if let Some(obj) = body.as_object_mut() {
-                obj.insert("sessionId".into(), json!(state.session_id));
+                obj.insert("sessionId".into(), json!(session_id));
                 obj.insert("seq".into(), json!(rec.seq));
                 let is_assistant_message = rec.kind == "message"
                     && rec.payload.get("role").and_then(|r| r.as_str()) == Some("assistant");
@@ -390,25 +468,26 @@ impl NuomiKernel {
         let mut state = self.state.lock().await;
         state.session_id = session_id.to_string();
         state.history = history;
-        // Different live stream ⇒ restart the non-persistent delta ordinal.
-        state.delta_seq = Arc::new(AtomicU64::new(0));
+        // The ordinal belongs to the session, not to the live stream: keep
+        // the same counter across resumes so consumers can still dedupe.
+        state.delta_seq = self.delta_counter(session_id).await;
         Ok(())
     }
 
     /// Starts a fresh session (`/new` in the REPL).
     pub async fn new_session(&self) -> CoreResult<String> {
         let path = self.db_path.clone();
-        let session = Session {
-            id: new_id(),
-            title: DEFAULT_SESSION_TITLE.into(),
-            created_at: now_ms(),
-            updated_at: now_ms(),
-        };
+        let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
         let id = session.id.clone();
         tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
+            let active_ws =
+                repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
             repos::sessions::insert(&db.0, &session)?;
+            if !active_ws.is_empty() {
+                repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
+            }
             Ok(())
         })
         .await
@@ -417,8 +496,8 @@ impl NuomiKernel {
         let mut state = self.state.lock().await;
         state.session_id = id.clone();
         state.history = Vec::new();
-        // Fresh session ⇒ the live delta ordinal restarts at 1.
-        state.delta_seq = Arc::new(AtomicU64::new(0));
+        // Fresh session ⇒ the live delta ordinal starts at 1.
+        state.delta_seq = self.delta_counter(&id).await;
         Ok(id)
     }
 
@@ -427,7 +506,14 @@ impl NuomiKernel {
         tokio::task::spawn_blocking(move || -> Result<Vec<Session>, CoreError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
-            Ok(repos::sessions::list(&db.0, 100)?)
+            let active_ws =
+                repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+            let filter_ws = if active_ws.is_empty() {
+                "__migrated__"
+            } else {
+                &active_ws
+            };
+            Ok(repos::sessions::list(&db.0, filter_ws, 100)?)
         })
         .await
         .map_err(join_err)?

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "frameworkVersion": "2.8.2",
+  "distribution": "opencode",
+  "harnessDir": ".aidlc"
+}

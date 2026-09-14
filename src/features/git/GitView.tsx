@@ -5,15 +5,62 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
+import { Badge, type BadgeTone } from "../../components/ui/Badge";
+import { Field, TextareaField } from "../../components/ui/Field";
+import { Icon } from "../../components/ui/Icon/Icon";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { DiffView } from "./DiffView";
 
-/**
- * Git panel (SPEC D5/US5): read status/log, stage selected paths,
- * commit with message, push to remote/branch.
- */
+function statusTone(status: string): BadgeTone {
+  switch (status) {
+    case "M":
+      return "warn";
+    case "A":
+      return "ok";
+    case "D":
+      return "danger";
+    case "R":
+    case "C":
+      return "accent";
+    case "?":
+      return "neutral";
+    case "U":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function displayStatus(indexStatus: string, worktreeStatus: string): string {
+  const s = indexStatus !== " " && indexStatus !== "" ? indexStatus : worktreeStatus;
+  return s === " " || s === "" ? "?" : s;
+}
+
+function isStaged(indexStatus: string): boolean {
+  return indexStatus !== " " && indexStatus !== "" && indexStatus !== "?";
+}
+
+function Breadcrumbs({ path }: { path: string }): ReactNode {
+  const parts = path.split(/[/\\]/);
+  return (
+    <div className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap text-xs text-ink-muted">
+      {parts.map((part, i) => (
+        <span key={i} className="flex items-center gap-0.5">
+          {i > 0 && <Icon name="arrow-right" size={10} />}
+          <span className={i === parts.length - 1 ? "font-mono text-ink" : ""}>{part}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function GitView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [remote, setRemote] = useState("origin");
   const [branch, setBranch] = useState("main");
@@ -21,6 +68,16 @@ export function GitView(): ReactNode {
   const statusQuery = useQuery({ queryKey: ["git", "status"], queryFn: ipc.gitStatus });
   const logQuery = useQuery({ queryKey: ["git", "log"], queryFn: () => ipc.gitLog(20) });
   const worktreesQuery = useQuery({ queryKey: ["git", "worktrees"], queryFn: ipc.gitWorktrees });
+
+  const activeEntry = statusQuery.data?.find((e) => e.path === activeFile) ?? null;
+  const activeStaged = activeEntry ? isStaged(activeEntry.indexStatus) : false;
+  const activePath = activeFile ?? "";
+
+  const diffQuery = useQuery({
+    queryKey: ["git", "diff", activePath, activeStaged],
+    queryFn: () => ipc.gitDiff(activePath, activeStaged),
+    enabled: activeFile !== null,
+  });
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["git"] });
@@ -36,7 +93,6 @@ export function GitView(): ReactNode {
     },
     onError: fail,
   });
-
   const stageMut = useMutation({
     mutationFn: (paths: string[]) => ipc.gitStage(paths),
     onSuccess: refresh,
@@ -66,122 +122,181 @@ export function GitView(): ReactNode {
   };
 
   return (
-    <section aria-label={t("git.heading")} className="flex h-full flex-col gap-3 overflow-y-auto p-3">
-      <h2 className="text-lg font-semibold">{t("git.heading")}</h2>
-
-      <fieldset className="rounded border border-surface-overlay p-2">
-        <legend className="px-1 text-ink-muted">{t("git.changes")}</legend>
-        {statusQuery.isLoading && <p role="status">{t("common.loading")}</p>}
-        {statusQuery.isError && <p role="alert">{t("git.notRepo")}</p>}
-        {statusQuery.data?.length === 0 && <p>{t("git.clean")}</p>}
-        <ul>
-          {statusQuery.data?.map((e) => (
-            <li key={e.path} className="flex items-center gap-2 py-0.5">
-              <input
-                type="checkbox"
-                id={`stage-${e.path}`}
-                checked={selected.has(e.path)}
-                onChange={() => toggle(e.path)}
-              />
-              <label htmlFor={`stage-${e.path}`} className="font-mono text-sm">
-                <span className="text-ink-muted">{e.indexStatus || e.worktreeStatus} </span>
-                {e.path}
-              </label>
-            </li>
-          ))}
-        </ul>
-        <button
-          type="button"
-          className="mt-2 rounded bg-surface-overlay px-2 py-1 text-sm disabled:opacity-50"
-          disabled={selected.size === 0 || stageMut.isPending}
-          onClick={() => stageMut.mutate([...selected])}
-        >
-          {t("git.stage")}
-        </button>
-      </fieldset>
-
-      <fieldset className="rounded border border-surface-overlay p-2">
-        <legend className="px-1 text-ink-muted">{t("git.commitSection")}</legend>
-        <textarea
-          aria-label={t("git.message")}
-          className="w-full rounded bg-surface-raised p-1 text-sm"
-          rows={2}
-          value={message}
-          onChange={(ev) => setMessage(ev.target.value)}
-        />
-        <button
-          type="button"
-          className="mt-1 rounded bg-surface-overlay px-2 py-1 text-sm disabled:opacity-50"
-          disabled={message.trim().length === 0 || commitMut.isPending}
-          onClick={() => commitMut.mutate()}
-        >
-          {t("git.commit")}
-        </button>
-      </fieldset>
-
-      <fieldset className="rounded border border-surface-overlay p-2">
-        <legend className="px-1 text-ink-muted">{t("git.pushSection")}</legend>
-        <div className="flex items-center gap-2">
-          <input
-            aria-label={t("git.remote")}
-            className="w-24 rounded bg-surface-raised p-1 text-sm"
-            value={remote}
-            onChange={(ev) => setRemote(ev.target.value)}
+    <section aria-label={t("git.heading")} className="flex h-full gap-2 p-2">
+      <div className="flex w-80 shrink-0 flex-col gap-2 overflow-y-auto">
+        <Card flush className="p-2">
+          <TextareaField
+            aria-label={t("git.message")}
+            rows={2}
+            value={message}
+            onChange={(ev) => setMessage(ev.target.value)}
+            onKeyDown={(e) => {
+              if (e.ctrlKey && e.key === "Enter" && message.trim() && !commitMut.isPending) {
+                commitMut.mutate();
+              }
+            }}
+            placeholder={t("git.commitHint")}
           />
-          <input
-            aria-label={t("git.branch")}
-            className="w-32 rounded bg-surface-raised p-1 text-sm"
-            value={branch}
-            onChange={(ev) => setBranch(ev.target.value)}
-          />
-          <button
-            type="button"
-            className="rounded bg-surface-overlay px-2 py-1 text-sm disabled:opacity-50"
-            disabled={pushMut.isPending}
-            onClick={() => pushMut.mutate()}
+          <Button
+            variant="solid"
+            size="sm"
+            className="mt-1.5 w-full"
+            disabled={message.trim().length === 0 || commitMut.isPending}
+            onClick={() => commitMut.mutate()}
           >
-            {t("git.push")}
-          </button>
-        </div>
-      </fieldset>
+            <Icon name="commit" size={14} />
+            {t("git.commit")}
+          </Button>
+        </Card>
 
-      <fieldset className="rounded border border-surface-overlay p-2">
-        <legend className="px-1 text-ink-muted">{t("git.worktrees")}</legend>
-        <ul>
-          {worktreesQuery.data?.map((w) => (
-            <li key={w.path} className="flex items-center justify-between gap-2 py-0.5">
-              <span className="font-mono text-xs">
-                {w.path}
-                {w.branch != null && <span className="text-ink-muted"> ({w.branch})</span>}
-                {w.isCurrent && <span className="text-state-ok"> ●</span>}
-              </span>
-              {!w.isCurrent && (
-                <button
-                  type="button"
-                  className="rounded bg-surface-overlay px-2 py-0.5 text-xs"
-                  onClick={() => switchMut.mutate(w.path)}
-                >
-                  {t("git.switchTo")}
-                </button>
+        <Card flush className="p-2">
+          <p className="mb-1 font-note-hand text-sm text-ink-muted">{t("git.changes")}</p>
+          {statusQuery.isLoading && <p role="status">{t("common.loading")}</p>}
+          {statusQuery.isError && <p role="alert">{t("git.notRepo")}</p>}
+          {statusQuery.data?.length === 0 && (
+            <p className="text-xs text-ink-muted">{t("git.clean")}</p>
+          )}
+          <ul className="flex flex-col gap-0.5">
+            {statusQuery.data?.map((e) => {
+              const status = displayStatus(e.indexStatus, e.worktreeStatus);
+              const isActive = e.path === activeFile;
+              return (
+                <li key={e.path}>
+                  <div
+                    className={`flex items-center gap-1.5 rounded px-1 py-0.5 ${
+                      isActive ? "bg-surface-overlay" : "hover:bg-surface-overlay/50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      id={`stage-${e.path}`}
+                      checked={selected.has(e.path)}
+                      onChange={() => toggle(e.path)}
+                      className="shrink-0"
+                    />
+                    <label
+                      htmlFor={`stage-${e.path}`}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5"
+                      onClick={() => setActiveFile(e.path)}
+                    >
+                      <Badge tone={statusTone(status)} className="shrink-0">
+                        {status}
+                      </Badge>
+                      <span className="truncate font-mono text-xs text-ink">{e.path}</span>
+                    </label>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1.5 w-full"
+            disabled={selected.size === 0 || stageMut.isPending}
+            onClick={() => stageMut.mutate([...selected])}
+          >
+            {t("git.stage")}
+          </Button>
+        </Card>
+
+        <Card flush className="p-2">
+          <p className="mb-1 font-note-hand text-sm text-ink-muted">{t("git.pushSection")}</p>
+          <div className="flex items-center gap-1.5">
+            <div className="w-20">
+              <Field
+                aria-label={t("git.remote")}
+                className="text-xs"
+                value={remote}
+                onChange={(ev) => setRemote(ev.target.value)}
+              />
+            </div>
+            <div className="w-24">
+              <Field
+                aria-label={t("git.branch")}
+                className="text-xs"
+                value={branch}
+                onChange={(ev) => setBranch(ev.target.value)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pushMut.isPending}
+              onClick={() => pushMut.mutate()}
+            >
+              <Icon name="pull" size={14} />
+              {t("git.push")}
+            </Button>
+          </div>
+        </Card>
+
+        {worktreesQuery.data != null && worktreesQuery.data.length > 0 && (
+          <Card flush className="p-2">
+            <p className="mb-1 font-note-hand text-sm text-ink-muted">{t("git.worktrees")}</p>
+            <ul className="flex flex-col gap-0.5">
+              {worktreesQuery.data.map((w) => (
+                <li key={w.path} className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs">
+                    {w.path}
+                    {w.branch != null && <span className="text-ink-muted"> ({w.branch})</span>}
+                    {w.isCurrent && <span className="text-state-ok"> ●</span>}
+                  </span>
+                  {!w.isCurrent && (
+                    <Button variant="ghost" size="sm" onClick={() => switchMut.mutate(w.path)}>
+                      {t("git.switchTo")}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        <Card flush className="p-2">
+          <p className="mb-1 font-note-hand text-sm text-ink-muted">{t("git.log")}</p>
+          {logQuery.isError && <p role="alert">{t("git.notRepo")}</p>}
+          <ul className="flex flex-col gap-0.5 font-mono text-xs">
+            {logQuery.data?.map((c) => (
+              <li key={c.hash} className="py-0.5">
+                <span className="text-ink-muted">{c.hash.slice(0, 7)} </span>
+                {c.subject}
+                <span className="text-ink-muted"> — {c.author}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {activeFile !== null ? (
+          <>
+            <div className="border-b border-dashed border-ink-muted/30 bg-surface-raised px-3 py-1.5">
+              <Breadcrumbs path={activeFile} />
+            </div>
+            <div className="flex-1 overflow-auto bg-surface-raised">
+              {diffQuery.isLoading && (
+                <p role="status" className="p-3 text-sm text-ink-muted">
+                  {t("common.loading")}
+                </p>
               )}
-            </li>
-          ))}
-        </ul>
-      </fieldset>
-
-      <fieldset className="rounded border border-surface-overlay p-2">
-        <legend className="px-1 text-ink-muted">{t("git.log")}</legend>
-        {logQuery.isError && <p role="alert">{t("git.notRepo")}</p>}
-        <ul className="font-mono text-xs">
-          {logQuery.data?.map((c) => (
-            <li key={c.hash} className="py-0.5">
-              <span className="text-ink-muted">{c.hash.slice(0, 7)} </span>
-              {c.subject}
-              <span className="text-ink-muted"> — {c.author}</span>
-            </li>
-          ))}
-        </ul>
-      </fieldset>
+              {diffQuery.isError && (
+                <p role="alert" className="p-3 text-sm text-danger">
+                  {t("git.notRepo")}
+                </p>
+              )}
+              {diffQuery.data != null && <DiffView diffText={diffQuery.data} className="py-1" />}
+            </div>
+          </>
+        ) : (
+          <EmptyState
+            icon="diff"
+            title={t("git.selectFile")}
+            hint={t("git.selectFileHint")}
+            className="m-2"
+          />
+        )}
+      </div>
     </section>
   );
 }
