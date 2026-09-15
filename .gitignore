@@ -38,7 +38,7 @@ code-review-*.md
 
 # Local review reports
 reviews/
-design.m
+design.md
 # Ad-hoc build/test logs (cargo-check.log, cargo-test*.log, …)
 *.log
 
