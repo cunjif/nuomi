@@ -297,11 +297,11 @@ async fn role_capability_mismatch_and_preset_protection() {
 
     let roles = commands::impl_list_roles(&state).await.unwrap();
     let builtin = roles.iter().find(|r| r.builtin).unwrap();
-    let err = commands::impl_delete_role(&state, builtin.id.clone())
+    let err = commands::impl_delete_role(&state, builtin.id.clone(), false)
         .await
         .expect_err("built-in roles are delete-protected");
     assert_eq!(ipc_code(&err), "role.builtin_protected");
 
     // User roles still delete normally.
-    commands::impl_delete_role(&state, role.id).await.unwrap();
+    commands::impl_delete_role(&state, role.id, false).await.unwrap();
 }
