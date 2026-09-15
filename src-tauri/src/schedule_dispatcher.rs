@@ -1,11 +1,11 @@
 //! Schedule dispatcher (plan §5.4): subscribes to `schedule.triggered` bus
 //! events and, when `auto_dispatch` is set, launches the appropriate executor:
-//! - `target_kind=chat`  → session-level Loop Engine via `run_task_in_session`
+//! - `target_kind=chat`  → unified dispatch via `run_conversation_turn` (D1)
 //! - `target_kind=group` → team run via `impl_run_team_on_task`
 //! - `target_kind=task`  → no-op (Board manual/batch run keeps the old path)
 //!
-//! Failures are logged and never propagated — a missed dispatch leaves the
-//! Task in `queued`, where a user can still drive it manually.
+//! Failures are logged and the Task is marked `failed` — a missed dispatch
+//! must be visible to the user (AC8, non-silent).
 
 use nuomi_core::harness::Event;
 use tokio::sync::broadcast::error::RecvError;
@@ -95,23 +95,22 @@ async fn handle_event(state: &AppState, event: Event) {
                 session_id = %session_id,
                 "schedule dispatch: starting chat run"
             );
-            match state
-                .kernel
-                .run_task_in_session(&session_id, &prompt, None)
-                .await
-            {
+            match commands::run_conversation_turn(state, &session_id, &prompt).await {
                 Ok(result) => tracing::info!(
                     task_id = %task_id,
                     session_id = %session_id,
                     steps = result.steps,
                     "schedule dispatch: chat run completed"
                 ),
-                Err(e) => tracing::warn!(
-                    task_id = %task_id,
-                    session_id = %session_id,
-                    error = %e,
-                    "schedule dispatch: chat run failed"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        task_id = %task_id,
+                        session_id = %session_id,
+                        error = %e,
+                        "schedule dispatch: chat run failed — marking task failed"
+                    );
+                    mark_task_failed(state, &task_id, &e.to_string()).await;
+                }
             }
         }
         "group" => {
@@ -156,4 +155,27 @@ async fn handle_event(state: &AppState, event: Event) {
             );
         }
     }
+}
+
+/// Marks a scheduled Task as `failed` with the error message (AC8 — non-silent
+/// missed dispatch). Best-effort: if the Task row is gone or already terminal,
+/// the update is a no-op.
+async fn mark_task_failed(state: &AppState, task_id: &str, error_msg: &str) {
+    if task_id.is_empty() {
+        return;
+    }
+    let path = state.db_path.clone();
+    let tid = task_id.to_string();
+    let msg = error_msg.to_string();
+    let _ = tokio::task::spawn_blocking(move || -> Result<(), nuomi_core::store::StoreError> {
+        let db = nuomi_core::store::Db::open(&path)?;
+        let now = nuomi_core::domain::now_ms();
+        db.0.execute(
+            "UPDATE tasks SET status = 'failed', updated_at = ?1 WHERE id = ?2 AND status = 'queued'",
+            rusqlite::params![now, tid],
+        )?;
+        tracing::warn!(task_id = %tid, error = %msg, "task marked failed");
+        Ok(())
+    })
+    .await;
 }

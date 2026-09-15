@@ -23,11 +23,18 @@ use nuomi_core::evolution::research::{
 };
 use nuomi_core::integrations::OutboundSink;
 use nuomi_core::orchestrator::OrchestratorError;
+use nuomi_core::plugins::LoopRunResult;
 use nuomi_core::plugins::approval_gate;
 use nuomi_core::services::capability_router::RouteOutcome;
 use nuomi_core::services::parse_schedule;
 use nuomi_core::services::SeedReport;
-use nuomi_core::services::{run_team as core_run_team, TeamRunOutcome};
+use nuomi_core::services::{
+    check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
+    delete_and_nullify_role_refs, detect_missing_provider, emit_env_fallback,
+    emit_materialize_warnings, emit_materialized, emit_provider_missing, emit_role_applied,
+    materialize_single_role, resolve_agent, run_team as core_run_team, MissingProviderHint,
+    ResolvedAgent, SingleRoleContext, TeamRunOutcome,
+};
 use nuomi_core::store::{migrations, repos, Db, StoreError};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
@@ -110,15 +117,134 @@ pub async fn run_conversation_turn(
         ));
     }
     let token = state.session_cancels.begin(session_id);
-    let outcome = state
-        .kernel
-        .run_task_in_session(session_id, text, Some(token.clone()))
-        .await;
+
+    // Dispatch based on team_id (D1 / D3). Wrapped in a block so that
+    // `finish` is always called — even on error paths (`?` inside the block
+    // returns from the block, not the function).
+    let result = {
+        // Load session row + resolve agent binding (single spawn_blocking).
+        let db_path = state.db_path.clone();
+        let sid_load = session_id.to_string();
+        let (session, resolved, missing_hint) = tokio::task::spawn_blocking(
+            move || -> Result<(Session, Option<ResolvedAgent>, Option<MissingProviderHint>), IpcError> {
+                let db = Db::open(&db_path)?;
+                let session = repos::sessions::get(&db.0, &sid_load)
+                    .map_err(|_| IpcError::new("session.not_found", "session not found"))?;
+                let resolved = resolve_agent(&db.0, &session).ok().flatten();
+                // Detect missing provider for Role-bound agents (AC6 runtime).
+                let missing_hint = match &resolved {
+                    Some(r) if matches!(r.kind, AgentRefKind::Role) => {
+                        repos::roles::get(&db.0, &r.id)
+                            .ok()
+                            .and_then(|role| detect_missing_provider(&role))
+                    }
+                    _ => None,
+                };
+                Ok((session, resolved, missing_hint))
+            },
+        )
+        .await
+        .map_err(join_err)??;
+
+        // Emit provider.missing hint if detected (non-blocking warning).
+        if let Some(ref hint) = missing_hint {
+            let bus = state.kernel.context().bus();
+            let db_path = state.db_path.clone();
+            emit_provider_missing(&bus, &db_path, session_id, &hint.role_id, &hint.role_name)
+                .await
+                .ok();
+        }
+
+        if let Some(ref team_id) = session.team_id {
+            // Team path: dispatch to core_run_team (群聊拓扑: Selector +
+            // Handoff + WhiteBoard). 续传时按 team_id 有无分派，未绑定的
+            // 既有会话走单 Role/Provider 路径 (D3).
+            let db_path = state.db_path.clone();
+            let secrets = state.secrets.clone();
+            let cwd = Some(state.current_workspace());
+            let bus = state.kernel.context().bus();
+            let outcome = core_run_team(db_path, Some(bus), team_id, session_id, text, secrets, cwd)
+                .await
+                .map_err(|e| IpcError::new("team.run_failed", &e.to_string()))?;
+            LoopRunResult {
+                final_text: outcome.final_output,
+                steps: outcome.rounds,
+                truncated: !outcome.converged,
+                transcript: Vec::new(),
+            }
+        } else {
+            // Single role path: materialize from DB config (D1).
+            let db_path = state.db_path.clone();
+            let secrets = state.secrets.clone();
+            let cwd = Some(state.current_workspace());
+            let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref()).await?;
+
+            match ctx {
+                SingleRoleContext::Materialized {
+                    provider,
+                    model,
+                    overlay,
+                    warnings,
+                } => {
+                    let provider_id = provider.id().to_string();
+                    let bus = state.kernel.context().bus();
+                    let db_path = state.db_path.clone();
+                    emit_materialized(&bus, &db_path, session_id, &provider_id)
+                        .await
+                        .ok();
+                    // AC7: materialize skip+warnings → EventRecord (not hard error).
+                    if !warnings.is_empty() {
+                        let db_path = state.db_path.clone();
+                        emit_materialize_warnings(&bus, &db_path, session_id, &warnings)
+                            .await
+                            .ok();
+                    }
+                    if let (Some(ref ov), Some(ref r)) = (&overlay, &resolved) {
+                        if matches!(r.kind, AgentRefKind::Role) {
+                            let db_path = state.db_path.clone();
+                            emit_role_applied(&bus, &db_path, session_id, &r.id, ov)
+                                .await
+                                .ok();
+                        }
+                    }
+                    state
+                        .kernel
+                        .run_task_in_session(
+                            session_id,
+                            text,
+                            Some(token.clone()),
+                            Some(provider),
+                            Some(model),
+                            overlay,
+                        )
+                        .await?
+                }
+                SingleRoleContext::EnvFallback => {
+                    let bus = state.kernel.context().bus();
+                    let db_path = state.db_path.clone();
+                    emit_env_fallback(&bus, &db_path, session_id)
+                        .await
+                        .ok();
+                    state
+                        .kernel
+                        .run_task_in_session(
+                            session_id,
+                            text,
+                            Some(token.clone()),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?
+                }
+            }
+        }
+    };
+
     // A cancelled run was already deregistered by the canceller.
     if !token.is_cancelled() {
         state.session_cancels.finish(session_id);
     }
-    let result = outcome?;
     Ok(RunResultDto {
         final_text: result.final_text,
         steps: result.steps,
@@ -1114,17 +1240,39 @@ pub async fn impl_upsert_provider(
     .await?
 }
 
-pub async fn impl_delete_provider(state: &AppState, provider_id: String) -> Result<(), IpcError> {
+pub async fn impl_delete_provider(
+    state: &AppState,
+    provider_id: String,
+    force: bool,
+) -> Result<(), IpcError> {
     let path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let db = Db::open(&path)?;
+        let mut db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        if !repos::providers::delete_provider(&db.0, &provider_id)? {
+
+        // Verify the provider exists.
+        if repos::providers::get_provider(&db.0, &provider_id).is_err() {
             return Err(IpcError::new(
                 "provider.not_found",
                 format!("provider#{provider_id} not found"),
             ));
         }
+
+        // Two-phase delete (ADR 0011 D5): phase one — check refs.
+        let refs = check_provider_refs(&db.0, &provider_id)?;
+        if !refs.is_empty() && !force {
+            return Err(IpcError::with_details(
+                "entity.referenced",
+                format!(
+                    "provider#{provider_id} is referenced by {} role(s)",
+                    refs.roles.len()
+                ),
+                serde_json::to_value(&refs).unwrap_or_default(),
+            ));
+        }
+
+        // Phase two (force=true or no refs): delete + nullify in one tx.
+        delete_and_nullify_provider_refs(&mut db.0, &provider_id)?;
         Ok(())
     })
     .await?
@@ -1935,10 +2083,14 @@ pub async fn impl_upsert_role(state: &AppState, role: RoleInput) -> Result<RoleD
     Ok(RoleDto::from(entity))
 }
 
-pub async fn impl_delete_role(state: &AppState, role_id: String) -> Result<(), IpcError> {
+pub async fn impl_delete_role(
+    state: &AppState,
+    role_id: String,
+    force: bool,
+) -> Result<(), IpcError> {
     let path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let db = Db::open(&path)?;
+        let mut db = Db::open(&path)?;
         migrations::run(&db.0)?;
         // Built-in preset roles are protected from deletion (disable/rebind
         // instead); everything else deletes normally.
@@ -1949,13 +2101,29 @@ pub async fn impl_delete_role(state: &AppState, role_id: String) -> Result<(), I
                     format!("role#{role_id} is a built-in preset and cannot be deleted"),
                 ));
             }
-        }
-        if !repos::roles::delete(&db.0, &role_id)? {
+        } else {
             return Err(IpcError::new(
                 "role.not_found",
                 format!("role#{role_id} not found"),
             ));
         }
+
+        // Two-phase delete (ADR 0011 D5): phase one — check refs.
+        let refs = check_role_refs(&db.0, &role_id)?;
+        if !refs.is_empty() && !force {
+            return Err(IpcError::with_details(
+                "entity.referenced",
+                format!(
+                    "role#{role_id} is referenced by {} team(s) and {} session(s)",
+                    refs.teams.len(),
+                    refs.sessions.len()
+                ),
+                serde_json::to_value(&refs).unwrap_or_default(),
+            ));
+        }
+
+        // Phase two (force=true or no refs): delete + nullify in one tx.
+        delete_and_nullify_role_refs(&mut db.0, &role_id)?;
         Ok(())
     })
     .await?

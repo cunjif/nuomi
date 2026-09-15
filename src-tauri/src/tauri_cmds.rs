@@ -329,8 +329,9 @@ pub async fn list_providers(
 pub async fn delete_provider(
     state: tauri::State<'_, AppState>,
     provider_id: String,
+    force: Option<bool>,
 ) -> Result<(), IpcError> {
-    commands::impl_delete_provider(&state, provider_id).await
+    commands::impl_delete_provider(&state, provider_id, force.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -517,8 +518,9 @@ pub async fn upsert_role(
 pub async fn delete_role(
     state: tauri::State<'_, AppState>,
     role_id: String,
+    force: Option<bool>,
 ) -> Result<(), IpcError> {
-    commands::impl_delete_role(&state, role_id).await
+    commands::impl_delete_role(&state, role_id, force.unwrap_or(false)).await
 }
 
 // ---------- role capability system (presets / director / routing) ----------
