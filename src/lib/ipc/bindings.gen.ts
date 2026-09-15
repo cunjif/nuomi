@@ -238,9 +238,9 @@ async listProviders() : Promise<Result<ProviderDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async deleteProvider(providerId: string) : Promise<Result<null, IpcError>> {
+async deleteProvider(providerId: string, force: boolean | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_provider", { providerId }) };
+    return { status: "ok", data: await TAURI_INVOKE("delete_provider", { providerId, force }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -414,9 +414,9 @@ async upsertRole(role: RoleInput) : Promise<Result<RoleDto, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async deleteRole(roleId: string) : Promise<Result<null, IpcError>> {
+async deleteRole(roleId: string, force: boolean | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_role", { roleId }) };
+    return { status: "ok", data: await TAURI_INVOKE("delete_role", { roleId, force }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
