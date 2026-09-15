@@ -85,6 +85,13 @@ pub struct LoopEngine {
     /// in-flight provider stream is *not* aborted mid-token, so a cancel
     /// takes effect when the current step finishes.
     cancel: Option<CancellationToken>,
+    /// Role-level system prompt override (D4). When `Some`, replaces the
+    /// `SystemPromptService` default for this run.
+    system_prompt_override: Option<String>,
+    /// Role-level tool allowlist (D4). Non-empty = only these tool ids are
+    /// exposed to the LLM; empty = unrestricted (matches orchestrator
+    /// convention).
+    tool_allowlist: Vec<String>,
 }
 
 /// Recovers the queue even if a panicking writer poisoned the mutex.
@@ -108,7 +115,23 @@ impl LoopEngine {
             steering: Arc::new(Mutex::new(VecDeque::new())),
             follow_ups: Arc::new(Mutex::new(VecDeque::new())),
             cancel: None,
+            system_prompt_override: None,
+            tool_allowlist: Vec::new(),
         }
+    }
+
+    /// Sets a role-level system prompt override (D4). When `Some`, replaces
+    /// the `SystemPromptService` default for this run.
+    pub fn with_system_prompt_override(mut self, prompt: Option<String>) -> Self {
+        self.system_prompt_override = prompt;
+        self
+    }
+
+    /// Sets a role-level tool allowlist (D4). Non-empty = only these tool
+    /// ids are exposed; empty = unrestricted.
+    pub fn with_tool_allowlist(mut self, allowlist: Vec<String>) -> Self {
+        self.tool_allowlist = allowlist;
+        self
     }
 
     /// Attaches a cooperative stop signal: when it is cancelled the loop
@@ -220,9 +243,11 @@ impl LoopEngine {
             serde_json::json!({ "task": user_task }),
         ));
 
-        let system_prompt = resolve_system_prompt(ctx).await?;
-        let allowlist: Vec<String> = Vec::new(); // role-level filtering applied by orchestrator
-        let defs = tools.defs_for(&allowlist).await;
+        let system_prompt = match &self.system_prompt_override {
+            Some(ov) => ov.clone(),
+            None => resolve_system_prompt(ctx).await?,
+        };
+        let defs = tools.defs_for(&self.tool_allowlist).await;
 
         // Injected messages are inserted *after* the replayed history so the
         // caller's `transcript[history_len..]` slice still starts exactly at

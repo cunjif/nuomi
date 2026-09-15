@@ -20,7 +20,8 @@ use crate::harness::sideload::{
 use crate::harness::{Context, HarnessError, Kernel};
 use crate::plugins::{
     DeltaCallback, HookRegistry, HooksPlugin, LoopConfig, LoopEngine, LoopRunResult, MemoryPlugin,
-    MemoryService, SystemPromptPlugin, SystemPromptService, ToolRegistry, ToolsPlugin,
+    MemoryService, SystemPromptPlugin, SystemPromptService, ToolRegistry, ToolsPlugin, TurnHook,
+    TurnOverride,
 };
 use crate::providers::{
     AnthropicCompatibleClient, ChatMessage, ChatResponse, FakeLlm, LlmProvider, MessageRole,
@@ -28,6 +29,8 @@ use crate::providers::{
 };
 use crate::store::{migrations, repos, Db};
 use crate::{CoreError, CoreResult};
+
+use crate::services::RoleOverlay;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are nuomi, a helpful agent.";
 
@@ -306,7 +309,7 @@ impl NuomiKernel {
 
         let history = std::mem::take(&mut state.history);
         let result = self
-            .run_turn(&session_id, history, task, delta_counter.clone(), None)
+            .run_turn(&session_id, history, task, delta_counter.clone(), None, None, None, None)
             .await?;
         state.history = result.transcript.clone();
         Ok(result)
@@ -335,6 +338,9 @@ impl NuomiKernel {
         session_id: &str,
         task: &str,
         cancel: Option<CancellationToken>,
+        provider: Option<Arc<dyn LlmProvider>>,
+        model: Option<String>,
+        overlay: Option<RoleOverlay>,
     ) -> CoreResult<LoopRunResult> {
         let session_id = session_id.to_string();
         let task = task.to_string();
@@ -353,7 +359,7 @@ impl NuomiKernel {
             .map_err(join_err)??;
 
         let delta_counter = self.delta_counter(&session_id).await;
-        self.run_turn(&session_id, history, &task, delta_counter, cancel)
+        self.run_turn(&session_id, history, &task, delta_counter, cancel, provider, model, overlay)
             .await
     }
 
@@ -367,6 +373,9 @@ impl NuomiKernel {
         task: &str,
         delta_counter: Arc<AtomicU64>,
         cancel: Option<CancellationToken>,
+        provider: Option<Arc<dyn LlmProvider>>,
+        model: Option<String>,
+        overlay: Option<RoleOverlay>,
     ) -> CoreResult<LoopRunResult> {
         let history_len = history.len();
         // Bridge streaming deltas onto the kernel bus so the shell's event
@@ -391,14 +400,35 @@ impl NuomiKernel {
             ));
         }));
 
+        let effective_provider = provider.unwrap_or_else(|| self.provider.clone());
+        let effective_model = model.unwrap_or_else(|| self.model.clone());
         let engine = LoopEngine::new(
-            self.provider.clone(),
+            effective_provider,
             LoopConfig {
-                model: self.model.clone(),
+                model: effective_model,
                 ..LoopConfig::default()
             },
         )
         .with_delta_callback(delta_bridge);
+        // Apply RoleOverlay (D4): system_prompt override + tool allowlist +
+        // temperature (via turn hook). Aligns with PipelineExecutor /
+        // GroupChatExecutor existing injection points.
+        let engine = match &overlay {
+            Some(ov) => {
+                let engine = engine
+                    .with_system_prompt_override(ov.system_prompt.clone())
+                    .with_tool_allowlist(ov.tool_allowlist.clone());
+                if let Some(temp) = ov.temperature {
+                    engine.with_turn_hook(Arc::new(move |_| TurnOverride {
+                        temperature: Some(temp),
+                        ..Default::default()
+                    }) as TurnHook)
+                } else {
+                    engine
+                }
+            }
+            None => engine,
+        };
         let engine = match cancel {
             Some(token) => engine.with_cancel(token),
             None => engine,

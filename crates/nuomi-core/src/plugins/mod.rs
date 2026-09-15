@@ -14,7 +14,7 @@ pub use approval_gate::{
     GateDecision, SensitiveToolPolicy, SENSITIVE_TOOLS_MARKER,
 };
 pub use hooks::{HookDecision, HookPoint, HookRegistry, HooksPlugin};
-pub use loop_engine::{DeltaCallback, LoopConfig, LoopEngine, LoopRunResult};
+pub use loop_engine::{DeltaCallback, LoopConfig, LoopEngine, LoopRunResult, TurnHook, TurnOverride};
 pub use memory::{MemoryPlugin, MemoryService};
 pub use system_prompt::{SystemPromptPlugin, SystemPromptService};
 pub use tools::{ToolRegistry, ToolsPlugin};

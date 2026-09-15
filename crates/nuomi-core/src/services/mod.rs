@@ -4,10 +4,13 @@
 
 pub mod capability_router;
 pub mod conversation_service;
+pub mod debug_event_publisher;
 pub mod git_service;
 pub mod presets;
+pub mod reference_pre_check;
 pub mod role_director;
 pub mod scheduler_service;
+pub mod single_role_materializer;
 pub mod team_former;
 pub mod team_runner;
 pub mod workspace;
@@ -40,6 +43,15 @@ pub use scheduler_service::{
 };
 pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMember};
 pub use team_runner::{materialize, run_team, MaterializedProviders, TeamRunOutcome};
+pub use single_role_materializer::{materialize_single_role, RoleOverlay, SingleRoleContext};
+pub use debug_event_publisher::{
+    emit_env_fallback, emit_materialize_warnings, emit_materialized, emit_provider_missing,
+    emit_role_applied,
+};
+pub use reference_pre_check::{
+    check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
+    delete_and_nullify_role_refs, detect_missing_provider, EntityRefs, MissingProviderHint,
+};
 pub use workspace::{FileEntry, WorkspaceError, WorkspaceService};
 pub use workspace_palette::{color_for, hash as palette_hash, ColorTag, PALETTE};
 pub use workspace_guard::{canonicalize as guard_canonicalize, is_blacklisted, PathGuardError};

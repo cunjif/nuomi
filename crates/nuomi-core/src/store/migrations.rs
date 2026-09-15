@@ -137,6 +137,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0017_sessions_workspace.sql"
         )),
     ),
+    (
+        18,
+        "0018_task_failed_status",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0018_task_failed_status.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

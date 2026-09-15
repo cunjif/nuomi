@@ -564,6 +564,7 @@ pub enum TaskStatus {
     Running,
     Done,
     Cancelled,
+    Failed,
 }
 
 impl TaskStatus {
@@ -574,6 +575,7 @@ impl TaskStatus {
             TaskStatus::Running => "running",
             TaskStatus::Done => "done",
             TaskStatus::Cancelled => "cancelled",
+            TaskStatus::Failed => "failed",
         }
     }
 
@@ -584,6 +586,7 @@ impl TaskStatus {
             "running" => Some(TaskStatus::Running),
             "done" => Some(TaskStatus::Done),
             "cancelled" => Some(TaskStatus::Cancelled),
+            "failed" => Some(TaskStatus::Failed),
             _ => None,
         }
     }
