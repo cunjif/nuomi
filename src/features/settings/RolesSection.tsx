@@ -7,7 +7,9 @@ import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
-import { readAgentProfileId, RoleForm } from "./RoleForm";
+import { isRoleReady, readAgentProfileId } from "../../lib/conversation/roleReady";
+import { RoleBindingPanel } from "./RoleBindingPanel";
+import { RoleForm } from "./RoleForm";
 
 interface BindingBadgeProps {
   role: RoleDto;
@@ -69,6 +71,7 @@ function RoleRow({
   confirmingId,
   setConfirmingId,
   deleteMut,
+  onOpenBinding,
 }: {
   role: RoleDto;
   providerNames: Map<string, string>;
@@ -76,6 +79,7 @@ function RoleRow({
   confirmingId: string | null;
   setConfirmingId: (id: string | null) => void;
   deleteMut: { isPending: boolean; mutate: (id: string) => void };
+  onOpenBinding: (role: RoleDto) => void;
 }): ReactNode {
   const { t } = useTranslation();
   const protectedRole = role.builtin;
@@ -102,6 +106,14 @@ function RoleRow({
         </p>
       )}
       <div className="mt-1.5 flex gap-2">
+        <button
+          type="button"
+          onClick={() => onOpenBinding(role)}
+          aria-label={`${isRoleReady(role) ? t("settings.roles.editBinding") : t("settings.roles.goBind")} ${role.name}`}
+          className="rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
+        >
+          {isRoleReady(role) ? t("settings.roles.editBinding") : t("settings.roles.goBind")}
+        </button>
         {protectedRole ? null : confirmingId === role.id ? (
           <button
             type="button"
@@ -196,6 +208,7 @@ export function RolesSection(): ReactNode {
   /** roleId awaiting a second click on Delete (two-step confirm, keyboard friendly) */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [directorOpen, setDirectorOpen] = useState(false);
+  const [bindingPanelRole, setBindingPanelRole] = useState<RoleDto | null>(null);
 
   const deleteMut = useMutation({
     mutationFn: (roleId: string) => ipc.deleteRole(roleId),
@@ -225,15 +238,8 @@ export function RolesSection(): ReactNode {
   const profileNames = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
   const roles = query.data ?? [];
   const groups: Array<{ label: string; roles: RoleDto[] }> = [
-    { label: t("settings.roles.groupBuiltin"), roles: roles.filter((r) => r.builtin) },
-    {
-      label: t("settings.roles.groupGenerated"),
-      roles: roles.filter((r) => !r.builtin && r.generated),
-    },
-    {
-      label: t("settings.roles.groupCustom"),
-      roles: roles.filter((r) => !r.builtin && !r.generated),
-    },
+    { label: t("settings.roles.groupReady"), roles: roles.filter(isRoleReady) },
+    { label: t("settings.roles.groupUnbound"), roles: roles.filter((r) => !isRoleReady(r)) },
   ];
 
   return (
@@ -284,6 +290,7 @@ export function RolesSection(): ReactNode {
                         confirmingId={confirmingId}
                         setConfirmingId={setConfirmingId}
                         deleteMut={deleteMut}
+                        onOpenBinding={(r) => setBindingPanelRole(r)}
                       />
                     ))}
                   </ul>
@@ -293,6 +300,9 @@ export function RolesSection(): ReactNode {
         </div>
       </AsyncBoundary>
       {directorOpen && <RoleDirectorDialog onClose={() => setDirectorOpen(false)} />}
+      {bindingPanelRole && (
+        <RoleBindingPanel initialRole={bindingPanelRole} onClose={() => setBindingPanelRole(null)} />
+      )}
     </section>
   );
 }

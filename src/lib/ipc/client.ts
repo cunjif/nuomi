@@ -107,7 +107,8 @@ export const ipc = {
   upsertProvider: (provider: Parameters<Commands["upsertProvider"]>[0]) =>
     unwrap(current.upsertProvider(provider)),
   listProviders: () => unwrap(current.listProviders()),
-  deleteProvider: (providerId: string) => unwrap(current.deleteProvider(providerId)),
+  deleteProvider: (providerId: string, force: boolean = false) =>
+    unwrap(current.deleteProvider(providerId, force)),
   testProviderConnection: (input: Parameters<Commands["testProviderConnection"]>[0]) =>
     unwrap(current.testProviderConnection(input)),
   listProviderModels: (input: Parameters<Commands["listProviderModels"]>[0]) =>
@@ -125,7 +126,8 @@ export const ipc = {
   checkCliAgent: (profileId: string) => unwrap(current.checkCliAgent(profileId)),
   listRoles: () => unwrap(current.listRoles()),
   upsertRole: (role: Parameters<Commands["upsertRole"]>[0]) => unwrap(current.upsertRole(role)),
-  deleteRole: (roleId: string) => unwrap(current.deleteRole(roleId)),
+  deleteRole: (roleId: string, force: boolean = false) =>
+    unwrap(current.deleteRole(roleId, force)),
   seedBuiltinRoles: () => unwrap(current.seedBuiltinRoles()),
   generateRole: (description: string) => unwrap(current.generateRole(description)),
   getRoutingRules: () => unwrap(current.getRoutingRules()),

@@ -160,6 +160,8 @@
     "agentPickerTitle": "Switch agent",
     "agentPickerSearch": "Search agents…",
     "agentPickerSetDefault": "Set as default",
+    "roleAgentGroup": "Role Agents",
+    "roleUnbound": "Unbound, configure",
     "attachmentShelfLabel": "Attachments",
     "attachmentRemove": "Remove attachment",
     "attachmentFailed": "Upload failed",
@@ -456,7 +458,16 @@
       "deleteConfirm": "Confirm delete",
       "deleted": "Role deleted",
       "deleteFailed": "Failed to delete role",
-      "empty": "No roles yet — fill in the form above to add one."
+      "empty": "No roles yet — fill in the form above to add one.",
+      "groupReady": "Ready",
+      "groupUnbound": "Unbound",
+      "bindToRole": "Bind to Role",
+      "editBinding": "Edit Binding",
+      "goBind": "Configure Binding",
+      "temperature": "Temperature",
+      "maxTokens": "Max Tokens",
+      "toolAllowlist": "Tool Allowlist",
+      "toolAllowlistHint": "Empty = no restriction (all tools allowed)"
     },
     "teams": {
       "heading": "Teams",

@@ -8,6 +8,8 @@ import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { CliAgentForm } from "./CliAgentForm";
+import type { BindingMode } from "./RoleForm";
+import { RoleBindingPanel } from "./RoleBindingPanel";
 
 const FLAVOR_LABEL_KEYS: Record<CliFlavorDto, string> = {
   claude_code: "settings.cliAgents.flavorClaudeCode",
@@ -24,6 +26,9 @@ export function CliAgentsSection(): ReactNode {
   const [versions, setVersions] = useState<Record<string, string>>({});
   /** profileId awaiting a second click on Delete (two-step confirm, keyboard friendly) */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [bindingPreset, setBindingPreset] = useState<
+    { mode: BindingMode; providerId?: string; agentProfileId?: string } | null
+  >(null);
 
   const checkMut = useMutation({
     mutationFn: (profileId: string) => ipc.checkCliAgent(profileId),
@@ -85,6 +90,13 @@ export function CliAgentsSection(): ReactNode {
               <div className="mt-1.5 flex gap-2">
                 <button
                   type="button"
+                  onClick={() => setBindingPreset({ mode: "cli", agentProfileId: profile.id })}
+                  className="rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
+                >
+                  {t("settings.roles.bindToRole")}
+                </button>
+                <button
+                  type="button"
                   onClick={() => checkMut.mutate(profile.id)}
                   disabled={checkMut.isPending}
                   aria-label={`${t("settings.cliAgents.check")} ${profile.name}`}
@@ -117,6 +129,9 @@ export function CliAgentsSection(): ReactNode {
           ))}
         </ul>
       </AsyncBoundary>
+      {bindingPreset && (
+        <RoleBindingPanel presetBinding={bindingPreset} onClose={() => setBindingPreset(null)} />
+      )}
     </section>
   );
 }

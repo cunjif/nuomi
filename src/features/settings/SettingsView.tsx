@@ -48,9 +48,11 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
 }
 
 /** U13 settings: tabbed sections (providers / roles / teams / agents / integrations / access). */
-export function SettingsView(): ReactNode {
+export function SettingsView({ initialTab }: { initialTab?: string }): ReactNode {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<TabKey>("providers");
+  const [tab, setTab] = useState<TabKey>(
+    TABS.some((item) => item.key === initialTab) ? (initialTab as TabKey) : "providers",
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">

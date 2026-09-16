@@ -159,24 +159,25 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     );
   });
 
-  it("groups roles into built-in / generated / custom sections with badges", async () => {
+  it("groups roles into ready / unbound sections with binding buttons", async () => {
     injectIpcCommands({
       listRoles: vi.fn().mockResolvedValue(
         ok([
-          role({ id: "r1", name: "Coder", builtin: true, requiredCapabilities: ["reasoning"] }),
-          role({ id: "r2", name: "weekly-bot", generated: true }),
+          role({ id: "r1", name: "Coder", builtin: true, providerId: "prov-1", requiredCapabilities: ["reasoning"] }),
+          role({ id: "r2", name: "weekly-bot", generated: true, providerId: "prov-1" }),
           role({ id: "r3", name: "mine" }),
         ]),
       ),
-      listProviders: vi.fn().mockResolvedValue(ok([])),
+      listProviders: vi.fn().mockResolvedValue(ok([provider()])),
       listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+      upsertRole: vi.fn(),
+      deleteRole: vi.fn(),
     } as never);
     renderWithProviders(<RolesSection />);
 
-    expect(await screen.findByText("Built-in presets (1)")).toBeInTheDocument();
-    expect(screen.getByText("Generated (1)")).toBeInTheDocument();
-    expect(screen.getByText("Custom (1)")).toBeInTheDocument();
-    // Built-in roles expose no delete button.
+    expect(await screen.findByText("Ready (2)")).toBeInTheDocument();
+    expect(screen.getByText("Unbound (1)")).toBeInTheDocument();
+    // Built-in roles expose no delete button but do expose a binding button.
     expect(screen.queryByRole("button", { name: /^delete coder$/i })).toBeNull();
     expect(screen.getByRole("button", { name: /^delete mine$/i })).toBeInTheDocument();
   });
@@ -203,7 +204,7 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /restore presets/i }));
     await waitFor(() => expect(seedBuiltinRoles).toHaveBeenCalled());
     // The seeded double surfaces 11 built-in presets in the grouped list.
-    expect(await screen.findByText(/Built-in presets \(11\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Unbound \(11\)/)).toBeInTheDocument();
   });
 
   it("generates a role through the Role Director dialog", async () => {

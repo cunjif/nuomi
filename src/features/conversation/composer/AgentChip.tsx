@@ -15,13 +15,15 @@ export interface AgentChipProps {
   busy: boolean;
   /** Invalidate callback after agent switch. */
   onAgentChanged: () => void;
+  /** Jump to Settings → Roles tab to bind an unbound role. */
+  onGoToSettings?: () => void;
 }
 
 /**
  * Always-visible agent indicator in the composer's bottom-left corner.
  * Click opens the AgentPickerPopover for switching.
  */
-export function AgentChip({ conversation, sessionId, busy, onAgentChanged }: AgentChipProps): ReactNode {
+export function AgentChip({ conversation, sessionId, busy, onAgentChanged, onGoToSettings }: AgentChipProps): ReactNode {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -61,6 +63,7 @@ export function AgentChip({ conversation, sessionId, busy, onAgentChanged }: Age
           sessionId={sessionId}
           onSelect={handleSelect}
           onClose={() => setOpen(false)}
+          onGoToSettings={onGoToSettings}
         />
       )}
     </div>

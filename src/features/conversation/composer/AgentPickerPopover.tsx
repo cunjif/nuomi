@@ -4,20 +4,26 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { groupAgentOptions } from "../../../lib/conversation/agentResolve";
+import { isRoleReady } from "../../../lib/conversation/roleReady";
 
 export interface AgentPickerPopoverProps {
   sessionId: string;
   onSelect: (kind: string, id: string) => Promise<void>;
   onClose: () => void;
+  /** Jump to Settings → Roles tab to bind an unbound role. */
+  onGoToSettings?: () => void;
 }
 
 /**
  * Popover for picking an agent. Shows a search input and lists agents
- * grouped by CLI agents and Roles. Clicking an item calls onSelect.
+ * grouped by CLI agents and Roles. Roles are split into ready (bound to a
+ * provider or CLI agent, selectable) and unbound (greyed with a "configure"
+ * shortcut). Clicking a ready item calls onSelect.
  */
 export function AgentPickerPopover({
   onSelect,
   onClose,
+  onGoToSettings,
 }: AgentPickerPopoverProps): ReactNode {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -27,8 +33,18 @@ export function AgentPickerPopover({
     queryFn: () => ipc.listAgentOptions(),
     staleTime: 30_000,
   });
+  const { data: roles } = useQuery({ queryKey: ["roles"], queryFn: ipc.listRoles });
 
   const { cli, role } = useMemo(() => groupAgentOptions(options ?? []), [options]);
+  const readyMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const r of roles ?? []) {
+      m.set(r.id, isRoleReady(r));
+    }
+    return m;
+  }, [roles]);
+  const readyRoles = role.filter((o) => readyMap.get(o.id) === true);
+  const unboundRoles = role.filter((o) => readyMap.get(o.id) !== true);
 
   const filterFn = (name: string): boolean =>
     search.length === 0 || name.toLowerCase().includes(search.toLowerCase());
@@ -74,10 +90,12 @@ export function AgentPickerPopover({
             ))}
           </div>
         )}
-        {role.length > 0 && (
+        {readyRoles.length > 0 && (
           <div className="px-1.5">
-            <div className="py-0.5 text-xs font-semibold text-ink-muted">Roles</div>
-            {role.filter((o) => filterFn(o.name)).map((o) => (
+            <div className="py-0.5 text-xs font-semibold text-ink-muted">
+              {t("composer.roleAgentGroup")}
+            </div>
+            {readyRoles.filter((o) => filterFn(o.name)).map((o) => (
               <button
                 key={`${o.kind}:${o.id}`}
                 type="button"
@@ -87,6 +105,28 @@ export function AgentPickerPopover({
                 <span className="flex-1 truncate">{o.name}</span>
                 {o.builtin && <span className="text-xs text-ink-muted">builtin</span>}
               </button>
+            ))}
+          </div>
+        )}
+        {unboundRoles.length > 0 && (
+          <div className="px-1.5">
+            <div className="py-0.5 text-xs font-semibold text-ink-muted">
+              {t("composer.roleUnbound")}
+            </div>
+            {unboundRoles.filter((o) => filterFn(o.name)).map((o) => (
+              <div
+                key={`${o.kind}:${o.id}`}
+                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-sm text-ink-muted/50"
+              >
+                <span className="flex-1 truncate">{o.name}</span>
+                <button
+                  type="button"
+                  onClick={() => onGoToSettings?.()}
+                  className="rounded border border-ink-accent px-1.5 py-0.5 text-[10px] text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
+                >
+                  {t("settings.roles.goBind")}
+                </button>
+              </div>
             ))}
           </div>
         )}

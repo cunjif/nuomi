@@ -160,6 +160,8 @@
     "agentPickerTitle": "切换 Agent",
     "agentPickerSearch": "搜索 Agent…",
     "agentPickerSetDefault": "设为默认",
+    "roleAgentGroup": "Role Agents",
+    "roleUnbound": "未绑定，去设置",
     "attachmentShelfLabel": "附件",
     "attachmentRemove": "移除附件",
     "attachmentFailed": "上传失败",
@@ -456,7 +458,16 @@
       "deleteConfirm": "确认删除",
       "deleted": "Role 已删除",
       "deleteFailed": "删除 Role 失败",
-      "empty": "还没有 Role，填写上方表单添加一个。"
+      "empty": "还没有 Role，填写上方表单添加一个。",
+      "groupReady": "已就绪",
+      "groupUnbound": "未绑定",
+      "bindToRole": "绑定到 Role",
+      "editBinding": "编辑绑定",
+      "goBind": "去绑定",
+      "temperature": "温度",
+      "maxTokens": "最大 Tokens",
+      "toolAllowlist": "工具白名单",
+      "toolAllowlistHint": "留空 = 不限制（全部工具可用）"
     },
     "teams": {
       "heading": "Teams",

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CapabilityDto, JsonValue, RoleInput } from "../../lib/ipc/bindings.gen";
+import type { CapabilityDto, RoleInput } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
@@ -12,21 +12,14 @@ import { fieldClass as field } from "../../components/ui/Field";
 export type BindingMode = "none" | "provider" | "cli";
 
 /** Capability choices shown as checkboxes (reasoning/image/voice/video). */
-const CAPABILITY_KEYS: ReadonlyArray<{ key: CapabilityDto; labelKey: string }> = [
+export const CAPABILITY_KEYS: ReadonlyArray<{ key: CapabilityDto; labelKey: string }> = [
   { key: "reasoning", labelKey: "capability.reasoning" },
   { key: "image", labelKey: "capability.image" },
   { key: "voice", labelKey: "capability.voice" },
   { key: "video", labelKey: "capability.video" },
 ];
 
-/** Reads the `agent_profile_id` convention key out of a role's params JSON. */
-export function readAgentProfileId(params: JsonValue): string | null {
-  if (params !== null && typeof params === "object" && !Array.isArray(params)) {
-    const value = params["agent_profile_id"];
-    if (typeof value === "string") return value;
-  }
-  return null;
-}
+export { readAgentProfileId } from "../../lib/conversation/roleReady";
 
 /** Add form for roles (`name` is the backend idempotency key). */
 export function RoleForm(): ReactNode {

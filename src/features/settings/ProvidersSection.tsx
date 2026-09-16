@@ -11,6 +11,8 @@ import {
   providerInitials,
   type ProviderTestStatus,
 } from "./ProviderForm";
+import type { BindingMode } from "./RoleForm";
+import { RoleBindingPanel } from "./RoleBindingPanel";
 
 type DotStatus = ProviderTestStatus | "untested";
 
@@ -79,6 +81,9 @@ export function ProvidersSection(): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, ProviderTestStatus>>({});
+  const [bindingPreset, setBindingPreset] = useState<
+    { mode: BindingMode; providerId?: string; agentProfileId?: string } | null
+  >(null);
 
   const providersQuery = useQuery({ queryKey: ["providers"], queryFn: ipc.listProviders });
   const providers = providersQuery.data ?? [];
@@ -160,8 +165,20 @@ export function ProvidersSection(): ReactNode {
           ) : (
             <p className="text-xs text-ink-muted">{t("provider.selectHint")}</p>
           )}
+          {selected !== null && !creating && (
+            <button
+              type="button"
+              onClick={() => setBindingPreset({ mode: "provider", providerId: selected.id })}
+              className="mt-2 rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
+            >
+              {t("settings.roles.bindToRole")}
+            </button>
+          )}
         </div>
       </div>
+      {bindingPreset && (
+        <RoleBindingPanel presetBinding={bindingPreset} onClose={() => setBindingPreset(null)} />
+      )}
     </section>
   );
 }

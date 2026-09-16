@@ -226,7 +226,7 @@ describe("ProvidersSection", () => {
     fireEvent.click(await screen.findByText("alpha"));
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
     fireEvent.click(screen.getByRole("button", { name: /delete this provider/i }));
-    await waitFor(() => expect(deleteProvider).toHaveBeenCalledWith("prov-1"));
+    await waitFor(() => expect(deleteProvider).toHaveBeenCalledWith("prov-1", false));
     expect(await screen.findByText(/select a provider/i)).toBeInTheDocument();
   });
 });
