@@ -145,6 +145,46 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0018_task_failed_status.sql"
         )),
     ),
+    (
+        19,
+        "0019_agent_profile_model_id",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0019_agent_profile_model_id.sql"
+        )),
+    ),
+    (
+        20,
+        "0020_conversation_role_agent_cli_session",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0020_conversation_role_agent_cli_session.sql"
+        )),
+    ),
+    (
+        21,
+        "0021_remove_primary_agent",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0021_remove_primary_agent.sql"
+        )),
+    ),
+    (
+        22,
+        "0022_session_soft_delete",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0022_session_soft_delete.sql"
+        )),
+    ),
+    (
+        23,
+        "0023_message_queue",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0023_message_queue.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
