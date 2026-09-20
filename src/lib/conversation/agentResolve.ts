@@ -1,8 +1,9 @@
 /**
  * Agent display helpers: flavor labels, provider names, color tokens.
  * The backend resolves agent names; these are pure presentation utilities.
+ * ADR 0013: ConversationDto.agent 移除，改用 participantAgents[0]。
  */
-import type { AgentOptionDto, ConversationDto } from "../ipc/client";
+import type { AgentOptionDto, AgentRefDto } from "../ipc/client";
 
 /** Human-readable flavor label for CLI agents. */
 export function flavorLabel(flavor: string): string {
@@ -11,21 +12,19 @@ export function flavorLabel(flavor: string): string {
       return "Claude Code";
     case "codex":
       return "Codex";
-    case "plain":
-      return "Plain";
     default:
       return flavor;
   }
 }
 
 /** Short display name for an agent ref on a conversation. */
-export function agentDisplayName(agent: ConversationDto["agent"]): string {
+export function agentDisplayName(agent: AgentRefDto | null): string {
   if (!agent) return "Default";
   return agent.name || `${agent.kind}:${agent.id}`;
 }
 
 /** True when the agent is a CLI agent (vs a role). */
-export function isCliAgent(agent: ConversationDto["agent"]): boolean {
+export function isCliAgent(agent: AgentRefDto | null): boolean {
   return agent?.kind === "cli";
 }
 

@@ -26,6 +26,7 @@ interface CommandMocks {
   toggleTheme: MockFn;
   toastError: MockFn;
   toastSuccess: MockFn;
+  toastWarn: MockFn;
 }
 
 function makeContext(overrides: Partial<CommandContext> = {}): { ctx: CommandContext; mocks: CommandMocks } {
@@ -34,6 +35,7 @@ function makeContext(overrides: Partial<CommandContext> = {}): { ctx: CommandCon
   const toggleTheme = vi.fn();
   const toastError = vi.fn();
   const toastSuccess = vi.fn();
+  const toastWarn = vi.fn();
   const ctx: CommandContext = {
     sessionId: "s1",
     ipc,
@@ -41,11 +43,11 @@ function makeContext(overrides: Partial<CommandContext> = {}): { ctx: CommandCon
     navigate,
     selectSession,
     toggleTheme,
-    toast: { error: toastError, success: toastSuccess },
+    toast: { error: toastError, success: toastSuccess, warn: toastWarn },
     t: i18n.t,
     ...overrides,
   };
-  return { ctx, mocks: { navigate, selectSession, toggleTheme, toastError, toastSuccess } };
+  return { ctx, mocks: { navigate, selectSession, toggleTheme, toastError, toastSuccess, toastWarn } };
 }
 
 function typeIntoTextarea(value: string): HTMLTextAreaElement {

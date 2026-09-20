@@ -46,6 +46,38 @@ async submitTask(sessionId: string, input: string) : Promise<Result<RunResultDto
     else return { status: "error", error: e  as any };
 }
 },
+async enqueueMessage(sessionId: string, input: string) : Promise<Result<MessageQueueItemDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("enqueue_message", { sessionId, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listMessageQueue(sessionId: string) : Promise<Result<MessageQueueItemDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_message_queue", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelMessageQueueItem(id: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_message_queue_item", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearMessageQueue(sessionId: string) : Promise<Result<number, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_message_queue", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createTask(title: string, description: string) : Promise<Result<TaskDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_task", { title, description }) };
@@ -289,6 +321,22 @@ async setOnlineAuthorized(authorized: boolean) : Promise<Result<null, IpcError>>
 async getOnlineAuthorized() : Promise<Result<boolean, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_online_authorized") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getEvolutionSettings() : Promise<Result<EvolutionSettingsDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_evolution_settings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setEvolutionSettings(settings: EvolutionSettingsDto) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_evolution_settings", { settings }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -678,6 +726,30 @@ async addConversationAgent(sessionId: string, agent: AgentRefInput) : Promise<Re
     else return { status: "error", error: e  as any };
 }
 },
+async removeConversationAgent(sessionId: string, agent: AgentRefInput) : Promise<Result<ConversationDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_conversation_agent", { sessionId, agent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteConversation(sessionId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearConversations() : Promise<Result<number, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_conversations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getAgentDetail(agentKind: string, agentId: string) : Promise<Result<AgentDetailDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_agent_detail", { agentKind, agentId }) };
@@ -812,8 +884,16 @@ async listAsrModels() : Promise<Result<AsrModelDto[], IpcError>> {
 
 export type AgentDetailDto = { kind: string; id: string; name: string; avatarUrl: string | null; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null; enabled: boolean }
 export type AgentOptionDto = { kind: string; id: string; name: string; enabled: boolean; builtin: boolean; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null }
-export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; createdAt: number; updatedAt: number }
-export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean }
+export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; modelId: string | null; 
+/**
+ * CLI 会话保持参数模板（ADR 0012 D6）。
+ */
+resumeArgs?: string | null; createdAt: number; updatedAt: number }
+export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; modelId?: string | null; 
+/**
+ * CLI 会话保持参数模板（ADR 0012 D6）。如 `--resume {session_id}`。
+ */
+resumeArgs?: string | null }
 export type AgentRefDto = { kind: string; id: string; name: string }
 export type AgentRefInput = { kind: string; id: string }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
@@ -827,7 +907,7 @@ export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error:
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
-export type ConversationDto = { id: string; title: string; kind: string; agent: AgentRefDto | null; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
+export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
 export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null }
 export type ConversationUpdateInput = { title: string | null; goal: string | null }
 /**
@@ -857,6 +937,7 @@ symbols: boolean; commands: EditorCommandDto[]; overlays: EditorOverlayDto[] }
  */
 export type EditorOverlayDto = { id: string; title: string; url: string; width: number; height: number }
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
+export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
@@ -908,11 +989,14 @@ providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKe
  * Overrides the stored per-provider proxy when non-empty.
  */
 proxy: string | null }
+export type MemoryPolicyDto = { retentionDays: number; retrieval: RetrievalStrategyDto }
+export type MessageQueueItemDto = { id: string; text: string; seq: number; createdAt: number }
 /**
  * One model exposed by a provider endpoint plus its capability tags
  * (KiloCode-style per-model capabilities).
  */
-export type ModelEntryDto = { id: string; capabilities: CapabilityDto[] }
+export type ModelEntryDto = { id: string; capabilities: CapabilityDto[]; temperature?: number | null; topP?: number | null; maxTokens?: number | null }
+export type OnlineLearningConfigDto = { authorized: boolean; allowlist: string[] }
 /**
  * A session whose `workspace_id` points to a removed workspace.
  */
@@ -975,11 +1059,14 @@ models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | n
  * Per-provider local network proxy (`http://host:port`); `None` = direct.
  */
 proxy?: string | null; enabled?: boolean }
+export type RefineConfigDto = { triggerFailures: number; minEditStrategy: RefineStrategyDto; evidenceThreshold: number; rollbackEnabled: boolean }
+export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_spec"
 /**
  * Result of removing a workspace: the removed id plus the new active id
  * (None when the registry is now empty).
  */
 export type RemoveWorkspaceResult = { removedId: string; newActiveId: string | null }
+export type RetrievalStrategyDto = "keyword" | "semantic" | "hybrid"
 export type RoleDto = { id: string; name: string; providerId: string | null; providerIds: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities: CapabilityDto[]; temperature: number | null; maxTokens: number | null; params: JsonValue; builtin: boolean; generated: boolean; ephemeral: boolean; source: JsonValue; createdAt: number; updatedAt: number }
 export type RoleInput = { name: string; providerId: string | null; 
 /**
@@ -1017,6 +1104,8 @@ export type ScheduleInput = { name: string; cronExpr: string; targetKind: string
  */
 export type SeedRolesDto = { inserted: number; updated: number; skipped: number }
 export type SessionDto = { id: string; title: string; createdAt: number; updatedAt: number }
+export type SkillCreationConfigDto = { enabled: boolean; format: SkillFormatDto }
+export type SkillFormatDto = "skill_md"
 export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
 export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 

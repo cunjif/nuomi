@@ -104,7 +104,6 @@ export function testDoubleCommands(): CommandSet {
         id: nextId("s"),
         title: `Session ${tdState.sessions.length + 1}`,
         kind: "chat",
-        agent: null,
         teamId: null,
         taskId: null,
         scheduleId: null,
@@ -138,6 +137,18 @@ export function testDoubleCommands(): CommandSet {
       events.push({ seq, kind: "message", payload: { role: "user", content: input }, createdAt: Date.now() });
       tdState.events.set(sessionId, events);
       return ok({ finalText: "", steps: 0, truncated: false, sessionId });
+    },
+    async enqueueMessage(_sessionId, input) {
+      return ok({ id: nextId("q"), text: input, seq: 1, createdAt: Date.now() });
+    },
+    async listMessageQueue(_sessionId) {
+      return ok([]);
+    },
+    async cancelMessageQueueItem(_id) {
+      return ok(null);
+    },
+    async clearMessageQueue(_sessionId) {
+      return ok(0);
     },
     async createTask(title, description) {
       const t: TaskDto = {
@@ -391,6 +402,40 @@ export function testDoubleCommands(): CommandSet {
     async getOnlineAuthorized() {
       return ok(tdState.onlineAuthorized);
     },
+    async getEvolutionSettings() {
+      if (tdState.evolutionSettings) {
+        return ok({ ...tdState.evolutionSettings });
+      }
+      return ok({
+        onlineLearning: {
+          authorized: tdState.onlineAuthorized,
+          allowlist: [
+            "github.com",
+            "raw.githubusercontent.com",
+            "deepseek.com",
+            "shikigami.dev",
+            "t3.codes",
+            "1code.dev",
+            "aoagents.dev",
+            "parallelcode.app",
+            "agor.live",
+          ],
+        },
+        refine: {
+          triggerFailures: 3,
+          minEditStrategy: "prompt_note" as const,
+          evidenceThreshold: 0.8,
+          rollbackEnabled: true,
+        },
+        skillCreation: { enabled: false, format: "skill_md" as const },
+        memoryPolicy: { retentionDays: 90, retrieval: "keyword" as const },
+      });
+    },
+    async setEvolutionSettings(settings) {
+      tdState.evolutionSettings = { ...settings };
+      tdState.onlineAuthorized = settings.onlineLearning.authorized;
+      return ok(null);
+    },
     async listAgentProfiles() {
       return ok([...tdState.agentProfiles]);
     },
@@ -405,6 +450,7 @@ export function testDoubleCommands(): CommandSet {
         existing.env = { ...profile.env };
         existing.workingDir = profile.workingDir;
         existing.enabled = profile.enabled;
+        existing.modelId = profile.modelId ?? null;
         existing.updatedAt = now;
         return ok({ ...existing });
       }
@@ -418,6 +464,7 @@ export function testDoubleCommands(): CommandSet {
         env: { ...profile.env },
         workingDir: profile.workingDir,
         enabled: profile.enabled,
+        modelId: profile.modelId ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -805,7 +852,6 @@ export function testDoubleCommands(): CommandSet {
         id: nextId("s"),
         title: input.title ?? `Session ${tdState.sessions.length + 1}`,
         kind: input.kind,
-        agent: null,
         teamId: input.teamId,
         taskId: null,
         scheduleId: null,
@@ -815,7 +861,7 @@ export function testDoubleCommands(): CommandSet {
         mainAgentId: null,
         routeMode: null,
         whiteboardRouteMode: null,
-        participantAgents: [],
+        participantAgents: input.agent ? [{ kind: input.agent.kind, id: input.agent.id, name: input.agent.id }] : [],
         todoList: [],
       };
       tdState.sessions.unshift(s);
@@ -834,12 +880,10 @@ export function testDoubleCommands(): CommandSet {
     async setConversationAgent(sessionId, agent) {
       const s = tdState.sessions.find((s) => s.id === sessionId);
       if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
-      const updated: ConversationDto = {
-        ...s,
-        agent: agent ? { kind: agent.kind, id: agent.id, name: agent.id } : null,
-      };
-      Object.assign(s, updated);
-      return ok(updated);
+      // ADR 0013: 整体替换参与者列表。
+      s.participantAgents = agent ? [{ kind: agent.kind, id: agent.id, name: agent.id }] : [];
+      s.updatedAt = Date.now();
+      return ok(s);
     },
     async listAgentOptions() {
       return ok<import("./bindings.gen").AgentOptionDto[]>([]);
@@ -864,6 +908,32 @@ export function testDoubleCommands(): CommandSet {
       }
       s.updatedAt = Date.now();
       return ok(s);
+    },
+    async removeConversationAgent(sessionId, agent) {
+      const s = tdState.sessions.find((s) => s.id === sessionId);
+      if (!s) return err("conversation.not_found", `session#${sessionId} not found`);
+      if (s.participantAgents.length <= 1) {
+        return err("validation", "cannot remove the last participant");
+      }
+      s.participantAgents = s.participantAgents.filter(
+        (a) => !(a.kind === agent.kind && a.id === agent.id),
+      );
+      if (s.participantAgents.length === 1 && s.kind === "group") {
+        s.kind = "chat";
+      }
+      s.updatedAt = Date.now();
+      return ok(s);
+    },
+    async deleteConversation(sessionId) {
+      const idx = tdState.sessions.findIndex((s) => s.id === sessionId);
+      if (idx < 0) return err("conversation.not_found", `session#${sessionId} not found`);
+      tdState.sessions.splice(idx, 1);
+      return ok(null);
+    },
+    async clearConversations() {
+      const count = tdState.sessions.length;
+      tdState.sessions = [];
+      return ok(count);
     },
     async getAgentDetail(agentKind, agentId) {
       const detail: AgentDetailDto = {

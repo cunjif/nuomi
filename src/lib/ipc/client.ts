@@ -74,6 +74,14 @@ export const ipc = {
     unwrap(current.listEvents(sessionId, afterSeq)),
   submitTask: (sessionId: string, input: string) =>
     unwrap(current.submitTask(sessionId, input)),
+  enqueueMessage: (sessionId: string, input: string) =>
+    unwrap(current.enqueueMessage(sessionId, input)),
+  listMessageQueue: (sessionId: string) =>
+    unwrap(current.listMessageQueue(sessionId)),
+  cancelMessageQueueItem: (id: string) =>
+    unwrap(current.cancelMessageQueueItem(id)),
+  clearMessageQueue: (sessionId: string) =>
+    unwrap(current.clearMessageQueue(sessionId)),
   createTask: (title: string, description: string) =>
     unwrap(current.createTask(title, description)),
   listTasks: (status: string | null) => unwrap(current.listTasks(status)),
@@ -169,6 +177,12 @@ export const ipc = {
     unwrap(current.updateConversation(sessionId, input)),
   addConversationAgent: (sessionId: string, agent: AgentRefInput) =>
     unwrap(current.addConversationAgent(sessionId, agent)),
+  removeConversationAgent: (sessionId: string, agent: AgentRefInput) =>
+    unwrap(current.removeConversationAgent(sessionId, agent)),
+  deleteConversation: (sessionId: string) =>
+    unwrap(current.deleteConversation(sessionId)),
+  clearConversations: () =>
+    unwrap(current.clearConversations()),
   getAgentDetail: (agentKind: string, agentId: string) =>
     unwrap(current.getAgentDetail(agentKind, agentId)),
   submitMessage: (

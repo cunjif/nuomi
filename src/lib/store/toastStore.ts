@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 
-export type ToastKind = "error" | "success";
+export type ToastKind = "error" | "success" | "warn";
 
 export interface ToastItem {
   id: number;
@@ -35,4 +35,5 @@ export const useToastStore = create<ToastState>((set) => ({
 export const toast = {
   error: (message: string): void => useToastStore.getState().push("error", message),
   success: (message: string): void => useToastStore.getState().push("success", message),
+  warn: (message: string): void => useToastStore.getState().push("warn", message),
 };

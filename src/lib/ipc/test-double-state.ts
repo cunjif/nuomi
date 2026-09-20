@@ -17,6 +17,7 @@ import type {
   TaskDto,
   TeamDto,
   WhiteBoardNoteDto,
+  EvolutionSettingsDto,
 } from "./bindings.gen";
 
 interface DoubleState {
@@ -41,6 +42,7 @@ interface DoubleState {
   whiteboardNotes: WhiteBoardNoteDto[];
   sensitiveTools: string[] | null;
   onlineAuthorized: boolean;
+  evolutionSettings: EvolutionSettingsDto | null;
   /** Persisted capability-routing rules (get/setRoutingRules round-trip). */
   routingRules: { preferLocal: boolean; capabilityOverrides: Record<string, string> };
   /** App KV settings backing store (get/setAppSetting round-trip). */
@@ -71,6 +73,7 @@ export const tdState: DoubleState = {
   whiteboardNotes: [],
   sensitiveTools: null,
   onlineAuthorized: false,
+  evolutionSettings: null,
   routingRules: { preferLocal: false, capabilityOverrides: {} },
   appSettings: new Map(),
   workspaceRoot: "C:\\workspace",
@@ -107,7 +110,6 @@ export function seedConversation(row: Partial<ConversationDto> & { id: string })
   tdState.sessions.push({
     title: row.id,
     kind: "chat",
-    agent: null,
     teamId: null,
     taskId: null,
     scheduleId: null,
@@ -140,6 +142,27 @@ export function seedProvider(row: Partial<ProviderDto> & { id: string }): void {
   });
 }
 
+export function seedRole(row: Partial<RoleDto> & { id: string }): void {
+  tdState.roles.push({
+    name: row.id,
+    providerId: null,
+    providerIds: [],
+    systemPromptOverride: null,
+    toolAllowlist: [],
+    requiredCapabilities: [],
+    temperature: null,
+    maxTokens: null,
+    params: {},
+    builtin: false,
+    generated: false,
+    ephemeral: false,
+    source: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...row,
+  });
+}
+
 /** Wipe all double state between tests. */
 export function tdReset(): void {
   tdState.sessions.length = 0;
@@ -157,6 +180,7 @@ export function tdReset(): void {
   tdState.whiteboardNotes.length = 0;
   tdState.sensitiveTools = null;
   tdState.onlineAuthorized = false;
+  tdState.evolutionSettings = null;
   tdState.routingRules = { preferLocal: false, capabilityOverrides: {} };
   tdState.appSettings.clear();
   tdState.workspaceRoot = "C:\\workspace";

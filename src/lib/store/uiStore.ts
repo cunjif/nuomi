@@ -95,7 +95,7 @@ interface UiState {
   setActiveArea: (area: ActiveArea) => void;
   setWorkbenchSubTab: (sub: WorkbenchSubTab) => void;
   setTheme: (theme: Theme) => void;
-  selectSession: (sessionId: string) => void;
+  selectSession: (sessionId: string | null) => void;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
