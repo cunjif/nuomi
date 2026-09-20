@@ -105,6 +105,8 @@ fn cli_profile_fixture() -> AgentProfile {
         enabled: true,
         created_at: 1,
         updated_at: 1,
+        model_id: None,
+        resume_args: None,
     }
 }
 

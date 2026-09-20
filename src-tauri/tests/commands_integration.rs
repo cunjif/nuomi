@@ -226,6 +226,9 @@ fn provider_input(
             models: vec![commands::ModelEntryDto {
                 id: "m-1".into(),
                 capabilities: caps,
+                temperature: None,
+                top_p: None,
+                max_tokens: None,
             }],
             ..Default::default()
         },

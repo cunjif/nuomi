@@ -468,6 +468,8 @@ async fn cli_agent_profile_joins_pipeline_as_team_member() {
         enabled: true,
         created_at: 1,
         updated_at: 1,
+        model_id: None,
+        resume_args: None,
     };
 
     {

@@ -31,6 +31,8 @@ fn input(name: &str, command: &str) -> AgentProfileInput {
         env: BTreeMap::from([("NUOMI_TEST".to_string(), "1".to_string())]),
         working_dir: None,
         enabled: true,
+        model_id: None,
+        resume_args: None,
     }
 }
 

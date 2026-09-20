@@ -18,6 +18,7 @@ fn openai_request() -> ChatRequest {
         max_tokens: Some(128),
         cache_retention: Default::default(),
         cache_scope: None,
+        external_session_id: None,
     }
 }
 

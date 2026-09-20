@@ -105,6 +105,44 @@ pub async fn submit_task(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn enqueue_message(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    input: String,
+) -> Result<commands::MessageQueueItemDto, IpcError> {
+    commands::impl_enqueue_message(app_handle, &state, session_id, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_message_queue(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<commands::MessageQueueItemDto>, IpcError> {
+    commands::impl_list_message_queue(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_message_queue_item(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), IpcError> {
+    commands::impl_cancel_message_queue_item(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_message_queue(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<usize, IpcError> {
+    commands::impl_clear_message_queue(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_task(
     state: tauri::State<'_, AppState>,
     title: String,
@@ -382,6 +420,23 @@ pub async fn set_online_authorized(
 #[specta::specta]
 pub async fn get_online_authorized(state: tauri::State<'_, AppState>) -> Result<bool, IpcError> {
     commands::impl_get_online_authorized(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_evolution_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::EvolutionSettingsDto, IpcError> {
+    commands::impl_get_evolution_settings(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_evolution_settings(
+    state: tauri::State<'_, AppState>,
+    settings: commands::EvolutionSettingsDto,
+) -> Result<(), IpcError> {
+    commands::impl_set_evolution_settings(&state, settings).await
 }
 
 #[tauri::command]
@@ -749,6 +804,33 @@ pub async fn add_conversation_agent(
     agent: commands::AgentRefInput,
 ) -> Result<commands::ConversationDto, IpcError> {
     commands::impl_add_conversation_agent(&state, session_id, agent).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_conversation_agent(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    agent: commands::AgentRefInput,
+) -> Result<commands::ConversationDto, IpcError> {
+    commands::impl_remove_conversation_agent(&state, session_id, agent).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_conversations(
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, IpcError> {
+    commands::impl_clear_conversations(&state).await
 }
 
 #[tauri::command]

@@ -94,10 +94,10 @@ fn setup_provider_and_role(
     migrations::run(&db.0).unwrap();
     repos::providers::insert_provider(&db.0, &provider_cfg(provider_id, true)).unwrap();
     repos::roles::insert(&db.0, &role_cfg(role_id, Some(provider_id))).unwrap();
-    // Bind role to session.
+    // ADR 0013: Bind role to session via conversation_participants (not sessions.agent_*).
     db.0
         .execute(
-            "UPDATE sessions SET agent_kind = 'role', agent_ref_id = ?1 WHERE id = ?2",
+            "INSERT OR IGNORE INTO conversation_participants (session_id, agent_kind, agent_ref_id, joined_at) VALUES (?2, 'role', ?1, 0)",
             rusqlite::params![role_id, session_id],
         )
         .unwrap();
@@ -276,15 +276,15 @@ async fn ac6_force_delete_role_nullifies_refs() {
 
     let db = Db::open(&db_str(&db_path)).unwrap();
     assert!(repos::roles::get(&db.0, "r1").is_err(), "role should be deleted");
-    // Session agent binding is nullified.
-    let session_row: (Option<String>, Option<String>) = db.0
+    // ADR 0013: Session agent binding removed — check conversation_participants is cleared.
+    let participant_count: i64 = db.0
         .query_row(
-            "SELECT agent_kind, agent_ref_id FROM sessions WHERE id = ?1",
+            "SELECT count(*) FROM conversation_participants WHERE session_id = ?1 AND agent_kind = 'role' AND agent_ref_id = 'r1'",
             rusqlite::params![session.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert!(session_row.0.is_none() && session_row.1.is_none());
+    assert_eq!(participant_count, 0, "role ref should be removed from participants");
 }
 
 #[tokio::test]

@@ -36,6 +36,8 @@ fn cli_profile(flavor: CliFlavor, env: serde_json::Value) -> AgentProfile {
         enabled: true,
         created_at: 0,
         updated_at: 0,
+        model_id: None,
+        resume_args: None,
     }
 }
 
@@ -92,6 +94,7 @@ fn bare_request(user: &str) -> ChatRequest {
         max_tokens: None,
         cache_retention: Default::default(),
         cache_scope: None,
+        external_session_id: None,
     }
 }
 

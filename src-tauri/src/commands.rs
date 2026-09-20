@@ -10,13 +10,14 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use tauri::Manager;
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
     AgentProfile, AgentRefKind, CliFlavor, ConversationKind, EventRecord, Integration,
     IntegrationKind, ProviderConfig, ProviderProtocol, Role, RunState, Schedule,
-    ScheduleSessionMode, ScheduleTargetKind, Session, Task, TaskStatus, Team, TeamTopology,
-    WhiteBoardNote,
+    ScheduleSessionMode, ScheduleTargetKind, Session, SessionCliHandle, Task, TaskStatus, Team,
+    TeamTopology, WhiteBoardNote,
 };
 use nuomi_core::evolution::research::{
     online_authorized as core_online_authorized, set_online_authorized,
@@ -32,7 +33,7 @@ use nuomi_core::services::{
     check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
     delete_and_nullify_role_refs, detect_missing_provider, emit_env_fallback,
     emit_materialize_warnings, emit_materialized, emit_provider_missing, emit_role_applied,
-    materialize_single_role, resolve_agent, run_team as core_run_team, MissingProviderHint,
+    materialize_single_role, resolve_participants, run_team as core_run_team, MissingProviderHint,
     ResolvedAgent, SingleRoleContext, TeamRunOutcome,
 };
 use nuomi_core::store::{migrations, repos, Db, StoreError};
@@ -98,6 +99,46 @@ pub async fn impl_list_events(
     Ok(records.into_iter().map(EventDto::from).collect())
 }
 
+/// Persists the CLI Agent's own session id back to `session_cli_handles`
+/// (ADR 0012 D8). Called after each conversation turn; no-op when the
+/// provider was not a CLI agent or did not report a session id.
+async fn upsert_cli_handle(
+    db_path: &str,
+    session_id: &str,
+    cli_handle: &Option<(String, Option<String>, Option<String>, Option<usize>)>,
+    result: &LoopRunResult,
+) -> Result<(), IpcError> {
+    let Some((role_agent_id, agent_profile_id, _, _)) = cli_handle else {
+        return Ok(());
+    };
+    let Some(ref cli_session_id) = result.cli_session_id else {
+        return Ok(());
+    };
+    let sid = session_id.to_string();
+    let role_id = role_agent_id.clone();
+    let profile_id = agent_profile_id.clone().unwrap_or_default();
+    let cli_id = cli_session_id.clone();
+    let path = db_path.to_string();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::session_cli_handles::upsert(
+            &db.0,
+            &SessionCliHandle {
+                session_id: sid,
+                role_agent_id: role_id,
+                agent_profile_id: profile_id,
+                cli_session_id: Some(cli_id),
+                updated_at: now_ms(),
+            },
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(())
+}
+
 /// Runs one conversation turn against an explicit session: history is
 /// loaded from (and persisted to) that session, so two conversations can
 /// run concurrently and a message never lands in the wrong transcript.
@@ -122,29 +163,103 @@ pub async fn run_conversation_turn(
     // `finish` is always called — even on error paths (`?` inside the block
     // returns from the block, not the function).
     let result = {
-        // Load session row + resolve agent binding (single spawn_blocking).
+        // Load session row + resolve participants (ADR 0013: multi-participant
+        // group chat). Wrapped in a block so that `finish` is always called.
         let db_path = state.db_path.clone();
         let sid_load = session_id.to_string();
-        let (session, resolved, missing_hint) = tokio::task::spawn_blocking(
-            move || -> Result<(Session, Option<ResolvedAgent>, Option<MissingProviderHint>), IpcError> {
-                let db = Db::open(&db_path)?;
-                let session = repos::sessions::get(&db.0, &sid_load)
-                    .map_err(|_| IpcError::new("session.not_found", "session not found"))?;
-                let resolved = resolve_agent(&db.0, &session).ok().flatten();
-                // Detect missing provider for Role-bound agents (AC6 runtime).
-                let missing_hint = match &resolved {
-                    Some(r) if matches!(r.kind, AgentRefKind::Role) => {
-                        repos::roles::get(&db.0, &r.id)
+        let (session, participants, missing_hint, cli_handle) =
+            tokio::task::spawn_blocking(
+                move || -> Result<
+                    (
+                        Session,
+                        Vec<ResolvedAgent>,
+                        Option<MissingProviderHint>,
+                        Option<(String, Option<String>, Option<String>, Option<usize>)>,
+                    ),
+                    IpcError,
+                > {
+                    let db = Db::open(&db_path)?;
+                    let session = repos::sessions::get(&db.0, &sid_load)
+                        .map_err(|_| IpcError::new("session.not_found", "session not found"))?;
+                    let participants =
+                        resolve_participants(&db.0, &session.id).ok().unwrap_or_default();
+                    tracing::info!(
+                        session_id = %sid_load,
+                        count = participants.len(),
+                        ids = ?participants.iter().map(|p| (&p.kind, &p.id)).collect::<Vec<_>>(),
+                        "resolved participants",
+                    );
+                    let resolved = participants.first().cloned();
+                    // Detect missing provider for Role-bound agents (AC6 runtime).
+                    let missing_hint = match &resolved {
+                        Some(r) if matches!(r.kind, AgentRefKind::Role) => {
+                            repos::roles::get(&db.0, &r.id)
+                                .ok()
+                                .and_then(|role| detect_missing_provider(&role))
+                        }
+                        _ => None,
+                    };
+                    // Look up CLI session handle for Role agents (ADR 0012 D8).
+                    // Detect binding change: if the handle's agent_profile_id
+                    // differs from the current binding, clear the handle and
+                    // pass truncated context (ADR 0012 D7).
+                    let cli_handle = match &resolved {
+                        Some(r) if matches!(r.kind, AgentRefKind::Role) => {
+                            let current_profile_id = repos::roles::get(&db.0, &r.id)
+                                .ok()
+                                .and_then(|role| {
+                                    role.params
+                                        .get("agent_profile_id")
+                                        .and_then(serde_json::Value::as_str)
+                                        .map(|s| s.to_string())
+                                });
+                            let existing_handle = repos::session_cli_handles::get(
+                                &db.0,
+                                &sid_load,
+                                &r.id,
+                            )
                             .ok()
-                            .and_then(|role| detect_missing_provider(&role))
-                    }
-                    _ => None,
-                };
-                Ok((session, resolved, missing_hint))
-            },
-        )
-        .await
-        .map_err(join_err)??;
+                            .flatten();
+                            let (external_session_id, max_history_chars) =
+                                match &existing_handle {
+                                    Some(h) if h.agent_profile_id
+                                        != current_profile_id.clone().unwrap_or_default() =>
+                                    {
+                                        // Binding changed: clear old handle,
+                                        // start fresh with truncated context.
+                                        let _ = repos::session_cli_handles::clear(
+                                            &db.0,
+                                            &sid_load,
+                                            &r.id,
+                                        );
+                                        let handover_tokens = repos::settings::get(
+                                            &db.0,
+                                            "cli_context_handover_tokens",
+                                        )
+                                        .ok()
+                                        .flatten()
+                                        .and_then(|s| s.parse::<usize>().ok())
+                                        .unwrap_or(65536);
+                                        // tokens → chars (≈4 chars/token).
+                                        (None, Some(handover_tokens * 4))
+                                    }
+                                    Some(h) => (h.cli_session_id.clone(), None),
+                                    None => (None, None),
+                                };
+                            Some((
+                                r.id.clone(),
+                                current_profile_id,
+                                external_session_id,
+                                max_history_chars,
+                            ))
+                        }
+                        _ => None,
+                    };
+                    Ok((session, participants, missing_hint, cli_handle))
+                },
+            )
+            .await
+            .map_err(join_err)??;
 
         // Emit provider.missing hint if detected (non-blocking warning).
         if let Some(ref hint) = missing_hint {
@@ -171,13 +286,24 @@ pub async fn run_conversation_turn(
                 steps: outcome.rounds,
                 truncated: !outcome.converged,
                 transcript: Vec::new(),
+                cli_session_id: None,
             }
+        } else if participants.len() > 1 {
+            // ADR 0013: IM group chat — Selector mode. First participant is
+            // the Selector; it picks which of the remaining agents should
+            // respond to the user message.
+            run_selector_turn(state, session_id, text, &token, &participants).await?
         } else {
             // Single role path: materialize from DB config (D1).
+            let resolved = participants.first().cloned();
             let db_path = state.db_path.clone();
             let secrets = state.secrets.clone();
             let cwd = Some(state.current_workspace());
             let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref()).await?;
+            let external_session_id =
+                cli_handle.as_ref().and_then(|(_, _, sid, _)| sid.clone());
+            let max_history_chars =
+                cli_handle.as_ref().and_then(|(_, _, _, m)| *m);
 
             match ctx {
                 SingleRoleContext::Materialized {
@@ -207,7 +333,7 @@ pub async fn run_conversation_turn(
                                 .ok();
                         }
                     }
-                    state
+                    let result = state
                         .kernel
                         .run_task_in_session(
                             session_id,
@@ -216,8 +342,19 @@ pub async fn run_conversation_turn(
                             Some(provider),
                             Some(model),
                             overlay,
+                            external_session_id,
+                            max_history_chars,
                         )
-                        .await?
+                        .await?;
+                    // P1-6: CLI handle persistence is best-effort. The
+                    // reply is already persisted at this point; a failure
+                    // here (e.g. DB write error) should not surface as an
+                    // IPC error — that would make the frontend retry and
+                    // duplicate the message.
+                    if let Err(e) = upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result).await {
+                        tracing::warn!(error = %e, session_id, "failed to persist cli handle; reply is already saved");
+                    }
+                    result
                 }
                 SingleRoleContext::EnvFallback => {
                     let bus = state.kernel.context().bus();
@@ -225,7 +362,7 @@ pub async fn run_conversation_turn(
                     emit_env_fallback(&bus, &db_path, session_id)
                         .await
                         .ok();
-                    state
+                    let result = state
                         .kernel
                         .run_task_in_session(
                             session_id,
@@ -234,8 +371,15 @@ pub async fn run_conversation_turn(
                             None,
                             None,
                             None,
+                            external_session_id,
+                            max_history_chars,
                         )
-                        .await?
+                        .await?;
+                    // P1-6: same best-effort CLI handle persistence.
+                    if let Err(e) = upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result).await {
+                        tracing::warn!(error = %e, session_id, "failed to persist cli handle; reply is already saved");
+                    }
+                    result
                 }
             }
         }
@@ -253,12 +397,468 @@ pub async fn run_conversation_turn(
     })
 }
 
+/// ADR 0013: IM group chat Selector mode. The first participant acts as
+/// Selector — it receives the user message plus a list of candidate agents
+/// and replies with the id of the agent who should respond. The selected
+/// agent then processes the original user message.
+async fn run_selector_turn(
+    state: &AppState,
+    session_id: &str,
+    text: &str,
+    token: &CancellationToken,
+    participants: &[ResolvedAgent],
+) -> Result<LoopRunResult, IpcError> {
+    let selector = &participants[0];
+    let candidates = &participants[1..];
+
+    tracing::info!(
+        session_id,
+        selector_id = %selector.id,
+        selector_name = %selector.name,
+        candidate_count = candidates.len(),
+        "group chat: selector mode",
+    );
+
+    // 1. Materialize Selector agent.
+    let db_path = state.db_path.clone();
+    let secrets = state.secrets.clone();
+    let cwd = Some(state.current_workspace());
+    let selector_ctx = materialize_single_role(db_path, secrets, cwd, Some(selector))
+        .await
+        .map_err(|e| IpcError::new("selector.materialize_failed", &e.to_string()))?;
+
+    // 2. Build selector prompt with candidate list.
+    let candidate_list = candidates
+        .iter()
+        .map(|p| format!("- id: {}, name: {}", p.id, p.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let selector_prompt = format!(
+        "You are a selector. Choose the best agent to respond to the user message.\n\n\
+         Available agents:\n{}\n\n\
+         User message: {}\n\n\
+         Reply with ONLY the id of the chosen agent.",
+        candidate_list, text
+    );
+
+    // 3. Run Selector to pick the responding agent.
+    let selector_result =
+        run_single_role_context(state, session_id, &selector_prompt, token, selector_ctx).await?;
+
+    tracing::info!(
+        session_id,
+        selector_reply = %selector_result.final_text,
+        "selector responded",
+    );
+
+    // 4. Parse selector reply — find the candidate whose id appears in the reply.
+    let selected = candidates
+        .iter()
+        .find(|p| selector_result.final_text.contains(&p.id))
+        .or_else(|| candidates.first())
+        .cloned();
+
+    tracing::info!(
+        session_id,
+        selected_id = ?selected.as_ref().map(|p| &p.id),
+        selected_name = ?selected.as_ref().map(|p| &p.name),
+        "selected agent for response",
+    );
+
+    // 5. Materialize and run the selected agent with the original user message.
+    let db_path = state.db_path.clone();
+    let secrets = state.secrets.clone();
+    let cwd = Some(state.current_workspace());
+    let selected_ctx = materialize_single_role(db_path, secrets, cwd, selected.as_ref())
+        .await
+        .map_err(|e| IpcError::new("selected.materialize_failed", &e.to_string()))?;
+
+    run_single_role_context(state, session_id, text, token, selected_ctx).await
+}
+
+/// Helper: run a SingleRoleContext (Materialized or EnvFallback) through the
+/// kernel. Emits materialized/env_fallback events for UI diagnostics.
+async fn run_single_role_context(
+    state: &AppState,
+    session_id: &str,
+    text: &str,
+    token: &CancellationToken,
+    ctx: SingleRoleContext,
+) -> Result<LoopRunResult, IpcError> {
+    match ctx {
+        SingleRoleContext::Materialized {
+            provider,
+            model,
+            overlay,
+            warnings,
+        } => {
+            let provider_id = provider.id().to_string();
+            let bus = state.kernel.context().bus();
+            let db_path = state.db_path.clone();
+            emit_materialized(&bus, &db_path, session_id, &provider_id)
+                .await
+                .ok();
+            if !warnings.is_empty() {
+                let db_path = state.db_path.clone();
+                emit_materialize_warnings(&bus, &db_path, session_id, &warnings)
+                    .await
+                    .ok();
+            }
+            state
+                .kernel
+                .run_task_in_session(
+                    session_id,
+                    text,
+                    Some(token.clone()),
+                    Some(provider),
+                    Some(model),
+                    overlay,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|e| IpcError::new("agent.run_failed", &e.to_string()))
+        }
+        SingleRoleContext::EnvFallback => {
+            let bus = state.kernel.context().bus();
+            let db_path = state.db_path.clone();
+            emit_env_fallback(&bus, &db_path, session_id).await.ok();
+            state
+                .kernel
+                .run_task_in_session(
+                    session_id,
+                    text,
+                    Some(token.clone()),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|e| IpcError::new("agent.run_failed", &e.to_string()))
+        }
+    }
+}
+
 pub async fn impl_submit_task(
     state: &AppState,
     session_id: String,
     input: String,
 ) -> Result<RunResultDto, IpcError> {
-    run_conversation_turn(state, &session_id, &input).await
+    // P1-1: use try_set_busy so we don't clobber a running turn. If the
+    // agent is already busy, the frontend should route through
+    // `enqueue_message` instead of `submit_task`.
+    let acquired = {
+        let db_path = state.db_path.clone();
+        let sid = session_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<bool, StoreError> {
+            let db = Db::open(&db_path)?;
+            repos::sessions::try_set_busy(&db.0, &sid)
+        })
+        .await
+        .map_err(join_err)??
+    };
+    if !acquired {
+        return Err(IpcError::new(
+            "session.agent_busy",
+            "agent is already processing a turn; use enqueue_message instead",
+        ));
+    }
+    let result = run_conversation_turn(state, &session_id, &input).await;
+    // Release the busy lock and notify the frontend.
+    release_busy_and_emit(state, &session_id).await;
+    result
+}
+
+/// ADR 0015: Marks the session's agent busy/idle in the DB.
+async fn set_agent_busy(state: &AppState, session_id: &str, busy: bool) {
+    let db_path = state.db_path.clone();
+    let sid = session_id.to_string();
+    let _ = tokio::task::spawn_blocking(move || -> Result<(), StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::sessions::set_busy(&db.0, &sid, busy)
+    })
+    .await;
+}
+
+/// ADR 0015: Emits `session.turn_end` with the remaining queue length so
+/// the frontend can refresh the queue list. Does NOT touch the busy flag
+/// — used by the drainer between turns to keep the lock held (P0-2 fix).
+async fn emit_turn_end(state: &AppState, session_id: &str) {
+    let db_path = state.db_path.clone();
+    let sid = session_id.to_string();
+    let remaining = tokio::task::spawn_blocking(move || -> Result<i64, StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::message_queue::count_queued(&db.0, &sid)
+    })
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .unwrap_or(0);
+    state.kernel.context().publish(nuomi_core::harness::Event::new(
+        "session.turn_end",
+        serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
+    ));
+}
+
+/// ADR 0015: Releases the busy lock (sets `agent_busy = 0`) and emits
+/// `session.turn_end`. Used by `impl_submit_task` after a direct (non-
+/// queued) turn completes.
+async fn release_busy_and_emit(state: &AppState, session_id: &str) {
+    let db_path = state.db_path.clone();
+    let sid = session_id.to_string();
+    let remaining = tokio::task::spawn_blocking(move || -> Result<i64, StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::sessions::set_busy(&db.0, &sid, false)?;
+        repos::message_queue::count_queued(&db.0, &sid)
+    })
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .unwrap_or(0);
+    state.kernel.context().publish(nuomi_core::harness::Event::new(
+        "session.turn_end",
+        serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
+    ));
+}
+
+// ---------------------------------------------------- ADR 0015: message queue
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageQueueItemDto {
+    pub id: String,
+    pub text: String,
+    pub seq: i64,
+    pub created_at: i64,
+}
+
+/// Enqueues a message. If the agent is idle, spawns a background loop that
+/// drains the queue turn by turn. Returns immediately (does not wait for
+/// the turn to complete).
+pub async fn impl_enqueue_message(
+    app_handle: tauri::AppHandle,
+    state: &AppState,
+    session_id: String,
+    input: String,
+) -> Result<MessageQueueItemDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let sid = session_id.clone();
+    let text = input.clone();
+    let entry = tokio::task::spawn_blocking(move || -> Result<nuomi_core::domain::MessageQueueEntry, StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::message_queue::enqueue(&db.0, &sid, &text)
+    })
+    .await
+    .map_err(join_err)??;
+
+    // Try to acquire the busy lock. If successful, spawn the queue drainer.
+    let acquired = {
+        let db_path = state.db_path.clone();
+        let sid = session_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<bool, StoreError> {
+            let db = Db::open(&db_path)?;
+            repos::sessions::try_set_busy(&db.0, &sid)
+        })
+        .await
+        .map_err(join_err)??
+    };
+    if acquired {
+        let app_handle = app_handle.clone();
+        let sid = session_id.clone();
+        tokio::task::spawn(async move {
+            process_queue(app_handle, sid).await;
+        });
+    }
+
+    Ok(MessageQueueItemDto {
+        id: entry.id,
+        text: entry.text,
+        seq: entry.seq,
+        created_at: entry.created_at,
+    })
+}
+
+/// Background queue drainer: dequeues and processes messages one by one
+/// until the queue is empty, then exits (releasing the busy lock).
+///
+/// Invariants (P0-2/P0-3/P0-4 fixes):
+/// - The busy flag is held for the *entire* drain loop, not released
+///   between turns. This prevents a second drainer from spawning while
+///   the first is still running.
+/// - Turn errors are recorded as `failed` (not `done`) and surfaced to
+///   the frontend via `session.queue_error`; the entry is not retried.
+/// - Before exiting, a double-check prevents lost-wakeup: after dequeue
+///   returns None we re-count, and after releasing busy we re-count +
+///   re-acquire. If a producer enqueued in the window, we continue.
+async fn process_queue(app_handle: tauri::AppHandle, session_id: String) {
+    loop {
+        let state = app_handle.state::<AppState>();
+        // Dequeue the oldest queued message.
+        let entry = {
+            let db_path = state.db_path.clone();
+            let sid = session_id.clone();
+            tokio::task::spawn_blocking(move || -> Result<Option<nuomi_core::domain::MessageQueueEntry>, StoreError> {
+                let db = Db::open(&db_path)?;
+                repos::message_queue::dequeue(&db.0, &sid)
+            })
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+        };
+        match entry {
+            Some(e) => {
+                let turn_result = run_conversation_turn(&state, &session_id, &e.text).await;
+                match turn_result {
+                    Ok(_) => {
+                        // Success — mark done.
+                        let db_path = state.db_path.clone();
+                        let id = e.id.clone();
+                        let _ = tokio::task::spawn_blocking(move || -> Result<(), StoreError> {
+                            let db = Db::open(&db_path)?;
+                            repos::message_queue::mark_done(&db.0, &id)
+                        })
+                        .await;
+                    }
+                    Err(err) => {
+                        // P0-3: turn failed — mark failed (not done) and
+                        // surface the error to the frontend so the user
+                        // can see/retry. Do not swallow.
+                        let db_path = state.db_path.clone();
+                        let id = e.id.clone();
+                        let _ = tokio::task::spawn_blocking(move || -> Result<(), StoreError> {
+                            let db = Db::open(&db_path)?;
+                            repos::message_queue::mark_failed(&db.0, &id)
+                        })
+                        .await;
+                        let err_msg = match &err {
+                            crate::ipc_error::IpcError::Generic { message, .. } => message.clone(),
+                        };
+                        state.kernel.context().publish(nuomi_core::harness::Event::new(
+                            "session.queue_error",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "queueId": e.id,
+                                "text": e.text,
+                                "error": err_msg,
+                            }),
+                        ));
+                    }
+                }
+                // P0-2: emit turn_end so the frontend refreshes the queue
+                // list, but do NOT release the busy flag here — we keep
+                // the lock for the next iteration so no second drainer can
+                // spawn.
+                emit_turn_end(&state, &session_id).await;
+            }
+            None => {
+                // P0-4: lost-wakeup double-check. After dequeue returns
+                // None, a producer may have enqueued in the window before
+                // we release busy. Sequence:
+                //   1. count_queued → if >0, a producer raced ahead; loop.
+                //   2. release busy.
+                //   3. count_queued again → if >0, a producer enqueued
+                //      after our count but before set_busy(0); try to
+                //      re-acquire and loop. Otherwise exit.
+                let state = app_handle.state::<AppState>();
+                let count = {
+                    let db_path = state.db_path.clone();
+                    let sid = session_id.clone();
+                    tokio::task::spawn_blocking(move || -> Result<i64, StoreError> {
+                        let db = Db::open(&db_path)?;
+                        repos::message_queue::count_queued(&db.0, &sid)
+                    })
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .unwrap_or(0)
+                };
+                if count > 0 {
+                    continue;
+                }
+                // Release busy, then re-check + re-acquire.
+                set_agent_busy(&state, &session_id, false).await;
+                let reacquired = {
+                    let db_path = state.db_path.clone();
+                    let sid = session_id.clone();
+                    tokio::task::spawn_blocking(move || -> Result<(bool, i64), StoreError> {
+                        let db = Db::open(&db_path)?;
+                        let count = repos::message_queue::count_queued(&db.0, &sid)?;
+                        if count == 0 {
+                            return Ok((false, 0));
+                        }
+                        let acquired = repos::sessions::try_set_busy(&db.0, &sid)?;
+                        Ok((acquired, count))
+                    })
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .unwrap_or((false, 0))
+                };
+                if reacquired.0 {
+                    // We re-acquired the lock and there are queued
+                    // messages — keep draining.
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+}
+
+pub async fn impl_list_message_queue(
+    state: &AppState,
+    session_id: String,
+) -> Result<Vec<MessageQueueItemDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let sid = session_id.clone();
+    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<nuomi_core::domain::MessageQueueEntry>, StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::message_queue::list_queued(&db.0, &sid)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(entries
+        .into_iter()
+        .map(|e| MessageQueueItemDto {
+            id: e.id,
+            text: e.text,
+            seq: e.seq,
+            created_at: e.created_at,
+        })
+        .collect())
+}
+
+pub async fn impl_cancel_message_queue_item(
+    state: &AppState,
+    id: String,
+) -> Result<(), IpcError> {
+    let db_path = state.db_path.clone();
+    let qid = id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::message_queue::cancel(&db.0, &qid)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(())
+}
+
+pub async fn impl_clear_message_queue(
+    state: &AppState,
+    session_id: String,
+) -> Result<usize, IpcError> {
+    let db_path = state.db_path.clone();
+    let sid = session_id.clone();
+    let count = tokio::task::spawn_blocking(move || -> Result<usize, StoreError> {
+        let db = Db::open(&db_path)?;
+        repos::message_queue::clear_queued(&db.0, &sid)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(count)
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -341,7 +941,6 @@ pub struct ConversationDto {
     pub id: String,
     pub title: String,
     pub kind: String,
-    pub agent: Option<AgentRefDto>,
     pub team_id: Option<String>,
     pub task_id: Option<String>,
     pub schedule_id: Option<String>,
@@ -361,11 +960,6 @@ impl From<Session> for ConversationDto {
             id: s.id,
             title: s.title,
             kind: s.kind.as_str().to_string(),
-            agent: s.agent.map(|(k, id)| AgentRefDto {
-                kind: k.as_str().to_string(),
-                id,
-                name: String::new(),
-            }),
             team_id: s.team_id,
             task_id: s.task_id,
             schedule_id: s.schedule_id,
@@ -1031,11 +1625,17 @@ pub struct ProviderSettingsDto {
 
 /// One model exposed by a provider endpoint plus its capability tags
 /// (KiloCode-style per-model capabilities).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelEntryDto {
     pub id: String,
     pub capabilities: Vec<CapabilityDto>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<i64>,
 }
 
 /// System modality capability (mirrors `nuomi_core::domain::Capability`).
@@ -1102,6 +1702,9 @@ impl ProviderSettingsDto {
                 .map(|m| ModelEntryDto {
                     id: m.id,
                     capabilities: caps_to_dto(&m.capabilities),
+                    temperature: m.temperature,
+                    top_p: m.top_p,
+                    max_tokens: m.max_tokens,
                 })
                 .collect(),
             default_model: settings.default_model,
@@ -1126,6 +1729,9 @@ impl ProviderSettingsDto {
                 .map(|m| nuomi_core::domain::ModelEntry {
                     id: m.id,
                     capabilities: caps_from_dto(&m.capabilities),
+                    temperature: m.temperature,
+                    top_p: m.top_p,
+                    max_tokens: m.max_tokens,
                 })
                 .collect(),
             default_model: self.default_model,
@@ -1550,6 +2156,236 @@ pub async fn impl_get_online_authorized(state: &AppState) -> Result<bool, IpcErr
     Ok(core_online_authorized(&mem).await)
 }
 
+// ---------- evolution settings (自进化四维度) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RefineStrategyDto {
+    PromptNote,
+    Memory,
+    Skill,
+    SubAgentSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillFormatDto {
+    SkillMd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalStrategyDto {
+    Keyword,
+    Semantic,
+    Hybrid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineLearningConfigDto {
+    pub authorized: bool,
+    pub allowlist: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RefineConfigDto {
+    pub trigger_failures: u32,
+    pub min_edit_strategy: RefineStrategyDto,
+    pub evidence_threshold: f64,
+    pub rollback_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCreationConfigDto {
+    pub enabled: bool,
+    pub format: SkillFormatDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPolicyDto {
+    pub retention_days: u32,
+    pub retrieval: RetrievalStrategyDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionSettingsDto {
+    pub online_learning: OnlineLearningConfigDto,
+    pub refine: RefineConfigDto,
+    pub skill_creation: SkillCreationConfigDto,
+    pub memory_policy: MemoryPolicyDto,
+}
+
+const EVOLUTION_SETTINGS_KEY: &str = "evolution_settings";
+
+impl EvolutionSettingsDto {
+    fn from_entity(e: nuomi_core::domain::EvolutionSettings) -> Self {
+        use nuomi_core::domain::{
+            MemoryPolicy, OnlineLearningConfig, RefineConfig, SkillCreationConfig,
+        };
+        let map_refine = |s: nuomi_core::domain::RefineStrategy| match s {
+            nuomi_core::domain::RefineStrategy::PromptNote => RefineStrategyDto::PromptNote,
+            nuomi_core::domain::RefineStrategy::Memory => RefineStrategyDto::Memory,
+            nuomi_core::domain::RefineStrategy::Skill => RefineStrategyDto::Skill,
+            nuomi_core::domain::RefineStrategy::SubAgentSpec => RefineStrategyDto::SubAgentSpec,
+        };
+        let map_skill = |s: nuomi_core::domain::SkillFormat| match s {
+            nuomi_core::domain::SkillFormat::SkillMd => SkillFormatDto::SkillMd,
+        };
+        let map_retrieval = |s: nuomi_core::domain::RetrievalStrategy| match s {
+            nuomi_core::domain::RetrievalStrategy::Keyword => RetrievalStrategyDto::Keyword,
+            nuomi_core::domain::RetrievalStrategy::Semantic => RetrievalStrategyDto::Semantic,
+            nuomi_core::domain::RetrievalStrategy::Hybrid => RetrievalStrategyDto::Hybrid,
+        };
+        let OnlineLearningConfig { authorized, allowlist } = e.online_learning;
+        let RefineConfig {
+            trigger_failures,
+            min_edit_strategy,
+            evidence_threshold,
+            rollback_enabled,
+        } = e.refine;
+        let SkillCreationConfig { enabled, format } = e.skill_creation;
+        let MemoryPolicy { retention_days, retrieval } = e.memory_policy;
+        Self {
+            online_learning: OnlineLearningConfigDto { authorized, allowlist },
+            refine: RefineConfigDto {
+                trigger_failures,
+                min_edit_strategy: map_refine(min_edit_strategy),
+                evidence_threshold,
+                rollback_enabled,
+            },
+            skill_creation: SkillCreationConfigDto {
+                enabled,
+                format: map_skill(format),
+            },
+            memory_policy: MemoryPolicyDto {
+                retention_days,
+                retrieval: map_retrieval(retrieval),
+            },
+        }
+    }
+
+    fn to_entity(&self) -> nuomi_core::domain::EvolutionSettings {
+        use nuomi_core::domain::{
+            EvolutionSettings, MemoryPolicy, OnlineLearningConfig, RefineConfig,
+            SkillCreationConfig,
+        };
+        let map_refine = |s: RefineStrategyDto| match s {
+            RefineStrategyDto::PromptNote => nuomi_core::domain::RefineStrategy::PromptNote,
+            RefineStrategyDto::Memory => nuomi_core::domain::RefineStrategy::Memory,
+            RefineStrategyDto::Skill => nuomi_core::domain::RefineStrategy::Skill,
+            RefineStrategyDto::SubAgentSpec => nuomi_core::domain::RefineStrategy::SubAgentSpec,
+        };
+        let map_skill = |s: SkillFormatDto| match s {
+            SkillFormatDto::SkillMd => nuomi_core::domain::SkillFormat::SkillMd,
+        };
+        let map_retrieval = |s: RetrievalStrategyDto| match s {
+            RetrievalStrategyDto::Keyword => nuomi_core::domain::RetrievalStrategy::Keyword,
+            RetrievalStrategyDto::Semantic => nuomi_core::domain::RetrievalStrategy::Semantic,
+            RetrievalStrategyDto::Hybrid => nuomi_core::domain::RetrievalStrategy::Hybrid,
+        };
+        EvolutionSettings {
+            online_learning: OnlineLearningConfig {
+                authorized: self.online_learning.authorized,
+                allowlist: self.online_learning.allowlist.clone(),
+            },
+            refine: RefineConfig {
+                trigger_failures: self.refine.trigger_failures,
+                min_edit_strategy: map_refine(self.refine.min_edit_strategy),
+                evidence_threshold: self.refine.evidence_threshold,
+                rollback_enabled: self.refine.rollback_enabled,
+            },
+            skill_creation: SkillCreationConfig {
+                enabled: self.skill_creation.enabled,
+                format: map_skill(self.skill_creation.format),
+            },
+            memory_policy: MemoryPolicy {
+                retention_days: self.memory_policy.retention_days,
+                retrieval: map_retrieval(self.memory_policy.retrieval),
+            },
+        }
+    }
+}
+
+pub async fn impl_get_evolution_settings(
+    state: &AppState,
+) -> Result<EvolutionSettingsDto, IpcError> {
+    let path = state.db_path.clone();
+    let json = tokio::task::spawn_blocking(move || -> Result<Option<String>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::settings::get(&db.0, EVOLUTION_SETTINGS_KEY)
+            .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))??;
+
+    if let Some(raw) = json {
+        let mut settings: nuomi_core::domain::EvolutionSettings =
+            serde_json::from_str(&raw)
+                .map_err(|e| IpcError::new("evolution.parse_failed", e.to_string()))?;
+        let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+        let legacy_auth = core_online_authorized(&mem).await;
+        if !settings.online_learning.authorized && legacy_auth {
+            settings.online_learning.authorized = true;
+        }
+        return Ok(EvolutionSettingsDto::from_entity(settings));
+    }
+
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    let legacy_auth = core_online_authorized(&mem).await;
+    let mut defaults = nuomi_core::domain::EvolutionSettings::default();
+    defaults.online_learning.authorized = legacy_auth;
+    Ok(EvolutionSettingsDto::from_entity(defaults))
+}
+
+pub async fn impl_set_evolution_settings(
+    state: &AppState,
+    dto: EvolutionSettingsDto,
+) -> Result<(), IpcError> {
+    if dto.refine.evidence_threshold < 0.5 {
+        return Err(IpcError::new(
+            "evolution.invalid_config",
+            "evidence_threshold must be >= 0.5",
+        ));
+    }
+    if dto.refine.trigger_failures < 1 {
+        return Err(IpcError::new(
+            "evolution.invalid_config",
+            "trigger_failures must be >= 1",
+        ));
+    }
+    if dto.memory_policy.retention_days < 1 {
+        return Err(IpcError::new(
+            "evolution.invalid_config",
+            "retention_days must be >= 1",
+        ));
+    }
+
+    let entity = dto.to_entity();
+    let raw = serde_json::to_string(&entity)
+        .map_err(|e| IpcError::new("evolution.serialize_failed", e.to_string()))?;
+
+    let path = state.db_path.clone();
+    let raw_clone = raw.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::settings::set(&db.0, EVOLUTION_SETTINGS_KEY, &raw_clone)
+            .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))??;
+
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    set_online_authorized(&mem, entity.online_learning.authorized).await?;
+    Ok(())
+}
+
 // ---------- cli agents (SPEC cli-agents-m1 C4) ----------
 
 /// Probe budget for `check_cli_agent` (`--version` run).
@@ -1593,6 +2429,10 @@ pub struct AgentProfileDto {
     pub env: BTreeMap<String, String>,
     pub working_dir: Option<String>,
     pub enabled: bool,
+    pub model_id: Option<String>,
+    /// CLI 会话保持参数模板（ADR 0012 D6）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_args: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -1611,6 +2451,8 @@ impl TryFrom<AgentProfile> for AgentProfileDto {
             env: decode_string_map(p.env)?,
             working_dir: p.working_dir,
             enabled: p.enabled,
+            model_id: p.model_id,
+            resume_args: p.resume_args,
             created_at: p.created_at,
             updated_at: p.updated_at,
         })
@@ -1645,6 +2487,11 @@ pub struct AgentProfileInput {
     pub env: BTreeMap<String, String>,
     pub working_dir: Option<String>,
     pub enabled: bool,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// CLI 会话保持参数模板（ADR 0012 D6）。如 `--resume {session_id}`。
+    #[serde(default)]
+    pub resume_args: Option<String>,
 }
 
 impl AgentProfileInput {
@@ -1675,6 +2522,8 @@ impl AgentProfileInput {
             env: serde_json::json!(self.env),
             working_dir: self.working_dir,
             enabled: self.enabled,
+            model_id: self.model_id,
+            resume_args: self.resume_args,
             created_at,
             updated_at,
         }
@@ -1774,6 +2623,8 @@ pub async fn impl_upsert_agent_profile(
                 prev.env = serde_json::json!(profile.env);
                 prev.working_dir = profile.working_dir;
                 prev.enabled = profile.enabled;
+                prev.model_id = profile.model_id;
+                prev.resume_args = profile.resume_args;
                 prev.updated_at = now;
                 repos::agent_profiles::update(&db.0, &prev)?;
                 Ok(prev)
@@ -1832,20 +2683,37 @@ pub async fn impl_check_cli_agent(
     })
     .await??;
 
-    let mut cmd = tokio::process::Command::new(&profile.command);
-    cmd.arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => {
+    // On Windows a bare name like `codebuddy` may resolve to an extensionless
+    // `#!/bin/sh` shim that `CreateProcess` cannot execute; retry PATHEXT
+    // variants (`.cmd`/`.bat`/`.exe`) before giving up.
+    let candidates = nuomi_core::adapters::spawn_candidates(&profile.command);
+    let mut child = None;
+    let mut last_err = None;
+    for candidate in &candidates {
+        let mut cmd = tokio::process::Command::new(candidate);
+        cmd.arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        match cmd.spawn() {
+            Ok(c) => {
+                child = Some(c);
+                break;
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    let mut child = match child {
+        Some(c) => c,
+        None => {
+            let err = last_err.unwrap_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "no spawn candidates")
+            });
             return Ok(failed_check(format!(
-                "failed to spawn {}: {e}",
+                "failed to spawn {}: {err}",
                 profile.command
-            )))
+            )));
         }
     };
     // Drain pipes concurrently so a chatty process cannot deadlock `wait()`.
@@ -3243,18 +4111,22 @@ pub async fn impl_create_conversation(
         .agent
         .as_ref()
         .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
-    let title = input.title.clone().unwrap_or_default();
+    let title = input.title.clone();
     let team_id = input.team_id.clone();
     let path = state.db_path.clone();
     let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let agent_ref = agent.as_ref().map(|(k, id)| (*k, id.as_str()));
+        // ADR 0013: agent 透传为 participants 写入 conversation_participants。
+        let participants: Vec<(AgentRefKind, &str)> = agent
+            .as_ref()
+            .map(|(k, id)| vec![(*k, id.as_str())])
+            .unwrap_or_default();
         let session = nuomi_core::services::create_conversation(
             &db.0,
             kind,
-            &title,
-            agent_ref,
+            title.as_deref().unwrap_or(""),
+            &participants,
             team_id.as_deref(),
             None,
         )?;
@@ -3282,9 +4154,6 @@ pub async fn impl_list_conversations(
         let active_ws = repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
         let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
         let sessions = repos::sessions::list(&db.0, filter_ws, 200)?;
-        // Steps 2–4 of the agent chain are session-independent: resolve them
-        // once instead of re-running the chain for every row.
-        let fallback = nuomi_core::services::resolve_default_agent(&db.0)?;
         let mut out = Vec::with_capacity(sessions.len());
         for session in &sessions {
             if filter
@@ -3294,18 +4163,23 @@ pub async fn impl_list_conversations(
                 continue;
             }
             let mut dto = ConversationDto::from(session.clone());
-            let resolved = if session.agent.is_some() {
-                nuomi_core::services::resolve_agent(&db.0, session)?
-            } else {
-                fallback.clone()
-            };
-            if let Some(agent) = resolved {
-                dto.agent = Some(AgentRefDto {
-                    kind: agent.kind.as_str().to_string(),
-                    id: agent.id,
-                    name: agent.name,
+            // ADR 0013: 参与者从 conversation_participants 读取，填充真实 name。
+            let participants = repos::sessions::list_participants(&db.0, &session.id)?;
+            let mut agent_refs = Vec::with_capacity(participants.len());
+            for (kind, id) in &participants {
+                let name = nuomi_core::services::name_agent_ref(
+                    &db.0,
+                    Some(&(kind.clone(), id.clone())),
+                )?
+                .map(|r| r.name)
+                .unwrap_or_default();
+                agent_refs.push(AgentRefDto {
+                    kind: kind.as_str().to_string(),
+                    id: id.clone(),
+                    name,
                 });
             }
+            dto.participant_agents = agent_refs;
             out.push(dto);
         }
         Ok(out)
@@ -3321,34 +4195,38 @@ pub async fn impl_get_conversation(
 ) -> Result<ConversationDto, IpcError> {
     let path = state.db_path.clone();
     let sid = session_id.clone();
-    let (session, resolved, participants, todos) =
-        tokio::task::spawn_blocking(move || -> Result<(Session, Option<nuomi_core::services::ResolvedAgent>, Vec<(nuomi_core::domain::AgentRefKind, String)>, Vec<nuomi_core::domain::TodoItem>), IpcError> {
+    let (session, participant_agents, todos) =
+        tokio::task::spawn_blocking(move || -> Result<(Session, Vec<AgentRefDto>, Vec<nuomi_core::domain::TodoItem>), IpcError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             let session = repos::sessions::get(&db.0, &sid)?;
-            let resolved = nuomi_core::services::resolve_agent(&db.0, &session)?;
             let participants = repos::sessions::list_participants(&db.0, &sid)?;
+            // ADR 0013: 参与者填充真实 name（决策 10）。
+            let agent_refs: Vec<AgentRefDto> = participants
+                .into_iter()
+                .map(|(k, id)| {
+                    let name = nuomi_core::services::name_agent_ref(
+                        &db.0,
+                        Some(&(k.clone(), id.clone())),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|r| r.name)
+                    .unwrap_or_default();
+                    AgentRefDto {
+                        kind: k.as_str().to_string(),
+                        id,
+                        name,
+                    }
+                })
+                .collect();
             let todos = repos::sessions::list_todos(&db.0, &sid)?;
-            Ok((session, resolved, participants, todos))
+            Ok((session, agent_refs, todos))
         })
         .await
         .map_err(join_err)??;
     let mut dto = ConversationDto::from(session);
-    if let Some(agent) = resolved {
-        dto.agent = Some(AgentRefDto {
-            kind: agent.kind.as_str().to_string(),
-            id: agent.id,
-            name: agent.name,
-        });
-    }
-    dto.participant_agents = participants
-        .into_iter()
-        .map(|(k, id)| AgentRefDto {
-            kind: k.as_str().to_string(),
-            id,
-            name: String::new(),
-        })
-        .collect();
+    dto.participant_agents = participant_agents;
     dto.todo_list = todos
         .into_iter()
         .map(|t| TodoItemDto {
@@ -3373,8 +4251,12 @@ pub async fn impl_set_conversation_agent(
     let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let agent_ref = agent_owned.as_ref().map(|(k, id)| (*k, id.as_str()));
-        Ok(nuomi_core::services::set_agent(&db.0, &sid, agent_ref)?)
+        // ADR 0013: 整体替换参与者列表（单聊切 Role Agent = 替换为 1 人）。
+        repos::sessions::clear_participants(&db.0, &sid)?;
+        if let Some((kind, id)) = &agent_owned {
+            repos::sessions::add_participant(&db.0, &sid, *kind, id, nuomi_core::domain::now_ms())?;
+        }
+        Ok(repos::sessions::get(&db.0, &sid)?)
     })
     .await
     .map_err(join_err)??;
@@ -3467,6 +4349,102 @@ pub async fn impl_add_conversation_agent(
     .await
     .map_err(join_err)??;
     impl_get_conversation(state, session_id).await
+}
+
+/// ADR 0013: Removes a participant from a conversation. Group chat → single
+/// chat downgrade when participants drop to 1. Single chat's only participant
+/// cannot be removed.
+pub async fn impl_remove_conversation_agent(
+    state: &AppState,
+    session_id: String,
+    agent: AgentRefInput,
+) -> Result<ConversationDto, IpcError> {
+    let agent_kind = AgentRefKind::parse(&agent.kind)
+        .ok_or_else(|| IpcError::new("validation", format!("unknown agent kind: {}", agent.kind)))?;
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let agent_id = agent.id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let participants = repos::sessions::list_participants(&db.0, &sid)?;
+        if participants.len() <= 1 {
+            return Err(IpcError::new(
+                "validation",
+                "cannot remove the last participant",
+            ));
+        }
+        repos::sessions::remove_participant(&db.0, &sid, agent_kind, &agent_id)?;
+        // Group chat → single chat downgrade when only 1 participant remains.
+        let remaining = repos::sessions::list_participants(&db.0, &sid)?;
+        if remaining.len() == 1 {
+            let session = repos::sessions::get(&db.0, &sid)?;
+            if session.kind == nuomi_core::domain::ConversationKind::Group {
+                repos::sessions::update_kind(
+                    &db.0,
+                    &sid,
+                    nuomi_core::domain::ConversationKind::Chat,
+                )?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    impl_get_conversation(state, session_id).await
+}
+
+pub async fn impl_delete_conversation(
+    state: &AppState,
+    session_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::sessions::delete(&db.0, &sid)?;
+        // P1-2: cascade — clear any queued messages so the drainer does
+        // not consume them for a now-deleted session.
+        let _ = repos::message_queue::clear_queued(&db.0, &sid);
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    // P1-2: cancel any in-flight turn for this session so a running
+    // reply does not keep writing into a deleted conversation.
+    state.session_cancels.cancel(&session_id);
+    Ok(())
+}
+
+pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcError> {
+    let path = state.db_path.clone();
+    let sids = tokio::task::spawn_blocking(move || -> Result<(usize, Vec<String>), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let active_ws =
+            repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        let ws_id = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
+        // List the sessions about to be soft-deleted so we can cascade
+        // queue cleanup + turn cancellation outside the blocking closure.
+        let to_delete = repos::sessions::list(&db.0, ws_id, 100_000)?
+            .into_iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>();
+        let count = repos::sessions::delete_all_for_workspace(&db.0, ws_id)?;
+        // P1-2: cascade — clear queued messages for every deleted session.
+        for sid in &to_delete {
+            let _ = repos::message_queue::clear_queued(&db.0, sid);
+        }
+        Ok((count, to_delete))
+    })
+    .await
+    .map_err(join_err)??;
+    // P1-2: cancel any in-flight turns for the deleted sessions.
+    for sid in &sids.1 {
+        state.session_cancels.cancel(sid);
+    }
+    Ok(sids.0)
 }
 
 // ----------------------------------------------- get_agent_detail
@@ -4610,6 +5588,7 @@ pub async fn impl_list_orphan_sessions(
             "SELECT s.id, s.workspace_id, s.title, s.updated_at
              FROM sessions s
              WHERE s.workspace_id NOT IN (SELECT id FROM workspaces)
+               AND s.deleted_at IS NULL
              ORDER BY s.updated_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {

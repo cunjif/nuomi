@@ -72,6 +72,8 @@ async fn seed_fixture_profile(state: &AppState, name: &str) -> commands::AgentPr
             env: Default::default(),
             working_dir: None,
             enabled: true,
+            model_id: None,
+            resume_args: None,
         },
     )
     .await
@@ -341,6 +343,8 @@ async fn cancel_team_run_transitions_to_cancelled() {
             )]),
             working_dir: None,
             enabled: true,
+            model_id: None,
+            resume_args: None,
         },
     )
     .await
