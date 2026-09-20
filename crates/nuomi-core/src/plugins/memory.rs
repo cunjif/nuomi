@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::domain::MemoryEntry;
+use crate::domain::{MemoryEntry, MemoryPolicy};
 use crate::harness::{Context, HarnessError, Plugin};
 use crate::store::repos;
 use crate::store::StoreError;
@@ -14,13 +14,31 @@ use super::super::domain;
 #[derive(Clone)]
 pub struct MemoryService {
     db_path: Arc<str>,
+    /// Reserved persistent-memory policy (retention + retrieval strategy).
+    /// Stored but not yet consumed — retention enforcement and semantic
+    /// retrieval are future milestones.
+    memory_policy: Option<MemoryPolicy>,
 }
 
 impl MemoryService {
     pub fn new(db_path: impl Into<Arc<str>>) -> Self {
         Self {
             db_path: db_path.into(),
+            memory_policy: None,
         }
+    }
+
+    /// Attaches a persistent-memory policy. The policy is stored for
+    /// downstream consumption (retention enforcement, retrieval strategy);
+    /// current methods do not yet use it.
+    pub fn with_memory_policy(mut self, policy: MemoryPolicy) -> Self {
+        self.memory_policy = Some(policy);
+        self
+    }
+
+    /// Returns the attached memory policy, if any.
+    pub fn memory_policy(&self) -> Option<&MemoryPolicy> {
+        self.memory_policy.as_ref()
     }
 
     /// Runs `f` with a fresh blocking connection to the shared database.

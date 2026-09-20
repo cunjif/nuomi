@@ -163,6 +163,7 @@ mod tests {
             max_tokens: None,
             cache_retention: Default::default(),
             cache_scope: None,
+            external_session_id: None,
         };
         let mut stream = port.stream(&request);
         let first = futures::executor::block_on(stream.next());

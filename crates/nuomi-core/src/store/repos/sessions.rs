@@ -7,16 +7,14 @@ use crate::store::StoreError;
 
 pub fn insert(conn: &Connection, session: &Session) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO sessions (id, title, created_at, updated_at, kind, agent_kind, agent_ref_id, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT INTO sessions (id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             session.id,
             session.title,
             session.created_at,
             session.updated_at,
             session.kind.as_str(),
-            session.agent.as_ref().map(|(k, _)| k.as_str()),
-            session.agent.as_ref().map(|(_, id)| id.as_str()),
             session.team_id,
             session.task_id,
             session.schedule_id,
@@ -31,8 +29,8 @@ pub fn insert(conn: &Connection, session: &Session) -> Result<(), StoreError> {
 
 pub fn get(conn: &Connection, id: &str) -> Result<Session, StoreError> {
     conn.query_row(
-        "SELECT id, title, created_at, updated_at, kind, agent_kind, agent_ref_id, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode
-         FROM sessions WHERE id = ?1",
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
+         FROM sessions WHERE id = ?1 AND deleted_at IS NULL",
         params![id],
         row_to_session,
     )
@@ -61,31 +59,6 @@ pub fn update_title(conn: &Connection, id: &str, title: &str) -> Result<(), Stor
     let n = conn.execute(
         "UPDATE sessions SET title = ?2, updated_at = ?3 WHERE id = ?1",
         params![id, title, crate::domain::now_ms()],
-    )?;
-    if n == 0 {
-        return Err(StoreError::NotFound {
-            entity: "session",
-            id: id.to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Updates the agent binding on a session. `None` clears the binding.
-pub fn update_agent(
-    conn: &Connection,
-    id: &str,
-    agent: Option<(AgentRefKind, &str)>,
-    at: i64,
-) -> Result<(), StoreError> {
-    let n = conn.execute(
-        "UPDATE sessions SET agent_kind = ?2, agent_ref_id = ?3, updated_at = ?4 WHERE id = ?1",
-        params![
-            id,
-            agent.map(|(k, _)| k.as_str()),
-            agent.as_ref().map(|(_, ref_id)| ref_id),
-            at,
-        ],
     )?;
     if n == 0 {
         return Err(StoreError::NotFound {
@@ -187,6 +160,93 @@ pub fn is_participant(
     Ok(n > 0)
 }
 
+/// Removes a single participant from a conversation. No-op if not present.
+pub fn remove_participant(
+    conn: &Connection,
+    session_id: &str,
+    agent_kind: AgentRefKind,
+    agent_ref_id: &str,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM conversation_participants WHERE session_id = ?1 AND agent_kind = ?2 AND agent_ref_id = ?3",
+        params![session_id, agent_kind.as_str(), agent_ref_id],
+    )?;
+    Ok(())
+}
+
+/// Clears all participants from a conversation. Used by `set_conversation_participants`
+/// for whole-list replacement.
+pub fn clear_participants(conn: &Connection, session_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM conversation_participants WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    Ok(())
+}
+
+/// Soft-deletes a session (ADR 0014). Marks `deleted_at` on the session row;
+/// all dependent rows (events, participants, CLI handles, todos) are preserved
+/// so the deletion is recoverable and the `events` append-only invariant holds.
+/// Idempotent: a no-op if the session is already soft-deleted or does not exist.
+pub fn delete(conn: &Connection, session_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+        params![session_id, crate::domain::now_ms()],
+    )?;
+    Ok(())
+}
+
+/// Soft-deletes all sessions for a workspace. Returns the number of sessions
+/// newly marked deleted. Each session is cascaded via [`delete`].
+pub fn delete_all_for_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<usize, StoreError> {
+    let session_ids: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL",
+        )?;
+        let rows = stmt.query_map(params![workspace_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let count = session_ids.len();
+    for sid in &session_ids {
+        delete(conn, sid)?;
+    }
+    Ok(count)
+}
+
+// ---------------------------------------------------- busy state (ADR 0015)
+
+/// Marks a session's agent as busy (1) or idle (0).
+pub fn set_busy(conn: &Connection, session_id: &str, busy: bool) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE sessions SET agent_busy = ?2 WHERE id = ?1",
+        params![session_id, busy as i64],
+    )?;
+    Ok(())
+}
+
+/// Atomically transitions a session from idle to busy. Returns `true` if the
+/// transition succeeded (caller owns the turn), `false` if already busy.
+pub fn try_set_busy(conn: &Connection, session_id: &str) -> Result<bool, StoreError> {
+    let n = conn.execute(
+        "UPDATE sessions SET agent_busy = 1 WHERE id = ?1 AND agent_busy = 0",
+        params![session_id],
+    )?;
+    Ok(n > 0)
+}
+
+/// Returns whether the session's agent is currently busy.
+pub fn get_busy(conn: &Connection, session_id: &str) -> Result<bool, StoreError> {
+    let busy: i64 = conn.query_row(
+        "SELECT agent_busy FROM sessions WHERE id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    Ok(busy != 0)
+}
+
 // ---------------------------------------------------- todos
 
 /// Inserts a todo item for a conversation.
@@ -271,8 +331,8 @@ pub fn list(
     limit: u32,
 ) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, updated_at, kind, agent_kind, agent_ref_id, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode
-         FROM sessions WHERE workspace_id = ?1 ORDER BY updated_at DESC LIMIT ?2",
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
+         FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_session)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -301,26 +361,20 @@ pub fn set_workspace_id(
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let kind_str: String = row.get(4)?;
     let kind = ConversationKind::parse(&kind_str).unwrap_or(ConversationKind::Chat);
-    let agent_kind: Option<String> = row.get(5)?;
-    let agent_ref_id: Option<String> = row.get(6)?;
-    let agent = match (agent_kind.as_deref(), agent_ref_id) {
-        (Some(k), Some(id)) => AgentRefKind::parse(k).map(|kind| (kind, id)),
-        _ => None,
-    };
     Ok(Session {
         id: row.get(0)?,
         title: row.get(1)?,
         created_at: row.get(2)?,
         updated_at: row.get(3)?,
         kind,
-        agent,
-        team_id: row.get(7)?,
-        task_id: row.get(8)?,
-        schedule_id: row.get(9)?,
-        goal: row.get(10)?,
-        main_agent_id: row.get(11)?,
-        route_mode: row.get(12)?,
-        whiteboard_route_mode: row.get(13)?,
+        team_id: row.get(5)?,
+        task_id: row.get(6)?,
+        schedule_id: row.get(7)?,
+        goal: row.get(8)?,
+        main_agent_id: row.get(9)?,
+        route_mode: row.get(10)?,
+        whiteboard_route_mode: row.get(11)?,
+        deleted_at: row.get(12)?,
     })
 }
 

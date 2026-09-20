@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::domain::EvolutionSettings;
 use crate::plugins::MemoryService;
 use crate::store::StoreError;
 
@@ -34,10 +35,22 @@ impl ResearchAllowlist {
     ];
 
     /// True when `url_or_domain` points at an allowlisted domain (or a
-    /// subdomain of one).
+    /// subdomain of one). Uses the built-in `DOMAINS` constant.
     pub fn is_allowed(&self, url_or_domain: &str) -> bool {
+        Self::is_allowed_with(&Self::DOMAINS.iter().map(|s| s.to_string()).collect::<Vec<_>>(), url_or_domain)
+    }
+
+    /// Parameterized allowlist check — accepts a custom `allowlist` and
+    /// checks whether `url_or_domain` matches (exact or subdomain).
+    /// Falls back to `DOMAINS` when `allowlist` is empty.
+    pub fn is_allowed_with(allowlist: &[String], url_or_domain: &str) -> bool {
         let host = normalize_host(url_or_domain);
-        Self::DOMAINS
+        let domains: Vec<&str> = if allowlist.is_empty() {
+            Self::DOMAINS.to_vec()
+        } else {
+            allowlist.iter().map(|s| s.as_str()).collect()
+        };
+        domains
             .iter()
             .any(|d| host == *d || host.ends_with(&format!(".{d}")))
     }
@@ -84,7 +97,17 @@ impl ResearchFetcher {
     }
 
     pub async fn fetch(&self, source: &str) -> Result<ResearchReportEntry, EvolutionError> {
-        if !ResearchAllowlist.is_allowed(source) {
+        self.fetch_with(&ResearchAllowlist::DOMAINS.iter().map(|s| s.to_string()).collect::<Vec<_>>(), source).await
+    }
+
+    /// Parameterized fetch — checks against a custom `allowlist` before
+    /// issuing the HTTP request.
+    pub async fn fetch_with(
+        &self,
+        allowlist: &[String],
+        source: &str,
+    ) -> Result<ResearchReportEntry, EvolutionError> {
+        if !ResearchAllowlist::is_allowed_with(allowlist, source) {
             return Err(EvolutionError::SourceNotAllowlisted(source.to_string()));
         }
         let url = self
@@ -158,6 +181,33 @@ impl ResearchScheduler {
         }
         Ok(entries)
     }
+
+    /// Settings-driven research pass: authorization, allowlist, and source
+    /// filtering all come from `EvolutionSettings`. Replaces the fixed
+    /// `authorized: bool` gate with a full configuration object.
+    pub async fn run_once_with_settings(
+        &self,
+        topic: &str,
+        settings: &EvolutionSettings,
+    ) -> Result<Vec<ResearchReportEntry>, EvolutionError> {
+        if !settings.online_learning.authorized {
+            return Err(EvolutionError::NotAuthorized);
+        }
+        let allowlist = &settings.online_learning.allowlist;
+        let mut entries = Vec::new();
+        for source in &self.sources {
+            match self.fetcher.fetch_with(allowlist, source).await {
+                Ok(mut entry) => {
+                    entry.excerpt = format!("# research: {topic}\n{}", entry.excerpt);
+                    entries.push(entry);
+                }
+                Err(err) => {
+                    tracing::warn!(source = %source, error = %err, "research source skipped");
+                }
+            }
+        }
+        Ok(entries)
+    }
 }
 
 /// Persists the permanent online-learning authorization switch in the
@@ -220,6 +270,22 @@ mod tests {
         assert!(!al.is_allowed("evil.example"));
         assert!(!al.is_allowed("notgithub.com"));
         assert!(!al.is_allowed("github.com.evil.example"));
+    }
+
+    #[test]
+    fn parameterized_allowlist_accepts_custom_domains() {
+        let custom = vec!["custom.dev".to_string(), "api.example.org".to_string()];
+        assert!(ResearchAllowlist::is_allowed_with(&custom, "custom.dev"));
+        assert!(ResearchAllowlist::is_allowed_with(&custom, "sub.custom.dev"));
+        assert!(ResearchAllowlist::is_allowed_with(&custom, "https://api.example.org/path"));
+        assert!(!ResearchAllowlist::is_allowed_with(&custom, "github.com"));
+    }
+
+    #[test]
+    fn parameterized_allowlist_falls_back_to_domains_when_empty() {
+        let empty: Vec<String> = vec![];
+        assert!(ResearchAllowlist::is_allowed_with(&empty, "github.com"));
+        assert!(!ResearchAllowlist::is_allowed_with(&empty, "evil.example"));
     }
 
     #[tokio::test]

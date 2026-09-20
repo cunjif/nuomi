@@ -47,9 +47,15 @@ pub async fn materialize_single_role(
     cwd: Option<PathBuf>,
     resolved: Option<&ResolvedAgent>,
 ) -> CoreResult<SingleRoleContext> {
+    tracing::info!(
+        resolved_kind = ?resolved.map(|r| &r.kind),
+        resolved_id = ?resolved.map(|r| r.id.as_str()),
+        "materialize_single_role: start",
+    );
     let materialized = materialize(db_path.clone(), secrets, cwd).await?;
 
     if materialized.default.is_none() && materialized.providers.is_empty() {
+        tracing::warn!("materialize_single_role: EnvFallback (no providers, no default)");
         return Ok(SingleRoleContext::EnvFallback);
     }
 
@@ -57,10 +63,21 @@ pub async fn materialize_single_role(
     let (provider, overlay) = select_provider(&materialized, resolved, &db_path).await?;
 
     let Some(provider) = provider else {
+        tracing::warn!(
+            has_default = materialized.default.is_some(),
+            provider_count = materialized.providers.len(),
+            "materialize_single_role: EnvFallback (select_provider returned None)",
+        );
         return Ok(SingleRoleContext::EnvFallback);
     };
 
     let model = provider.id().to_string();
+    tracing::info!(
+        provider_id = %model,
+        has_overlay = overlay.is_some(),
+        warning_count = warnings.len(),
+        "materialize_single_role: Materialized",
+    );
     Ok(SingleRoleContext::Materialized {
         provider,
         model,
@@ -121,6 +138,15 @@ async fn select_for_role(
         .as_deref()
         .and_then(|k| materialized.providers.get(k).cloned())
         .or_else(|| materialized.default.clone());
+
+    tracing::info!(
+        role_id = %role_id,
+        provider_key = ?provider_key,
+        found = provider.is_some(),
+        has_default = materialized.default.is_some(),
+        available_keys = ?materialized.providers.keys().collect::<Vec<_>>(),
+        "select_for_role",
+    );
 
     let overlay = RoleOverlay {
         system_prompt: role.system_prompt_override.clone(),

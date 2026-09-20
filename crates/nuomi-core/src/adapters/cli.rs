@@ -161,7 +161,11 @@ impl CliAgentClient {
 
     /// Resolves everything needed to spawn synchronously so configuration
     /// errors surface deterministically before any stream polling.
-    fn prepare(&self, prompt: &str) -> Result<Prepared, AdapterError> {
+    fn prepare(
+        &self,
+        prompt: &str,
+        dynamic_args: &[String],
+    ) -> Result<Prepared, AdapterError> {
         let profile = &self.profile;
         // Defense in depth: re-check even though `new` already validated.
         if !is_allowlisted(&profile.command, &self.allowlist) {
@@ -170,9 +174,11 @@ impl CliAgentClient {
             });
         }
         let (args, has_placeholder) =
-            resolve_args(&profile.args, prompt).map_err(|message| AdapterError::Protocol {
-                agent: profile.name.clone(),
-                message,
+            resolve_args(&profile.args, prompt, dynamic_args).map_err(|message| {
+                AdapterError::Protocol {
+                    agent: profile.name.clone(),
+                    message,
+                }
             })?;
         let profile_env = resolve_env(&profile.env).map_err(|message| AdapterError::Protocol {
             agent: profile.name.clone(),
@@ -254,15 +260,34 @@ impl LlmProvider for CliAgentClient {
     ) -> BoxStream<'static, Result<StreamEvent, ProviderError>> {
         let prompt = compose_prompt(request);
         let agent = self.profile.name.clone();
-        match self.prepare(&prompt) {
+        let dynamic_args = build_resume_args(
+            self.profile.flavor,
+            self.profile.resume_args.as_deref(),
+            request.external_session_id.as_deref(),
+        );
+        match self.prepare(&prompt, &dynamic_args) {
             Err(error) => {
+                tracing::warn!(
+                    agent = %agent,
+                    error = %error,
+                    "cli agent: prepare failed",
+                );
                 futures::stream::once(async move { Err(adapter_error(&agent, error)) }).boxed()
             }
-            Ok(prepared) => futures::stream::try_unfold(
-                StepState::Spawn(Box::new(prepared)),
-                |state| async move { step(state).await },
-            )
-            .boxed(),
+            Ok(prepared) => {
+                tracing::info!(
+                    agent = %agent,
+                    program = %prepared.program,
+                    flavor = ?self.profile.flavor,
+                    prompt_len = prompt.len(),
+                    "cli agent: spawning",
+                );
+                futures::stream::try_unfold(
+                    StepState::Spawn(Box::new(prepared)),
+                    |state| async move { step(state).await },
+                )
+                .boxed()
+            }
         }
     }
 }
@@ -351,31 +376,33 @@ async fn step(state: StepState) -> Result<Option<(StreamEvent, StepState)>, Prov
 }
 
 async fn spawn_child(prepared: Prepared) -> Result<ReadState, AdapterError> {
-    let mut command = Command::new(&prepared.program);
-    command.args(&prepared.args);
-    // `prepared.envs` is the complete sanitized environment (parent env +
-    // profile env minus ENV_BLOCK_LIST), so the inherited environment is
-    // cleared first — nothing unfiltered can leak through.
-    command.env_clear();
-    command.envs(
-        prepared
-            .envs
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-    );
-    if let Some(dir) = &prepared.working_dir {
-        command.current_dir(dir);
+    // On Windows a bare name like `codebuddy` may resolve to an extensionless
+    // `#!/bin/sh` shim that `CreateProcess` cannot execute; `spawn_candidates`
+    // appends PATHEXT variants (`.cmd`/`.bat`/`.exe`) so we retry on failure.
+    let candidates = super::spawn_candidates(&prepared.program);
+    let mut child = None;
+    let mut last_err = None;
+    for candidate in &candidates {
+        match build_command(candidate, &prepared).spawn() {
+            Ok(c) => {
+                child = Some(c);
+                break;
+            }
+            Err(e) => last_err = Some(e),
+        }
     }
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    let mut child = command.spawn().map_err(|source| AdapterError::Spawn {
-        command: prepared.program.clone(),
-        source,
-    })?;
+    let mut child = match child {
+        Some(c) => c,
+        None => {
+            let source = last_err.unwrap_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "no spawn candidates")
+            });
+            return Err(AdapterError::Spawn {
+                command: prepared.program.clone(),
+                source,
+            });
+        }
+    };
 
     // Write the prompt to stdin (then close it) concurrently so a large
     // prompt cannot deadlock against an unread stdout pipe.
@@ -414,6 +441,33 @@ async fn spawn_child(prepared: Prepared) -> Result<ReadState, AdapterError> {
         flavor: prepared.flavor,
         had_output: false,
     })
+}
+
+/// Builds the `Command` for one spawn attempt: sanitized env, optional cwd,
+/// piped stdio, `kill_on_drop`. `program` is one of [`super::spawn_candidates`]'s
+/// entries (bare name first, then PATHEXT variants on Windows).
+fn build_command(program: &str, prepared: &Prepared) -> Command {
+    let mut command = Command::new(program);
+    command.args(&prepared.args);
+    // `prepared.envs` is the complete sanitized environment (parent env +
+    // profile env minus ENV_BLOCK_LIST), so the inherited environment is
+    // cleared first — nothing unfiltered can leak through.
+    command.env_clear();
+    command.envs(
+        prepared
+            .envs
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
+    if let Some(dir) = &prepared.working_dir {
+        command.current_dir(dir);
+    }
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
 }
 
 /// Waits for the child to exit and produces the terminal event.
@@ -469,19 +523,58 @@ fn compose_prompt(request: &ChatRequest) -> String {
     sections.join("\n\n")
 }
 
+/// Default resume-args template per CLI flavor (ADR 0012 D6).
+/// Returns `None` when the flavor has no known resume mechanism —
+/// the user must configure `AgentProfile.resume_args` explicitly.
+fn default_resume_template(flavor: CliFlavor) -> Option<&'static str> {
+    match flavor {
+        CliFlavor::ClaudeCode => Some("--resume {session_id}"),
+        CliFlavor::Codex => None,
+        CliFlavor::Plain => None,
+    }
+}
+
+/// Builds the dynamic argv tokens for session resume (ADR 0012 D6/D8).
+/// `resume_args_override` (from `AgentProfile.resume_args`) takes priority
+/// over the flavor default; `None` or empty `session_id` yields no tokens.
+/// The template is split on whitespace into argv entries, with `{session_id}`
+/// substituted in place.
+fn build_resume_args(
+    flavor: CliFlavor,
+    resume_args_override: Option<&str>,
+    session_id: Option<&str>,
+) -> Vec<String> {
+    let Some(sid) = session_id.filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    let template = resume_args_override
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| default_resume_template(flavor));
+    let Some(tmpl) = template else {
+        return Vec::new();
+    };
+    tmpl.split_whitespace()
+        .map(|tok| tok.replace("{session_id}", sid))
+        .collect()
+}
+
 /// Substitutes `{prompt}` inside each arg-template string.
 ///
 /// Returns the resolved argv plus whether the placeholder appeared at all
 /// (it decides stdin vs argv delivery). `request.tools` is intentionally
 /// ignored throughout: CLI agents manage their own tools.
+///
+/// `dynamic_args` (e.g. resume flags) are appended after template args —
+/// concatenation, not override (ADR 0012 D6).
 fn resolve_args(
     args_json: &serde_json::Value,
     prompt: &str,
+    dynamic_args: &[String],
 ) -> Result<(Vec<String>, bool), String> {
     let items = args_json
         .as_array()
         .ok_or_else(|| "args template must be a JSON array of strings".to_string())?;
-    let mut resolved = Vec::with_capacity(items.len());
+    let mut resolved = Vec::with_capacity(items.len() + dynamic_args.len());
     let mut has_placeholder = false;
     for item in items {
         let raw = item
@@ -494,6 +587,7 @@ fn resolve_args(
             resolved.push(raw.to_string());
         }
     }
+    resolved.extend(dynamic_args.iter().cloned());
     Ok((resolved, has_placeholder))
 }
 
@@ -536,6 +630,8 @@ fn executable_base_name(command: &str) -> String {
 struct StreamAccumulator {
     text: String,
     usage: Option<Usage>,
+    /// CLI Agent 自身会话 id（ADR 0012 D8），从输出 JSON 顶层提取。
+    cli_session_id: Option<String>,
 }
 
 impl StreamAccumulator {
@@ -545,6 +641,7 @@ impl StreamAccumulator {
             tool_calls: Vec::new(),
             usage: self.usage,
             finish_reason: Some("stop".into()),
+            cli_session_id: self.cli_session_id,
         }
     }
 }
@@ -573,6 +670,12 @@ fn feed_claude_code(line: &str, acc: &mut StreamAccumulator) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         return Vec::new();
     };
+    // Extract CLI session_id from any event that carries it (ADR 0012 D8).
+    if let Some(sid) = value.get("session_id").and_then(|s| s.as_str()) {
+        if !sid.is_empty() {
+            acc.cli_session_id = Some(sid.to_string());
+        }
+    }
     match value.get("type").and_then(|t| t.as_str()) {
         Some("assistant") => {
             let mut deltas = Vec::new();
@@ -685,6 +788,8 @@ mod tests {
             env: serde_json::json!({}),
             working_dir: None,
             enabled: true,
+            model_id: None,
+            resume_args: None,
             created_at: 0,
             updated_at: 0,
         }
@@ -700,6 +805,7 @@ mod tests {
             max_tokens: None,
             cache_retention: Default::default(),
             cache_scope: None,
+            external_session_id: None,
         }
     }
 
@@ -832,6 +938,38 @@ mod tests {
     }
 
     #[test]
+    fn claude_code_extracts_cli_session_id_from_events() {
+        let mut acc = StreamAccumulator::default();
+        // assistant event carries session_id at top level
+        feed_line(
+            CliFlavor::ClaudeCode,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]},"session_id":"sess-abc"}"#,
+            &mut acc,
+        );
+        assert_eq!(acc.cli_session_id.as_deref(), Some("sess-abc"));
+        // result event with a different session_id updates it
+        feed_line(
+            CliFlavor::ClaudeCode,
+            r#"{"type":"result","subtype":"success","result":"done","session_id":"sess-xyz"}"#,
+            &mut acc,
+        );
+        assert_eq!(acc.cli_session_id.as_deref(), Some("sess-xyz"));
+        let response = acc.into_response();
+        assert_eq!(response.cli_session_id.as_deref(), Some("sess-xyz"));
+    }
+
+    #[test]
+    fn claude_code_empty_session_id_is_ignored() {
+        let mut acc = StreamAccumulator::default();
+        feed_line(
+            CliFlavor::ClaudeCode,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]},"session_id":""}"#,
+            &mut acc,
+        );
+        assert!(acc.cli_session_id.is_none());
+    }
+
+    #[test]
     fn empty_input_completes_with_empty_content() {
         for flavor in [CliFlavor::ClaudeCode, CliFlavor::Codex, CliFlavor::Plain] {
             let (_, acc) = run_parser(flavor, &[]);
@@ -886,8 +1024,12 @@ mod tests {
 
     #[test]
     fn resolve_args_substitutes_placeholder_and_reports_presence() {
-        let (args, has) =
-            resolve_args(&serde_json::json!(["-p", "{prompt}", "--verbose"]), "do it").unwrap();
+        let (args, has) = resolve_args(
+            &serde_json::json!(["-p", "{prompt}", "--verbose"]),
+            "do it",
+            &[],
+        )
+        .unwrap();
         assert_eq!(
             args,
             vec![
@@ -898,15 +1040,76 @@ mod tests {
         );
         assert!(has);
 
-        let (args, has) = resolve_args(&serde_json::json!(["--json"]), "do it").unwrap();
+        let (args, has) = resolve_args(&serde_json::json!(["--json"]), "do it", &[]).unwrap();
         assert_eq!(args, vec!["--json".to_string()]);
         assert!(!has);
     }
 
     #[test]
     fn resolve_args_rejects_non_array_templates() {
-        assert!(resolve_args(&serde_json::json!("x"), "p").is_err());
-        assert!(resolve_args(&serde_json::json!([1]), "p").is_err());
+        assert!(resolve_args(&serde_json::json!("x"), "p", &[]).is_err());
+        assert!(resolve_args(&serde_json::json!([1]), "p", &[]).is_err());
+    }
+
+    #[test]
+    fn resolve_args_appends_dynamic_args_without_overriding() {
+        let (args, has) = resolve_args(
+            &serde_json::json!(["--json", "{prompt}"]),
+            "hello",
+            &["--resume".to_string(), "sid-42".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "--json".to_string(),
+                "hello".to_string(),
+                "--resume".to_string(),
+                "sid-42".to_string()
+            ]
+        );
+        assert!(has);
+    }
+
+    #[test]
+    fn build_resume_args_flavor_default_for_claude_code() {
+        let args = build_resume_args(
+            CliFlavor::ClaudeCode,
+            None,
+            Some("abc-123"),
+        );
+        assert_eq!(args, vec!["--resume".to_string(), "abc-123".to_string()]);
+    }
+
+    #[test]
+    fn build_resume_args_override_takes_priority() {
+        let args = build_resume_args(
+            CliFlavor::ClaudeCode,
+            Some("--session {session_id} --reuse"),
+            Some("xyz"),
+        );
+        assert_eq!(
+            args,
+            vec![
+                "--session".to_string(),
+                "xyz".to_string(),
+                "--reuse".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn build_resume_args_no_template_yields_empty() {
+        // Codex has no default template.
+        assert!(build_resume_args(CliFlavor::Codex, None, Some("sid")).is_empty());
+        // Plain has no default template.
+        assert!(build_resume_args(CliFlavor::Plain, None, Some("sid")).is_empty());
+    }
+
+    #[test]
+    fn build_resume_args_empty_or_missing_session_id_yields_empty() {
+        assert!(build_resume_args(CliFlavor::ClaudeCode, None, None).is_empty());
+        assert!(build_resume_args(CliFlavor::ClaudeCode, None, Some("")).is_empty());
     }
 
     #[test]

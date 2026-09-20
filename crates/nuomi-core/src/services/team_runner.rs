@@ -510,6 +510,8 @@ mod tests {
             env: json!({}),
             working_dir: None,
             enabled: true,
+            model_id: None,
+            resume_args: None,
             created_at: now_ms(),
             updated_at: now_ms(),
         };

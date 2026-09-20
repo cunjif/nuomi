@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::domain::RefineConfig;
 use crate::providers::{ChatRequest, LlmProvider};
 
 use super::journal::{audit, EvolutionJournal, JournalKind};
@@ -44,6 +45,9 @@ pub struct Reflector {
     provider: Arc<dyn LlmProvider>,
     /// Optional Harness Journal: reflection triggers become audit entries.
     journal: Option<Arc<EvolutionJournal>>,
+    /// Reserved refine configuration (GEPA-style parameters). Stored but
+    /// not yet consumed — the full `/refine` pipeline is a future milestone.
+    refine_config: Option<RefineConfig>,
 }
 
 impl Reflector {
@@ -51,6 +55,7 @@ impl Reflector {
         Self {
             provider,
             journal: None,
+            refine_config: None,
         }
     }
 
@@ -58,6 +63,19 @@ impl Reflector {
     pub fn with_journal(mut self, journal: Arc<EvolutionJournal>) -> Self {
         self.journal = Some(journal);
         self
+    }
+
+    /// Attaches refine configuration (GEPA-style parameters). The config is
+    /// stored for downstream consumption by the future `/refine` pipeline;
+    /// the current `reflect` method does not yet use it.
+    pub fn with_refine_config(mut self, config: RefineConfig) -> Self {
+        self.refine_config = Some(config);
+        self
+    }
+
+    /// Returns the attached refine configuration, if any.
+    pub fn refine_config(&self) -> Option<&RefineConfig> {
+        self.refine_config.as_ref()
     }
 
     pub async fn reflect(

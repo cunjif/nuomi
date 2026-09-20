@@ -1,15 +1,13 @@
 //! Conversation service: creates, binds, and resolves typed conversations.
 //!
-//! A Conversation = Session + kind + bindings (migration 0011).
-//! This service is the single place that knows how to:
-//!  - create a session with the right kind and bindings
-//!  - resolve the effective agent via the priority chain (plan §7.1)
-//!  - compose a user message with attachment references
+//! ADR 0013: 祛除主 Agent 概念，统一为 IM 式单聊/群聊模型。
+//! 参与者统一存储在 `conversation_participants` 表，单聊 = 1 参与者，
+//! 群聊 = 多参与者。`sessions.agent_*` 列已废弃（migration 0021）。
 
 use rusqlite::Connection;
 
 use crate::domain::{
-    now_ms, AgentRefKind, ConversationKind, Session,
+    now_ms, AgentRefKind, ConversationKind, Role, Session,
 };
 use crate::store::repos::{agent_profiles, roles, sessions, settings};
 use crate::store::StoreError;
@@ -25,15 +23,16 @@ pub struct ResolvedAgent {
     pub name: String,
 }
 
-/// Creates a new conversation (session with kind + bindings).
+/// Creates a new conversation (session + kind + participants).
 ///
-/// `agent` is `(AgentRefKind, id)` where id references `agent_profiles.id`
-/// or `roles.id`. Pass `None` for the default resolution chain.
+/// `participants` is a slice of `(AgentRefKind, id)` pairs. Each is written
+/// to `conversation_participants`. Pass an empty slice for the default
+/// resolution chain (materialized on first resolve).
 pub fn create_conversation(
     conn: &Connection,
     kind: ConversationKind,
     title: &str,
-    agent: Option<(AgentRefKind, &str)>,
+    participants: &[(AgentRefKind, &str)],
     team_id: Option<&str>,
     schedule_id: Option<&str>,
 ) -> Result<Session, StoreError> {
@@ -44,7 +43,6 @@ pub fn create_conversation(
         created_at: now,
         updated_at: now,
         kind,
-        agent: agent.map(|(k, id)| (k, id.to_string())),
         team_id: team_id.map(|s| s.to_string()),
         task_id: None,
         schedule_id: schedule_id.map(|s| s.to_string()),
@@ -52,43 +50,55 @@ pub fn create_conversation(
         main_agent_id: None,
         route_mode: None,
         whiteboard_route_mode: None,
+        deleted_at: None,
     };
     sessions::insert(conn, &session)?;
+    for (kind, id) in participants {
+        sessions::add_participant(conn, &session.id, *kind, id, now)?;
+    }
     Ok(session)
 }
 
-/// Sets or clears the agent binding on a session, returning the refreshed row.
-pub fn set_agent(
+/// Resolves all participants for a session from `conversation_participants`.
+///
+/// If the table has no participants for this session, falls through to
+/// `resolve_default_agent` and materializes the result into the table
+/// (so subsequent reads are stable and don't drift with global defaults).
+pub fn resolve_participants(
     conn: &Connection,
     session_id: &str,
-    agent: Option<(AgentRefKind, &str)>,
-) -> Result<Session, StoreError> {
-    sessions::update_agent(conn, session_id, agent, now_ms())?;
-    sessions::get(conn, session_id)
+) -> Result<Vec<ResolvedAgent>, StoreError> {
+    let raw = sessions::list_participants(conn, session_id)?;
+    if !raw.is_empty() {
+        let mut resolved = Vec::with_capacity(raw.len());
+        for (kind, id) in raw {
+            if let Some(r) = resolve_ref(conn, kind, &id)? {
+                resolved.push(r);
+            }
+        }
+        return Ok(resolved);
+    }
+    // Fallback: materialize default agent into participants table.
+    if let Some(default) = resolve_default_agent(conn)? {
+        sessions::add_participant(conn, session_id, default.kind, &default.id, now_ms())?;
+        Ok(vec![default])
+    } else {
+        Ok(Vec::new())
+    }
 }
 
-/// Resolves the effective agent for a session via the priority chain:
-///
-/// 1. Session explicit binding (`sessions.agent_kind/agent_ref_id`)
-/// 2. Global default (`app_settings: conversation.default_agent`)
-/// 3. First enabled `AgentProfile`
-/// 4. First builtin `Role`
-/// 5. `None` (kernel default provider — current behavior)
+/// Resolves a single agent for a session — the first participant (single-chat
+/// semantics). Returns `None` if no participants. Kept for compatibility with
+/// `run_conversation_turn` which dispatches on a single agent.
 pub fn resolve_agent(
     conn: &Connection,
-    session: &Session,
+    session_id: &str,
 ) -> Result<Option<ResolvedAgent>, StoreError> {
-    if let Some((kind, id)) = &session.agent {
-        if let Some(resolved) = resolve_ref(conn, *kind, id)? {
-            return Ok(Some(resolved));
-        }
-    }
-    resolve_default_agent(conn)
+    Ok(resolve_participants(conn, session_id)?.into_iter().next())
 }
 
-/// Steps 2–4 of the [`resolve_agent`] chain — everything that does *not*
-/// depend on the session. List views resolve it once and reuse it for every
-/// row instead of re-running the chain per row.
+/// Steps 2–4 of the resolution chain — everything that does *not* depend on
+/// the session. Used by `resolve_participants` fallback and list views.
 pub fn resolve_default_agent(conn: &Connection) -> Result<Option<ResolvedAgent>, StoreError> {
     if let Some(default) = settings::get(conn, DEFAULT_AGENT_KEY)? {
         if let Some((kind, id)) = parse_agent_ref(&default) {
@@ -97,16 +107,10 @@ pub fn resolve_default_agent(conn: &Connection) -> Result<Option<ResolvedAgent>,
             }
         }
     }
-    let profiles = agent_profiles::list(conn)?;
-    if let Some(profile) = profiles.into_iter().find(|p| p.enabled) {
-        return Ok(Some(ResolvedAgent {
-            kind: AgentRefKind::Cli,
-            id: profile.id,
-            name: profile.name,
-        }));
-    }
+    // ADR 0012 D3: CLI Agent 须通过 Role 绑定才能使用，不再直接作为对话
+    // 对象。默认链只选第一个 builtin 且 isRoleReady 的 Role。
     let roles_list = roles::list(conn)?;
-    if let Some(role) = roles_list.into_iter().find(|r| r.builtin) {
+    if let Some(role) = roles_list.into_iter().find(|r| r.builtin && is_role_ready(r)) {
         return Ok(Some(ResolvedAgent {
             kind: AgentRefKind::Role,
             id: role.id,
@@ -114,6 +118,17 @@ pub fn resolve_default_agent(conn: &Connection) -> Result<Option<ResolvedAgent>,
         }));
     }
     Ok(None)
+}
+
+/// A role is "ready" (usable as a Role Agent) when it binds a provider or a
+/// CLI agent profile. Mirrors the frontend `isRoleReady` helper.
+pub fn is_role_ready(role: &Role) -> bool {
+    role.provider_id.is_some()
+        || role
+            .params
+            .get("agent_profile_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
 }
 
 /// Fills in the display name of an agent binding. List endpoints use this so
@@ -202,9 +217,8 @@ mod tests {
     fn create_chat_conversation_defaults() {
         let conn = db();
         let session =
-            create_conversation(&conn, ConversationKind::Chat, "hello", None, None, None).unwrap();
+            create_conversation(&conn, ConversationKind::Chat, "hello", &[], None, None).unwrap();
         assert_eq!(session.kind, ConversationKind::Chat);
-        assert!(session.agent.is_none());
         assert!(session.team_id.is_none());
         let loaded = sessions::get(&conn, &session.id).unwrap();
         assert_eq!(loaded.kind, ConversationKind::Chat);
@@ -217,7 +231,7 @@ mod tests {
             &conn,
             ConversationKind::Group,
             "group chat",
-            None,
+            &[],
             Some("team-1"),
             None,
         )
@@ -227,43 +241,49 @@ mod tests {
     }
 
     #[test]
-    fn set_agent_updates_binding() {
-        let conn = db();
-        let session =
-            create_conversation(&conn, ConversationKind::Chat, "s", None, None, None).unwrap();
-        let updated =
-            set_agent(&conn, &session.id, Some((AgentRefKind::Cli, "agent-1"))).unwrap();
-        assert_eq!(
-            updated.agent,
-            Some((AgentRefKind::Cli, "agent-1".to_string()))
-        );
-        let cleared = set_agent(&conn, &session.id, None).unwrap();
-        assert!(cleared.agent.is_none());
-    }
-
-    #[test]
-    fn resolve_agent_falls_through_to_none_when_empty() {
-        let conn = db();
-        let session =
-            create_conversation(&conn, ConversationKind::Chat, "s", None, None, None).unwrap();
-        let resolved = resolve_agent(&conn, &session).unwrap();
-        assert!(resolved.is_none());
-    }
-
-    #[test]
-    fn resolve_agent_uses_session_binding() {
+    fn create_conversation_with_participants() {
         let conn = db();
         let session = create_conversation(
             &conn,
             ConversationKind::Chat,
             "s",
-            Some((AgentRefKind::Role, "role-1")),
+            &[(AgentRefKind::Role, "role-1")],
             None,
             None,
         )
         .unwrap();
-        let resolved = resolve_agent(&conn, &session).unwrap();
-        assert!(resolved.is_none(), "nonexistent role ref resolves to None");
+        let parts = sessions::list_participants(&conn, &session.id).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0], (AgentRefKind::Role, "role-1".to_string()));
+    }
+
+    #[test]
+    fn resolve_participants_falls_through_to_none_when_empty() {
+        let conn = db();
+        let session =
+            create_conversation(&conn, ConversationKind::Chat, "s", &[], None, None).unwrap();
+        let resolved = resolve_participants(&conn, &session.id).unwrap();
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn resolve_participants_returns_participants() {
+        let conn = db();
+        let session = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "s",
+            &[(AgentRefKind::Role, "role-1")],
+            None,
+            None,
+        )
+        .unwrap();
+        // role-1 doesn't exist in db → resolve_ref returns None → filtered out.
+        let resolved = resolve_participants(&conn, &session.id).unwrap();
+        assert!(resolved.is_empty(), "nonexistent role ref is filtered out");
+        // Raw participants are still stored.
+        let raw = sessions::list_participants(&conn, &session.id).unwrap();
+        assert_eq!(raw.len(), 1);
     }
 
     #[test]

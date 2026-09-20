@@ -31,6 +31,9 @@ pub struct LoopConfig {
     /// Cache-lineage scope (session lineage root) forwarded to providers
     /// that route their prompt cache by key (OpenAI `prompt_cache_key`).
     pub cache_scope: Option<String>,
+    /// CLI Agent 外部会话 id（ADR 0012 D8），传入 ChatRequest 以让 CLI
+    /// adapter 在后续轮次生成 resume 参数。非 CLI provider 忽略。
+    pub external_session_id: Option<String>,
 }
 
 impl Default for LoopConfig {
@@ -40,6 +43,7 @@ impl Default for LoopConfig {
             max_steps: 16,
             memory_tag: None,
             cache_scope: None,
+            external_session_id: None,
         }
     }
 }
@@ -66,6 +70,9 @@ pub struct LoopRunResult {
     pub steps: usize,
     /// True if `max_steps` was exhausted without a final answer.
     pub truncated: bool,
+    /// CLI Agent 自身会话 id（ADR 0012 D8），从最后一轮 provider 响应提取。
+    /// 非 CLI provider 为 None。用于持久化到 session_cli_handles。
+    pub cli_session_id: Option<String>,
 }
 
 /// Streaming delta observer (e.g. CLI stdout printer).
@@ -276,6 +283,7 @@ impl LoopEngine {
         }
 
         let mut steps = 0usize;
+        let mut last_cli_session_id: Option<String> = None;
         while steps < self.config.max_steps {
             if self.cancelled() {
                 ctx.publish(Event::new(
@@ -287,6 +295,7 @@ impl LoopEngine {
                     final_text: String::new(),
                     steps,
                     truncated: false,
+                    cli_session_id: last_cli_session_id,
                 });
             }
             steps += 1;
@@ -307,15 +316,24 @@ impl LoopEngine {
                 max_tokens: turn_override.max_tokens,
                 cache_retention: Default::default(),
                 cache_scope: self.config.cache_scope.clone(),
+                external_session_id: self.config.external_session_id.clone(),
             };
             let provider = turn_override.provider.as_ref().unwrap_or(&self.provider);
             let response = self.stream_once(provider, &request).await?;
+            if let Some(ref sid) = response.cli_session_id {
+                last_cli_session_id = Some(sid.clone());
+            }
             // A length-capped response means emitted tool arguments were cut
             // mid-JSON; executing them would act on corrupt input.
             let output_truncated = response.finish_reason.as_deref() == Some("length");
 
             if response.tool_calls.is_empty() {
-                transcript.push(ChatMessage::assistant(response.content.clone()));
+                // Skip persisting an empty assistant message (e.g. model
+                // expired with no content). The frontend surfaces a toast in
+                // this case; an empty bubble would be meaningless noise.
+                if !response.content.is_empty() {
+                    transcript.push(ChatMessage::assistant(response.content.clone()));
+                }
                 // Dual-queue check on natural stop: interjections and
                 // follow-ups extend the run with a new turn.
                 let steering = drain_queue(&self.steering);
@@ -341,6 +359,7 @@ impl LoopEngine {
                         final_text: response.content,
                         steps,
                         truncated: false,
+                        cli_session_id: last_cli_session_id,
                     });
                 }
                 continue;
@@ -411,6 +430,7 @@ impl LoopEngine {
             final_text: String::new(),
             steps,
             truncated: true,
+            cli_session_id: last_cli_session_id,
         })
     }
 }
@@ -568,6 +588,7 @@ mod tests {
                 max_steps: 3,
                 memory_tag: None,
                 cache_scope: None,
+                external_session_id: None,
             },
         );
         let result = engine

@@ -26,8 +26,8 @@ pub use capability_router::{
     RouteOutcome, RouteRequest, RoutingError, RoutingRules, ROUTING_RULES_KEY,
 };
 pub use conversation_service::{
-    compose_user_message, create_conversation, name_agent_ref, resolve_agent,
-    resolve_default_agent, set_agent, AgentRef, ResolvedAgent, DEFAULT_AGENT_KEY,
+    compose_user_message, create_conversation, is_role_ready, name_agent_ref, resolve_agent,
+    resolve_default_agent, resolve_participants, AgentRef, ResolvedAgent, DEFAULT_AGENT_KEY,
 };
 pub use git_service::{
     create_worktree, merge_base_into_worktree, merge_worktree_into_base, recover_merges,

@@ -37,6 +37,10 @@ impl ConversationKind {
 }
 
 /// Whether an agent binding points to a CLI agent profile or a role.
+///
+/// `Cli` is deprecated as a conversation agent (ADR 0012): CLI agents must
+/// be bound through a Role to be used in conversations. The variant is
+/// retained for backward compatibility with existing sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRefKind {
@@ -69,7 +73,6 @@ pub struct Session {
     pub created_at: i64,
     pub updated_at: i64,
     pub kind: ConversationKind,
-    pub agent: Option<(AgentRefKind, String)>,
     pub team_id: Option<String>,
     pub task_id: Option<String>,
     pub schedule_id: Option<String>,
@@ -81,6 +84,8 @@ pub struct Session {
     pub route_mode: Option<String>,
     /// Whiteboard route mode: "preemptive" or "concurrent".
     pub whiteboard_route_mode: Option<String>,
+    /// ADR 0014: 软删除时间戳（unix-ms）。NULL = 未删除；非 NULL = 已软删除。
+    pub deleted_at: Option<i64>,
 }
 
 impl Session {
@@ -92,7 +97,6 @@ impl Session {
             created_at: now,
             updated_at: now,
             kind: ConversationKind::Chat,
-            agent: None,
             team_id: None,
             task_id: None,
             schedule_id: None,
@@ -100,6 +104,7 @@ impl Session {
             main_agent_id: None,
             route_mode: None,
             whiteboard_route_mode: None,
+            deleted_at: None,
         }
     }
 }
@@ -279,12 +284,18 @@ impl Capability {
 }
 
 /// One model exposed by a provider endpoint plus its per-model capabilities
-/// (KiloCode-style: each model is individually tagged).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// (KiloCode-style: each model is individually tagged) and per-model hyperparams.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelEntry {
     pub id: String,
     #[serde(default)]
     pub capabilities: Vec<Capability>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<i64>,
 }
 
 impl ModelEntry {
@@ -292,6 +303,9 @@ impl ModelEntry {
         Self {
             id: id.to_string(),
             capabilities: caps.to_vec(),
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
         }
     }
 }
@@ -318,6 +332,9 @@ where
             ModelEntryRaw::Id(id) => ModelEntry {
                 id,
                 capabilities: vec![Capability::Reasoning],
+                temperature: None,
+                top_p: None,
+                max_tokens: None,
             },
         })
         .collect())
@@ -350,11 +367,35 @@ impl ProviderSettings {
 
     /// Extracts the `"settings"` key from a provider `params` object;
     /// missing/malformed payloads fall back to defaults.
+    /// Post-processing applies legacy top-level hyperparams as per-model
+    /// fallbacks (read-time compat, no DB write).
     pub fn from_params(params: &serde_json::Value) -> Self {
-        params
+        let mut settings = params
             .get("settings")
             .and_then(|value| serde_json::from_value::<ProviderSettings>(value.clone()).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        settings.apply_legacy_toplevel_fallback();
+        settings
+    }
+
+    /// Read-time compat: if a model's per-model hyperparam is None but the
+    /// provider top-level value is Some, back-fill the model. The top-level
+    /// fields are preserved for backward reading but new writes set them null.
+    fn apply_legacy_toplevel_fallback(&mut self) {
+        if self.temperature.is_none() && self.top_p.is_none() && self.max_tokens.is_none() {
+            return;
+        }
+        for m in &mut self.models {
+            if m.temperature.is_none() {
+                m.temperature = self.temperature;
+            }
+            if m.top_p.is_none() {
+                m.top_p = self.top_p;
+            }
+            if m.max_tokens.is_none() {
+                m.max_tokens = self.max_tokens;
+            }
+        }
     }
 
     /// Writes the settings back into a `params` object, preserving any
@@ -786,6 +827,8 @@ impl CliFlavor {
 /// An executable external CLI agent (Claude Code / Codex / custom scripts).
 /// `args` is a JSON array template supporting a `{prompt}` placeholder;
 /// `env` is a JSON object of extra environment variables.
+/// `model_id` optionally pins a specific model served by this CLI agent,
+/// enabling per-ModelId binding granularity in the Roles UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentProfile {
     pub id: String,
@@ -798,7 +841,25 @@ pub struct AgentProfile {
     pub env: serde_json::Value,
     pub working_dir: Option<String>,
     pub enabled: bool,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// CLI 会话保持参数模板（ADR 0012 D6），如 `--resume {session_id}`。
+    /// 非空时覆盖方言默认；`{session_id}` 占位符运行时替换。
+    #[serde(default)]
+    pub resume_args: Option<String>,
     pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Per (session, role_agent) CLI Agent session handle (ADR 0012 D4).
+/// Stores the CLI Agent's own session id for resume — different Role Agents
+/// each hold an independent handle, even if bound to the same CLI Agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCliHandle {
+    pub session_id: String,
+    pub role_agent_id: String,
+    pub agent_profile_id: String,
+    pub cli_session_id: Option<String>,
     pub updated_at: i64,
 }
 
@@ -889,4 +950,274 @@ pub struct Attachment {
     pub size_bytes: i64,
     pub sha256: String,
     pub created_at: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Self-Evolution settings (PrimeAgent Continual Harness H=(ρ,G,K,M) + RSI +
+// Hermes auto-skill-creation). Stored as a single JSON row in `app_settings`
+// under key `evolution_settings`. The four value objects map to the four
+// configuration dimensions exposed in the Settings → 自进化 tab.
+// ---------------------------------------------------------------------------
+
+/// Minimum-edit strategy for GEPA-style prompt refinement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefineStrategy {
+    PromptNote,
+    Memory,
+    Skill,
+    SubAgentSpec,
+}
+
+impl Default for RefineStrategy {
+    fn default() -> Self {
+        RefineStrategy::PromptNote
+    }
+}
+
+/// Format for auto-created skill documents (agentskills.io compatible).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillFormat {
+    SkillMd,
+}
+
+impl Default for SkillFormat {
+    fn default() -> Self {
+        SkillFormat::SkillMd
+    }
+}
+
+/// Cross-session memory retrieval strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalStrategy {
+    Keyword,
+    Semantic,
+    Hybrid,
+}
+
+impl Default for RetrievalStrategy {
+    fn default() -> Self {
+        RetrievalStrategy::Keyword
+    }
+}
+
+/// Dimension (1): allowlisted online learning sources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnlineLearningConfig {
+    pub authorized: bool,
+    pub allowlist: Vec<String>,
+}
+
+impl Default for OnlineLearningConfig {
+    fn default() -> Self {
+        Self {
+            authorized: false,
+            allowlist: DEFAULT_RESEARCH_DOMAINS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+}
+
+/// Dimension (2): GEPA-style reflection / refinement parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefineConfig {
+    pub trigger_failures: u32,
+    pub min_edit_strategy: RefineStrategy,
+    pub evidence_threshold: f64,
+    pub rollback_enabled: bool,
+}
+
+impl Default for RefineConfig {
+    fn default() -> Self {
+        Self {
+            trigger_failures: 3,
+            min_edit_strategy: RefineStrategy::default(),
+            evidence_threshold: 0.8,
+            rollback_enabled: true,
+        }
+    }
+}
+
+/// Dimension (3): automatic skill creation (Hermes-style).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillCreationConfig {
+    pub enabled: bool,
+    pub format: SkillFormat,
+}
+
+impl Default for SkillCreationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            format: SkillFormat::default(),
+        }
+    }
+}
+
+/// Dimension (4): persistent memory policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryPolicy {
+    pub retention_days: u32,
+    pub retrieval: RetrievalStrategy,
+}
+
+impl Default for MemoryPolicy {
+    fn default() -> Self {
+        Self {
+            retention_days: 90,
+            retrieval: RetrievalStrategy::default(),
+        }
+    }
+}
+
+/// Top-level self-evolution configuration aggregating all four dimensions.
+/// Stored as JSON in `app_settings` (key = `evolution_settings`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionSettings {
+    pub online_learning: OnlineLearningConfig,
+    pub refine: RefineConfig,
+    pub skill_creation: SkillCreationConfig,
+    pub memory_policy: MemoryPolicy,
+}
+
+impl Default for EvolutionSettings {
+    fn default() -> Self {
+        Self {
+            online_learning: OnlineLearningConfig::default(),
+            refine: RefineConfig::default(),
+            skill_creation: SkillCreationConfig::default(),
+            memory_policy: MemoryPolicy::default(),
+        }
+    }
+}
+
+/// Default research domains — mirrors `evolution::research::ResearchAllowlist::DOMAINS`.
+/// Duplicated here to avoid a domain → evolution dependency (domain is lower-level).
+const DEFAULT_RESEARCH_DOMAINS: [&str; 9] = [
+    "github.com",
+    "raw.githubusercontent.com",
+    "deepseek.com",
+    "shikigami.dev",
+    "t3.codes",
+    "1code.dev",
+    "aoagents.dev",
+    "parallelcode.app",
+    "agor.live",
+];
+
+/// ADR 0015: Message queue entry — a user message waiting to be processed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageQueueEntry {
+    pub id: String,
+    pub session_id: String,
+    pub text: String,
+    pub status: QueueStatus,
+    pub seq: i64,
+    pub created_at: i64,
+}
+
+/// Processing status of a queue entry.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueStatus {
+    Queued,
+    Processing,
+    Done,
+    Failed,
+}
+
+impl QueueStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QueueStatus::Queued => "queued",
+            QueueStatus::Processing => "processing",
+            QueueStatus::Done => "done",
+            QueueStatus::Failed => "failed",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evolution_settings_default_values() {
+        let s = EvolutionSettings::default();
+        assert!(!s.online_learning.authorized);
+        assert_eq!(s.online_learning.allowlist.len(), 9);
+        assert!(s.online_learning.allowlist.contains(&"github.com".to_string()));
+        assert_eq!(s.refine.trigger_failures, 3);
+        assert_eq!(s.refine.evidence_threshold, 0.8);
+        assert!(s.refine.rollback_enabled);
+        assert!(matches!(s.refine.min_edit_strategy, RefineStrategy::PromptNote));
+        assert!(!s.skill_creation.enabled);
+        assert!(matches!(s.skill_creation.format, SkillFormat::SkillMd));
+        assert_eq!(s.memory_policy.retention_days, 90);
+        assert!(matches!(s.memory_policy.retrieval, RetrievalStrategy::Keyword));
+    }
+
+    #[test]
+    fn evolution_settings_roundtrip_serde() {
+        let original = EvolutionSettings {
+            online_learning: OnlineLearningConfig {
+                authorized: true,
+                allowlist: vec!["custom.dev".into()],
+            },
+            refine: RefineConfig {
+                trigger_failures: 5,
+                min_edit_strategy: RefineStrategy::Skill,
+                evidence_threshold: 0.9,
+                rollback_enabled: false,
+            },
+            skill_creation: SkillCreationConfig {
+                enabled: true,
+                format: SkillFormat::SkillMd,
+            },
+            memory_policy: MemoryPolicy {
+                retention_days: 180,
+                retrieval: RetrievalStrategy::Hybrid,
+            },
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: EvolutionSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.online_learning.authorized, true);
+        assert_eq!(decoded.online_learning.allowlist, vec!["custom.dev"]);
+        assert_eq!(decoded.refine.trigger_failures, 5);
+        assert!(matches!(decoded.refine.min_edit_strategy, RefineStrategy::Skill));
+        assert_eq!(decoded.refine.evidence_threshold, 0.9);
+        assert!(!decoded.refine.rollback_enabled);
+        assert!(decoded.skill_creation.enabled);
+        assert_eq!(decoded.memory_policy.retention_days, 180);
+        assert!(matches!(decoded.memory_policy.retrieval, RetrievalStrategy::Hybrid));
+    }
+
+    #[test]
+    fn evolution_settings_snake_case_serde() {
+        let json = r#"{
+            "online_learning": {"authorized": true, "allowlist": []},
+            "refine": {"trigger_failures": 1, "min_edit_strategy": "memory", "evidence_threshold": 0.5, "rollback_enabled": true},
+            "skill_creation": {"enabled": false, "format": "skill_md"},
+            "memory_policy": {"retention_days": 1, "retrieval": "semantic"}
+        }"#;
+        let decoded: EvolutionSettings = serde_json::from_str(json).unwrap();
+        assert!(decoded.online_learning.authorized);
+        assert!(matches!(decoded.refine.min_edit_strategy, RefineStrategy::Memory));
+        assert!(matches!(decoded.memory_policy.retrieval, RetrievalStrategy::Semantic));
+    }
+
+    #[test]
+    fn evolution_settings_default_json_roundtrip() {
+        let defaults = EvolutionSettings::default();
+        let json = serde_json::to_string(&defaults).unwrap();
+        let decoded: EvolutionSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.refine.trigger_failures, defaults.refine.trigger_failures);
+        assert_eq!(decoded.refine.evidence_threshold, defaults.refine.evidence_threshold);
+        assert_eq!(decoded.memory_policy.retention_days, defaults.memory_policy.retention_days);
+        assert_eq!(decoded.online_learning.allowlist, defaults.online_learning.allowlist);
+    }
 }

@@ -52,6 +52,7 @@ impl PipelineExecutor {
                 max_tokens: role.max_tokens,
                 cache_retention: Default::default(),
                 cache_scope: None,
+                external_session_id: None,
             };
 
             let response = provider

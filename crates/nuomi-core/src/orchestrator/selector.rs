@@ -193,6 +193,7 @@ impl SpeakerSelector for LlmSelector {
             max_tokens: None,
             cache_retention: Default::default(),
             cache_scope: None,
+            external_session_id: None,
         };
         let Ok(resp) = self.provider.complete(&request).await else {
             return state.last_speaker.map_or(0, |last| (last + 1) % n);

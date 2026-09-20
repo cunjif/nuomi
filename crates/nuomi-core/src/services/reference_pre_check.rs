@@ -73,7 +73,7 @@ pub fn check_provider_refs(conn: &Connection, provider_id: &str) -> Result<Entit
 }
 
 /// Scans for entities referencing a Role (`teams.member_role_ids` /
-/// `sessions.agent`).
+/// `conversation_participants`).
 pub fn check_role_refs(conn: &Connection, role_id: &str) -> Result<EntityRefs, StoreError> {
     let mut refs = EntityRefs::default();
 
@@ -84,8 +84,9 @@ pub fn check_role_refs(conn: &Connection, role_id: &str) -> Result<EntityRefs, S
         refs.teams.push(row?);
     }
 
+    // ADR 0013: 引用检查从 sessions.agent_kind 改为 conversation_participants。
     let mut stmt = conn.prepare(
-        "SELECT id FROM sessions WHERE agent_kind = 'role' AND agent_ref_id = ?1",
+        "SELECT DISTINCT session_id FROM conversation_participants WHERE agent_kind = 'role' AND agent_ref_id = ?1",
     )?;
     let rows = stmt.query_map(params![role_id], |row| row.get::<_, String>(0))?;
     for row in rows {
@@ -157,8 +158,9 @@ pub fn delete_and_nullify_role_refs(conn: &mut Connection, role_id: &str) -> Res
         }
     }
 
+    // ADR 0013: 级联清空从 sessions.agent_kind 改为 conversation_participants。
     tx.execute(
-        "UPDATE sessions SET agent_kind = NULL, agent_ref_id = NULL WHERE agent_kind = 'role' AND agent_ref_id = ?1",
+        "DELETE FROM conversation_participants WHERE agent_kind = 'role' AND agent_ref_id = ?1",
         params![role_id],
     )?;
 

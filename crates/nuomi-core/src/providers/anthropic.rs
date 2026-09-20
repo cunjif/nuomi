@@ -225,6 +225,7 @@ pub(crate) fn parse_response(body: &Value) -> Result<ChatResponse, ProviderError
             .get("stop_reason")
             .and_then(Value::as_str)
             .map(str::to_string),
+        cli_session_id: None,
     })
 }
 

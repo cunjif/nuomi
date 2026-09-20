@@ -41,6 +41,10 @@ const DEFAULT_SESSION_TITLE: &str = "nuomi session";
 /// Auto-derived titles never exceed this many characters.
 const TITLE_MAX_CHARS: usize = 40;
 
+/// Above this character count the input is considered "long" and a
+/// keyword-frequency extractor replaces first-line/first-sentence heuristics.
+const TITLE_LONG_THRESHOLD: usize = 200;
+
 /// A concrete model endpoint (CLI v1: key comes from `NUOMI_API_KEY`).
 #[derive(Debug, Clone)]
 pub struct ProviderEndpoint {
@@ -309,7 +313,7 @@ impl NuomiKernel {
 
         let history = std::mem::take(&mut state.history);
         let result = self
-            .run_turn(&session_id, history, task, delta_counter.clone(), None, None, None, None)
+            .run_turn(&session_id, history, task, delta_counter.clone(), None, None, None, None, None)
             .await?;
         state.history = result.transcript.clone();
         Ok(result)
@@ -333,6 +337,7 @@ impl NuomiKernel {
     /// `cancel` is a cooperative stop signal: the loop returns at the next
     /// step boundary (an in-flight provider stream is not aborted mid-token)
     /// and whatever was produced is persisted before returning.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_task_in_session(
         &self,
         session_id: &str,
@@ -341,13 +346,15 @@ impl NuomiKernel {
         provider: Option<Arc<dyn LlmProvider>>,
         model: Option<String>,
         overlay: Option<RoleOverlay>,
+        external_session_id: Option<String>,
+        max_history_chars: Option<usize>,
     ) -> CoreResult<LoopRunResult> {
         let session_id = session_id.to_string();
         let task = task.to_string();
 
         let path = self.db_path.clone();
         let sid_for_load = session_id.clone();
-        let history =
+        let mut history =
             tokio::task::spawn_blocking(move || -> Result<Vec<ChatMessage>, CoreError> {
                 let db = Db::open(&path)?;
                 repos::sessions::get(&db.0, &sid_for_load)?;
@@ -358,14 +365,30 @@ impl NuomiKernel {
             .await
             .map_err(join_err)??;
 
+        // Truncate history on CLI binding change (ADR 0012 D7).
+        if let Some(max_chars) = max_history_chars {
+            history = truncate_history_chars(history, max_chars);
+        }
+
         let delta_counter = self.delta_counter(&session_id).await;
-        self.run_turn(&session_id, history, &task, delta_counter, cancel, provider, model, overlay)
-            .await
+        self.run_turn(
+            &session_id,
+            history,
+            &task,
+            delta_counter,
+            cancel,
+            provider,
+            model,
+            overlay,
+            external_session_id,
+        )
+        .await
     }
 
     /// Shared core of [`run_task`] and [`run_task_in_session`]: bridges
     /// deltas onto the bus, runs the loop, persists only the new messages
     /// and republishes them with their authoritative `events.seq`.
+    #[allow(clippy::too_many_arguments)]
     async fn run_turn(
         &self,
         session_id: &str,
@@ -376,6 +399,7 @@ impl NuomiKernel {
         provider: Option<Arc<dyn LlmProvider>>,
         model: Option<String>,
         overlay: Option<RoleOverlay>,
+        external_session_id: Option<String>,
     ) -> CoreResult<LoopRunResult> {
         let history_len = history.len();
         // Bridge streaming deltas onto the kernel bus so the shell's event
@@ -406,6 +430,7 @@ impl NuomiKernel {
             effective_provider,
             LoopConfig {
                 model: effective_model,
+                external_session_id: external_session_id.clone(),
                 ..LoopConfig::default()
             },
         )
@@ -627,17 +652,119 @@ impl NuomiKernel {
     }
 }
 
-/// Derives a session auto-title from the first task input: the trimmed
-/// first line, capped at [`TITLE_MAX_CHARS`] characters with a trailing
-/// ellipsis only when truncation happened. Whitespace-only input maps to
-/// `""` (meaning "keep the default title").
+/// Derives a session auto-title from the first task input using a
+/// length-tiered extractor:
+/// - **≤ 40 chars**: trimmed first line, capped at [`TITLE_MAX_CHARS`].
+/// - **41–200 chars**: first sentence (split on `。！？.!?`), capped.
+/// - **> 200 chars**: top-3 frequency keywords (stopword-filtered), joined
+///   with spaces and capped.
+///
+/// Whitespace-only input maps to `""` (meaning "keep the default title").
 fn derive_title(input: &str) -> String {
-    let first_line = input.trim().lines().next().unwrap_or("").trim_end();
-    let mut title: String = first_line.chars().take(TITLE_MAX_CHARS).collect();
-    if first_line.chars().count() > TITLE_MAX_CHARS {
+    let text = input.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    let char_count = text.chars().count();
+    if char_count <= TITLE_MAX_CHARS {
+        first_line_truncated(text)
+    } else if char_count <= TITLE_LONG_THRESHOLD {
+        first_sentence_truncated(text)
+    } else {
+        keyword_title(text)
+    }
+}
+
+/// First non-empty line, truncated to [`TITLE_MAX_CHARS`] with a trailing `…`.
+fn first_line_truncated(text: &str) -> String {
+    let first_line = text.lines().next().unwrap_or("").trim_end();
+    truncate_with_ellipsis(first_line, TITLE_MAX_CHARS)
+}
+
+/// First sentence (up to the first sentence-ending punctuation), truncated.
+/// Falls back to [`first_line_truncated`] when no sentence terminator is found.
+fn first_sentence_truncated(text: &str) -> String {
+    let end = text
+        .char_indices()
+        .find(|(_, c)| matches!(c, '。' | '！' | '？' | '.' | '!' | '?'));
+    let sentence = match end {
+        Some((idx, c)) => text[..idx + c.len_utf8()].trim(),
+        None => text.lines().next().unwrap_or("").trim_end(),
+    };
+    if sentence.is_empty() {
+        first_line_truncated(text)
+    } else {
+        truncate_with_ellipsis(sentence, TITLE_MAX_CHARS)
+    }
+}
+
+/// Top-3 frequency keywords (stopword-filtered, ≥ 2 chars, ≤ 12 chars to
+/// avoid whole-sentence tokens), joined with spaces. Falls back to
+/// [`first_line_truncated`] when no keywords survive filtering.
+fn keyword_title(text: &str) -> String {
+    let mut freq: HashMap<&str, usize> = HashMap::new();
+    for token in tokenize(text) {
+        let len = token.chars().count();
+        if len < 2 || len > 12 || is_stopword(token) {
+            continue;
+        }
+        *freq.entry(token).or_insert(0) += 1;
+    }
+    let mut sorted: Vec<(&&str, &usize)> = freq.iter().collect();
+    // Highest frequency first; tie-break by shorter token (more keyword-like).
+    sorted.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.len().cmp(&b.0.len())));
+    let keywords: Vec<&str> = sorted.iter().take(3).map(|(w, _)| **w).collect();
+    if keywords.is_empty() {
+        first_line_truncated(text)
+    } else {
+        truncate_with_ellipsis(&keywords.join(" "), TITLE_MAX_CHARS)
+    }
+}
+
+/// Truncates `s` to `max` characters, appending `…` when truncation happened.
+fn truncate_with_ellipsis(s: &str, max: usize) -> String {
+    let mut title: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
         title.push('…');
     }
     title
+}
+
+/// Splits on whitespace and common punctuation, returning non-empty slices.
+fn tokenize(text: &str) -> Vec<&str> {
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '，' | ',' | '。' | '.' | '！' | '!' | '？' | '?' | '；' | ';' | '：' | ':'
+                    | '、' | '/' | '|' | '-' | '_' | '"' | '\'' | '`' | '(' | ')' | '（' | '）'
+                    | '【' | '】' | '[' | ']' | '{' | '}'
+            )
+    })
+    .filter(|s| !s.is_empty())
+    .collect()
+}
+
+/// Common Chinese/English function words and particles that carry no topic
+/// signal for keyword extraction.
+fn is_stopword(word: &str) -> bool {
+    const STOPWORDS: &[&str] = &[
+        "the", "a", "an", "and", "or", "but", "if", "then", "else", "for", "of", "to", "in",
+        "on", "at", "by", "with", "from", "as", "is", "it", "this", "that", "these", "those",
+        "i", "you", "he", "she", "we", "they", "me", "him", "her", "us", "them", "my", "your",
+        "his", "its", "our", "their", "what", "which", "who", "when", "where", "why", "how",
+        "do", "does", "did", "can", "could", "should", "would", "will", "shall", "may", "might",
+        "must", "have", "has", "had", "be", "been", "being", "am", "are", "was", "were", "not",
+        "no", "yes", "so", "too", "very", "just", "also", "only", "up", "down", "out", "about",
+        "into", "over", "under", "again", "here", "there", "all", "any", "both", "each", "few",
+        "more", "most", "other", "some", "such",
+        "的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "这", "那", "有", "和", "与",
+        "或", "但", "如", "果", "一", "个", "上", "下", "中", "为", "以", "及", "等", "都", "也",
+        "就", "还", "不", "没", "要", "会", "能", "可", "对", "让", "把", "被", "给", "向", "从",
+        "到", "于", "之", "其", "而", "且", "并", "则", "若", "虽", "然", "因", "所", "吗", "呢",
+        "吧", "啊", "呀", "哦", "嗯",
+    ];
+    STOPWORDS.contains(&word)
 }
 
 /// Rebuilds a `ChatMessage` sequence from persisted session events
@@ -680,6 +807,28 @@ fn join_err(e: tokio::task::JoinError) -> CoreError {
     CoreError::Store(crate::store::StoreError::Sqlite(
         rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
     ))
+}
+
+/// Truncates `history` to the last `max_chars` characters of content,
+/// keeping message boundaries intact (ADR 0012 D7). When the total fits,
+/// the history is returned unchanged.
+fn truncate_history_chars(history: Vec<ChatMessage>, max_chars: usize) -> Vec<ChatMessage> {
+    let total: usize = history.iter().map(|m| m.content.chars().count()).sum();
+    if total <= max_chars {
+        return history;
+    }
+    let mut kept = Vec::new();
+    let mut accumulated = 0usize;
+    for msg in history.into_iter().rev() {
+        let len = msg.content.chars().count();
+        if accumulated + len > max_chars {
+            break;
+        }
+        accumulated += len;
+        kept.push(msg);
+    }
+    kept.reverse();
+    kept
 }
 
 #[cfg(test)]
@@ -808,10 +957,73 @@ mod tests {
             (overlong_ascii.as_str(), truncated_ascii.as_str()),
             // Multi-byte chars count per character, not per byte.
             (overlong_cjk.as_str(), truncated_cjk.as_str()),
+            // Medium text (41-200 chars): first sentence extraction.
+            ("hello world. this is a longer test sentence exceeding forty.", "hello world."),
+            ("这是一个测试。后面跟着足够多的填充文字来确保总长度超过四十个字符才行所以多写一些。", "这是一个测试。"),
+            ("first sentence here? second one continues past forty chars!", "first sentence here?"),
         ];
         for (input, expected) in cases {
             assert_eq!(derive_title(input), expected, "input: {input:?}");
         }
+    }
+
+    #[test]
+    fn derive_title_long_text_uses_keywords() {
+        // > 200 chars: keyword extraction path.
+        let long_en = format!(
+            "{}{}{}",
+            "alpha ".repeat(5),
+            "beta ".repeat(3),
+            "gamma ".repeat(2),
+        ) + &"x ".repeat(100);
+        let title = derive_title(&long_en);
+        assert!(!title.is_empty(), "long text should yield a title");
+        assert!(
+            title.chars().count() <= TITLE_MAX_CHARS + 1,
+            "title must fit within max chars (plus ellipsis): got {title:?}"
+        );
+        // alpha (5x) should surface before beta (3x) / gamma (2x).
+        assert!(title.contains("alpha"), "top keyword alpha should appear: {title:?}");
+
+        let long_cjk = "错误 ".repeat(60);
+        let title_cjk = derive_title(&long_cjk);
+        assert!(!title_cjk.is_empty(), "long CJK text should yield a title");
+        assert!(
+            title_cjk.chars().count() <= TITLE_MAX_CHARS + 1,
+            "CJK title must fit: got {title_cjk:?}"
+        );
+    }
+
+    #[test]
+    fn truncate_history_chars_returns_unchanged_when_within_budget() {
+        let history = vec![
+            ChatMessage::user("hello"),
+            ChatMessage::assistant("world"),
+        ];
+        let truncated = truncate_history_chars(history.clone(), 100);
+        assert_eq!(truncated, history);
+    }
+
+    #[test]
+    fn truncate_history_chars_drops_oldest_messages() {
+        let history = vec![
+            ChatMessage::user("aaaa"),   // 4
+            ChatMessage::assistant("bbbb"), // 4
+            ChatMessage::user("cccc"),   // 4
+            ChatMessage::assistant("dddd"), // 4
+        ];
+        // Budget 10 → keep last 2 messages (8 chars), 3rd would exceed (12).
+        let truncated = truncate_history_chars(history, 10);
+        assert_eq!(truncated.len(), 2);
+        assert_eq!(truncated[0].content, "cccc");
+        assert_eq!(truncated[1].content, "dddd");
+    }
+
+    #[test]
+    fn truncate_history_chars_empty_budget_yields_empty() {
+        let history = vec![ChatMessage::user("x")];
+        let truncated = truncate_history_chars(history, 0);
+        assert!(truncated.is_empty());
     }
 
     #[tokio::test]

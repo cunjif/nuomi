@@ -174,6 +174,7 @@ mod tests {
                     cache_write_tokens: None,
                 }),
                 finish_reason: Some("stop".into()),
+                cli_session_id: None,
             })
         }
         fn stream(
@@ -200,6 +201,7 @@ mod tests {
             max_tokens: None,
             cache_retention: Default::default(),
             cache_scope: None,
+            external_session_id: None,
         }
     }
 

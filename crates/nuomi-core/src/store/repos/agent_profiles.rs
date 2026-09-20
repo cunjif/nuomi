@@ -9,8 +9,8 @@ use crate::store::StoreError;
 pub fn insert(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO agent_profiles
-         (id, name, adapter, flavor, command, args, env, working_dir, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         (id, name, adapter, flavor, command, args, env, working_dir, enabled, model_id, resume_args, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             p.id,
             p.name,
@@ -21,6 +21,8 @@ pub fn insert(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
             serde_json::to_string(&p.env)?,
             p.working_dir,
             p.enabled as i64,
+            p.model_id,
+            p.resume_args,
             p.created_at,
             p.updated_at
         ],
@@ -30,7 +32,7 @@ pub fn insert(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
 
 pub fn get(conn: &Connection, id: &str) -> Result<AgentProfile, StoreError> {
     conn.query_row(
-        "SELECT id, name, adapter, flavor, command, args, env, working_dir, enabled, created_at, updated_at
+        "SELECT id, name, adapter, flavor, command, args, env, working_dir, enabled, model_id, resume_args, created_at, updated_at
          FROM agent_profiles WHERE id = ?1",
         params![id],
         row_to_profile,
@@ -46,7 +48,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<AgentProfile, StoreError> {
 pub fn update(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
     let n = conn.execute(
         "UPDATE agent_profiles SET name = ?2, adapter = ?3, flavor = ?4, command = ?5,
-         args = ?6, env = ?7, working_dir = ?8, enabled = ?9, updated_at = ?10
+         args = ?6, env = ?7, working_dir = ?8, enabled = ?9, model_id = ?10, resume_args = ?11, updated_at = ?12
          WHERE id = ?1",
         params![
             p.id,
@@ -58,6 +60,8 @@ pub fn update(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
             serde_json::to_string(&p.env)?,
             p.working_dir,
             p.enabled as i64,
+            p.model_id,
+            p.resume_args,
             p.updated_at
         ],
     )?;
@@ -72,7 +76,7 @@ pub fn update(conn: &Connection, p: &AgentProfile) -> Result<(), StoreError> {
 
 pub fn list(conn: &Connection) -> Result<Vec<AgentProfile>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, adapter, flavor, command, args, env, working_dir, enabled, created_at, updated_at
+        "SELECT id, name, adapter, flavor, command, args, env, working_dir, enabled, model_id, resume_args, created_at, updated_at
          FROM agent_profiles ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map([], row_to_profile)?;
@@ -115,8 +119,10 @@ fn row_to_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentProfile> {
         env: crate::store::json_col(0, &env)?,
         working_dir: row.get(7)?,
         enabled: row.get::<_, i64>(8)? != 0,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        model_id: row.get(9)?,
+        resume_args: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -145,6 +151,8 @@ mod tests {
             env: serde_json::json!({ "NUOMI": "1" }),
             working_dir: Some("C:/tmp".into()),
             enabled: true,
+            model_id: None,
+            resume_args: None,
             created_at: 1,
             updated_at: 1,
         }
@@ -160,6 +168,8 @@ mod tests {
         assert_eq!(a.env, b.env);
         assert_eq!(a.working_dir, b.working_dir);
         assert_eq!(a.enabled, b.enabled);
+        assert_eq!(a.model_id, b.model_id);
+        assert_eq!(a.resume_args, b.resume_args);
         assert_eq!(a.created_at, b.created_at);
         assert_eq!(a.updated_at, b.updated_at);
     }

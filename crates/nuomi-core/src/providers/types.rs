@@ -114,6 +114,10 @@ pub struct ChatResponse {
     pub usage: Option<Usage>,
     /// Provider's finish reason when available (`stop`, `tool_use`, ...).
     pub finish_reason: Option<String>,
+    /// CLI Agent 自身会话 id（ADR 0012 D8），由 CLI adapter 提取。
+    /// 非 CLI provider 为 None。用于持久化到 session_cli_handles。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session_id: Option<String>,
 }
 
 /// Streaming events normalized across protocols.
@@ -140,6 +144,11 @@ pub struct ChatRequest {
     /// `None` falls back to provider-default cache routing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_scope: Option<String>,
+    /// CLI Agent 外部会话 id（ADR 0012 D8），用于让 CLI adapter 在后续轮次
+    /// 传入 resume 参数以复用 CLI Agent 自身的模型会话。
+    /// 非 CLI provider 忽略此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_session_id: Option<String>,
 }
 
 impl ChatRequest {
@@ -153,6 +162,7 @@ impl ChatRequest {
             max_tokens: None,
             cache_retention: CacheRetention::None,
             cache_scope: None,
+            external_session_id: None,
         }
     }
 }

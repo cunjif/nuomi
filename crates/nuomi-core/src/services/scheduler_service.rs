@@ -17,8 +17,8 @@ use time::{OffsetDateTime, Time};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::{
-    new_id, now_ms, ConversationKind, Schedule, ScheduleSessionMode, ScheduleTargetKind, Task,
-    TaskStatus,
+    new_id, now_ms, AgentRefKind, ConversationKind, Schedule, ScheduleSessionMode,
+    ScheduleTargetKind, Task, TaskStatus,
 };
 use crate::harness::bus::{Event, EventBus};
 use crate::services::conversation_service;
@@ -325,11 +325,18 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                         Some(existing_sid.clone())
                     }
                     _ => {
+                        // ADR 0013: Schedule.agent 保留，但透传为 participants
+                        // 写入 conversation_participants 表（而非 session.agent）。
+                        let participants: Vec<(AgentRefKind, &str)> = s
+                            .agent
+                            .as_ref()
+                            .map(|(k, id)| vec![(*k, id.as_str())])
+                            .unwrap_or_default();
                         let session = conversation_service::create_conversation(
                             conn,
                             ConversationKind::Scheduled,
                             &s.task_title,
-                            s.agent.as_ref().map(|(k, id)| (*k, id.as_str())),
+                            &participants,
                             s.team_id.as_deref(),
                             // Anchor the conversation to its schedule so a
                             // scheduled session can be traced back later.
