@@ -2,6 +2,10 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentRefDto, ConversationDto } from "../../../lib/ipc/client";
+import { ipc } from "../../../lib/ipc/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { describeError } from "../../../i18n";
+import { toast } from "../../../lib/store/toastStore";
 import { AgentAvatarList } from "./AgentAvatarList";
 import { ConversationInfoPanel } from "./ConversationInfoPanel";
 import { AgentBottomSheet } from "./AgentBottomSheet";
@@ -27,6 +31,7 @@ export function AgentSidebar({
   onClose,
 }: AgentSidebarProps): ReactNode {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const [selectedAgent, setSelectedAgent] = useState<AgentRefDto | null>(null);
 
   // State machine: closing the sidebar also dismisses the BottomSheet.
@@ -37,6 +42,21 @@ export function AgentSidebar({
   // Click outside to close (backdrop).
   const onBackdropClick = (): void => {
     onClose();
+  };
+
+  // ADR 0013: "Remove member" only in group chat (participantAgents.length > 1).
+  const canRemove = conversation.participantAgents.length > 1;
+
+  const handleRemove = async (): Promise<void> => {
+    if (!selectedAgent) return;
+    try {
+      await ipc.removeConversationAgent(sessionId, { kind: selectedAgent.kind, id: selectedAgent.id });
+      void qc.invalidateQueries({ queryKey: ["conversation", sessionId] });
+      setSelectedAgent(null);
+    } catch (e) {
+      // P1-5: surface the error instead of silently swallowing it.
+      toast.error(`${t("conversation.removeMemberFailed")}: ${describeError(e)}`);
+    }
   };
 
   return (
@@ -92,6 +112,8 @@ export function AgentSidebar({
             agentKind={selectedAgent.kind}
             agentId={selectedAgent.id}
             onClose={() => setSelectedAgent(null)}
+            canRemove={canRemove}
+            onRemove={handleRemove}
           />
         )}
       </aside>

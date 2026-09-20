@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import type { CommandContext } from "../../lib/commands/registry";
 import { describeError } from "../../i18n";
@@ -10,6 +10,7 @@ import { toast } from "../../lib/store/toastStore";
 import { useTheme } from "../../lib/store/useTheme";
 import { useUiStore } from "../../lib/store/uiStore";
 import { Composer } from "../conversation/composer/Composer";
+import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
 
@@ -33,17 +34,47 @@ export function ChatView(): ReactNode {
     mutationFn: (input: string) => {
       if (sessionId === null) return Promise.reject(new Error("no session"));
       setFinalText(null);
+      stream.addOptimistic(input);
       return ipc.submitTask(sessionId, input);
     },
     onSuccess: (result) => {
-      // Deltas already streamed the answer; only fall back to finalText when
-      // nothing arrived live (e.g. non-streaming providers).
-      if (!stream.hasLiveActivity() && result.finalText.length > 0) setFinalText(result.finalText);
+      const hadLive = stream.hasLiveActivity();
+      if (!hadLive && result.finalText.length > 0) setFinalText(result.finalText);
       stream.clearLive();
+      // P1-3: clear the optimistic bubble now that the turn has completed
+      // and the user message is persisted. Without this, the history
+      // refetch lands with the assistant reply as the last entry, which
+      // makes `showOptimistic` true again and re-renders the user bubble
+      // as a ghost after the assistant reply.
+      stream.clearOptimistic();
       if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+      if (!hadLive && result.finalText.length === 0) {
+        toast.warn(t("chat.emptyResponse"));
+      }
+    },
+    onError: (e) => {
+      stream.clearOptimistic();
+      toast.error(`${t("chat.sendFailed")}: ${describeError(e)}`);
+    },
+  });
+
+  // ADR 0015: message queue — enqueue when agent is busy.
+  const queueQuery = useQuery({
+    queryKey: ["messageQueue", sessionId],
+    queryFn: () => (sessionId !== null ? ipc.listMessageQueue(sessionId) : Promise.resolve([])),
+    enabled: sessionId !== null,
+  });
+  const enqueueMut = useMutation({
+    mutationFn: (input: string) => {
+      if (sessionId === null) return Promise.reject(new Error("no session"));
+      return ipc.enqueueMessage(sessionId, input);
+    },
+    onSuccess: () => {
+      if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["messageQueue", sessionId] });
     },
     onError: (e) => toast.error(`${t("chat.sendFailed")}: ${describeError(e)}`),
   });
+  const isAgentBusy = submitMut.isPending || (queueQuery.data?.length ?? 0) > 0;
 
   if (sessionId === null) {
     return (
@@ -60,7 +91,7 @@ export function ChatView(): ReactNode {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <AsyncBoundary
           isLoading={stream.isLoading}
           error={stream.error}
@@ -73,11 +104,16 @@ export function ChatView(): ReactNode {
       </div>
       <Composer
         disabled={false}
-        pending={submitMut.isPending}
+        pending={false}
         commandContext={commandContext}
         sessionId={sessionId}
+        topSlot={<QueueList sessionId={sessionId} />}
         onSubmit={async (input) => {
-          await submitMut.mutateAsync(input);
+          if (isAgentBusy) {
+            await enqueueMut.mutateAsync(input);
+          } else {
+            await submitMut.mutateAsync(input);
+          }
         }}
       />
     </div>

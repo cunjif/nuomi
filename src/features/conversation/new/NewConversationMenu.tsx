@@ -1,11 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { ipc } from "../../../lib/ipc/client";
-import { toast } from "../../../lib/store/toastStore";
-import { useUiStore } from "../../../lib/store/uiStore";
-import { describeError } from "../../../i18n";
 import { NewConversationDialog } from "./NewConversationDialog";
 import type { ConversationKind } from "../../../lib/conversation/kinds";
 
@@ -17,32 +12,20 @@ const MENU_ITEMS: Array<{ kind: ConversationKind; labelKey: string }> = [
 ];
 
 /**
- * Split button for creating new conversations. Left click creates a default
- * chat; the dropdown arrow opens a kind menu. Selecting a kind opens the
- * NewConversationDialog wizard.
+ * Split button for creating new conversations. Left click opens the
+ * NewConversationDialog wizard for a default chat; the dropdown arrow opens
+ * a kind menu.
  */
 export function NewConversationMenu(): ReactNode {
   const { t } = useTranslation();
-  const qc = useQueryClient();
-  const selectSession = useUiStore((s) => s.selectSession);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialogKind, setDialogKind] = useState<ConversationKind | null>(null);
-
-  const createChat = async (): Promise<void> => {
-    try {
-      const session = await ipc.createConversation({ kind: "chat", title: null, agent: null, teamId: null });
-      void qc.invalidateQueries({ queryKey: ["conversations"] });
-      selectSession(session.id);
-    } catch (e) {
-      toast.error(describeError(e));
-    }
-  };
 
   return (
     <div className="relative flex">
       <button
         type="button"
-        onClick={() => void createChat()}
+        onClick={() => setDialogKind("chat")}
         className="pixel-fill-accent rounded-l px-2 py-0.5 text-xs text-surface focus-visible:ring-2 focus-visible:ring-ink-accent"
       >
         {t("sessions.newSession")}

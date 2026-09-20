@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConversationDto } from "../../lib/ipc/client";
 import { Icon } from "../../components/ui/Icon/Icon";
+import { RoleAvatar } from "./composer/RoleAvatar";
 
 export interface ConversationHeaderProps {
   conversation: ConversationDto | null;
@@ -54,6 +55,7 @@ export function ConversationHeader({ conversation, statusSlot, onAgentSidebarOpe
         </span>
       )}
       {statusSlot}
+      <RoleAvatar conversation={conversation} />
       {onAgentSidebarOpen && (
         <button
           type="button"

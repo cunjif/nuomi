@@ -12,6 +12,8 @@ export interface AgentPickerPopoverProps {
   onClose: () => void;
   /** Jump to Settings → Roles tab to bind an unbound role. */
   onGoToSettings?: () => void;
+  /** Popover open direction relative to the anchor. */
+  placement?: "up" | "down";
 }
 
 /**
@@ -24,6 +26,7 @@ export function AgentPickerPopover({
   onSelect,
   onClose,
   onGoToSettings,
+  placement = "up",
 }: AgentPickerPopoverProps): ReactNode {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -35,7 +38,7 @@ export function AgentPickerPopover({
   });
   const { data: roles } = useQuery({ queryKey: ["roles"], queryFn: ipc.listRoles });
 
-  const { cli, role } = useMemo(() => groupAgentOptions(options ?? []), [options]);
+  const { role } = useMemo(() => groupAgentOptions(options ?? []), [options]);
   const readyMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of roles ?? []) {
@@ -51,7 +54,7 @@ export function AgentPickerPopover({
 
   return (
     <div
-      className="absolute bottom-full left-0 z-20 mb-1 w-64 rounded border border-ink-muted/40 bg-surface-raised shadow-lg"
+      className={`absolute z-20 w-64 rounded border border-ink-muted/40 bg-surface-raised shadow-lg ${placement === "down" ? "top-full right-0 mt-1" : "bottom-full left-0 mb-1"}`}
       role="dialog"
       aria-label={t("composer.agentPickerTitle")}
     >
@@ -74,22 +77,6 @@ export function AgentPickerPopover({
         </button>
       </div>
       <div className="max-h-48 overflow-y-auto py-1">
-        {cli.length > 0 && (
-          <div className="px-1.5">
-            <div className="py-0.5 text-xs font-semibold text-ink-muted">CLI Agents</div>
-            {cli.filter((o) => filterFn(o.name)).map((o) => (
-              <button
-                key={`${o.kind}:${o.id}`}
-                type="button"
-                onClick={() => void onSelect(o.kind, o.id)}
-                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm text-ink hover:bg-surface-overlay"
-              >
-                <span className="flex-1 truncate">{o.name}</span>
-                {!o.enabled && <span className="text-xs text-ink-muted">disabled</span>}
-              </button>
-            ))}
-          </div>
-        )}
         {readyRoles.length > 0 && (
           <div className="px-1.5">
             <div className="py-0.5 text-xs font-semibold text-ink-muted">
@@ -130,7 +117,7 @@ export function AgentPickerPopover({
             ))}
           </div>
         )}
-        {cli.length === 0 && role.length === 0 && (
+        {role.length === 0 && (
           <div className="px-1.5 py-2 text-sm text-ink-muted">{t("commands.noMatch")}</div>
         )}
       </div>

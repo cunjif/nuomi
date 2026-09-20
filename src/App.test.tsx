@@ -1,14 +1,15 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { seedConversation, seedProvider } from "./lib/ipc/test-double";
+import { seedConversation, seedProvider, seedRole } from "./lib/ipc/test-double";
 import { renderWithProviders } from "./test/helpers";
 import App from "./App";
 
 describe("App shell (U8)", () => {
   it("renders the three-pane shell with nav and connection status", async () => {
-    // The conversation surface is gated on "a Provider exists"; without one
-    // the main pane shows the provider hint instead of the chat placeholder.
+    // The conversation surface is gated on "a Role Agent exists"; without one
+    // the main pane shows the role-agent hint instead of the chat placeholder.
     seedProvider({ id: "p1", name: "demo provider" });
+    seedRole({ id: "r1", name: "demo role", providerId: "p1", builtin: true });
     seedConversation({ id: "s1", title: "demo session", createdAt: 1, updatedAt: 1 });
     renderWithProviders(<App />);
 

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CapabilityDto, RoleInput } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { fieldClass as field } from "../../components/ui/Field";
+import { PresetRolePicker } from "./PresetRolePicker";
+import type { PresetRoleSelection } from "./PresetRolePicker";
 
 /** Binding mode of the role form: unbound ("默认"), provider or CLI agent profile. */
 export type BindingMode = "none" | "provider" | "cli";
@@ -21,19 +23,74 @@ export const CAPABILITY_KEYS: ReadonlyArray<{ key: CapabilityDto; labelKey: stri
 
 export { readAgentProfileId } from "../../lib/conversation/roleReady";
 
-/** Add form for roles (`name` is the backend idempotency key). */
+/** Role Director dialog: plain-language description → generated Role. */
+function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [description, setDescription] = useState("");
+
+  const generateMut = useMutation({
+    mutationFn: (desc: string) => ipc.generateRole(desc),
+    onSuccess: (role) => {
+      void qc.invalidateQueries({ queryKey: ["roles"] });
+      toast.success(t("settings.roles.directorSuccess", { name: role.name }));
+      onClose();
+    },
+    onError: (e) => toast.error(`${t("settings.roles.directorFailed")}: ${describeError(e)}`),
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("settings.roles.directorTitle")}
+    >
+      <div className="w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
+        <h4 className="mb-2 text-sm font-semibold text-ink">
+          {t("settings.roles.directorTitle")}
+        </h4>
+        <p className="mb-2 text-xs text-ink-muted">{t("settings.roles.directorHint")}</p>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={4}
+          autoFocus
+          placeholder={t("settings.roles.directorPlaceholder") ?? ""}
+          aria-label={t("settings.roles.directorTitle")}
+          className="w-full rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
+        />
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-ink-muted px-3 py-1 text-sm text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            disabled={generateMut.isPending || description.trim().length === 0}
+            onClick={() => generateMut.mutate(description.trim())}
+            className="pixel-fill-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+          >
+            {generateMut.isPending ? t("settings.roles.directorGenerating") : t("settings.roles.directorGenerate")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Add form for roles — pure template definition (no binding). */
 export function RoleForm(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [name, setName] = useState("");
-  const [bindingMode, setBindingMode] = useState<BindingMode>("none");
-  const [providerId, setProviderId] = useState("");
-  const [agentProfileId, setAgentProfileId] = useState("");
   const [systemPromptOverride, setSystemPromptOverride] = useState("");
   const [requiredCapabilities, setRequiredCapabilities] = useState<CapabilityDto[]>([]);
-
-  const providersQuery = useQuery({ queryKey: ["providers"], queryFn: ipc.listProviders });
-  const profilesQuery = useQuery({ queryKey: ["agentProfiles"], queryFn: ipc.listAgentProfiles });
+  const [presetOpen, setPresetOpen] = useState(false);
+  const [directorOpen, setDirectorOpen] = useState(false);
 
   const saveMut = useMutation({
     mutationFn: (input: RoleInput) => ipc.upsertRole(input),
@@ -41,18 +98,19 @@ export function RoleForm(): ReactNode {
       void qc.invalidateQueries({ queryKey: ["roles"] });
       toast.success(t("settings.roles.saved"));
       setName("");
-      setBindingMode("none");
-      setProviderId("");
-      setAgentProfileId("");
       setSystemPromptOverride("");
       setRequiredCapabilities([]);
     },
     onError: (e) => {
-      // Inputs stay as-is so the user can fix and resubmit.
       toast.error(`${t("settings.roles.saveFailed")}: ${describeError(e)}`);
     },
   });
 
+  const applyPreset = (preset: PresetRoleSelection) => {
+    setName(preset.name);
+    setSystemPromptOverride(preset.systemPromptOverride ?? "");
+    setRequiredCapabilities(preset.requiredCapabilities);
+  };
 
   return (
     <form
@@ -61,89 +119,44 @@ export function RoleForm(): ReactNode {
       onSubmit={(e) => {
         e.preventDefault();
         if (!name.trim() || saveMut.isPending) return;
-        const boundProvider = bindingMode === "provider" ? providerId : null;
-        const boundAgent = bindingMode === "cli" ? agentProfileId : null;
-        if (bindingMode === "provider" && boundProvider === "") return;
-        if (bindingMode === "cli" && boundAgent === "") return;
         saveMut.mutate({
           name: name.trim(),
-          // CLI-agent binding wins over provider (SPEC team-shell-m1 D2b).
-          providerId: boundProvider,
-          providerIds: boundProvider !== null ? [boundProvider] : [],
+          providerId: null,
+          providerIds: [],
           systemPromptOverride:
             systemPromptOverride.trim().length > 0 ? systemPromptOverride.trim() : null,
           toolAllowlist: [],
           requiredCapabilities,
           temperature: null,
           maxTokens: null,
-          params:
-            boundAgent !== null
-              ? { agent_profile_id: boundAgent }
-              : {},
+          params: {},
         });
       }}
     >
-      <p className="mb-2 text-xs text-ink-muted">{t("settings.roles.idempotentHint")}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs text-ink-muted">{t("settings.roles.idempotentHint")}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setPresetOpen(true)}
+            className="rounded border border-ink-muted px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
+          >
+            {t("settings.roles.presetOpen")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirectorOpen(true)}
+            className="rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
+          >
+            {t("settings.roles.directorOpen")}
+          </button>
+        </div>
+      </div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           {t("settings.roles.name")}
           <input value={name} onChange={(e) => setName(e.target.value)} required className={`${field} bg-surface text-sm w-40`} />
         </label>
-        <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-          {t("settings.roles.bindingMode")}
-          <select
-            value={bindingMode}
-            onChange={(e) => {
-              const mode = e.target.value;
-              if (mode === "provider" || mode === "cli" || mode === "none") setBindingMode(mode);
-            }}
-            className={`${field} bg-surface text-sm`}
-          >
-            <option value="none">{t("settings.roles.bindingNone")}</option>
-            <option value="provider">{t("settings.roles.bindingProvider")}</option>
-            <option value="cli">{t("settings.roles.bindingCliAgent")}</option>
-          </select>
-        </label>
-        {bindingMode === "provider" && (
-          <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-            {t("settings.roles.providerTarget")}
-            <select
-              value={providerId}
-              onChange={(e) => setProviderId(e.target.value)}
-              required
-              className={`${field} bg-surface text-sm w-44`}
-            >
-              <option value="" disabled>
-                {t("settings.roles.providerTarget")}
-              </option>
-              {(providersQuery.data ?? []).map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {bindingMode === "cli" && (
-          <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-            {t("settings.roles.agentProfileTarget")}
-            <select
-              value={agentProfileId}
-              onChange={(e) => setAgentProfileId(e.target.value)}
-              required
-              className={`${field} bg-surface text-sm w-44`}
-            >
-              <option value="" disabled>
-                {t("settings.roles.agentProfileTarget")}
-              </option>
-              {(profilesQuery.data ?? []).map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-ink-muted">{t("settings.roles.requiredCapabilities")}</span>
@@ -192,6 +205,13 @@ export function RoleForm(): ReactNode {
       >
         {saveMut.isPending ? t("settings.roles.saving") : t("settings.roles.save")}
       </button>
+      {presetOpen && (
+        <PresetRolePicker
+          onSelect={applyPreset}
+          onClose={() => setPresetOpen(false)}
+        />
+      )}
+      {directorOpen && <RoleDirectorDialog onClose={() => setDirectorOpen(false)} />}
     </form>
   );
 }

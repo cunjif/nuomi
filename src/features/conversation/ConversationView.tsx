@@ -10,6 +10,7 @@ import { ChatView } from "../chat/ChatView";
 import { GroupConversationView } from "./group/GroupConversationView";
 import { BackgroundConversationView } from "./background/BackgroundConversationView";
 import { ScheduledConversationView } from "./scheduled/ScheduledConversationView";
+import { isRoleReady } from "../../lib/conversation/roleReady";
 
 /**
  * Top-level conversation surface. Fetches the current conversation and
@@ -21,9 +22,9 @@ export function ConversationView(): ReactNode {
   const setView = useUiStore((s) => s.setView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const providersQuery = useQuery({
-    queryKey: ["providers"],
-    queryFn: () => ipc.listProviders(),
+  const rolesQuery = useQuery({
+    queryKey: ["roles"],
+    queryFn: () => ipc.listRoles(),
     staleTime: 30_000,
   });
 
@@ -34,12 +35,13 @@ export function ConversationView(): ReactNode {
     staleTime: 10_000,
   });
 
-  // No Provider configured → conversation panel is unavailable.
-  if ((providersQuery.data ?? []).length === 0) {
+  // No Role Agent configured → conversation panel is unavailable.
+  const roleAgents = (rolesQuery.data ?? []).filter(isRoleReady);
+  if (roleAgents.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
-        <p className="text-sm font-medium text-ink">{t("chat.noProvider")}</p>
-        <p className="max-w-xs text-center text-xs text-ink-muted">{t("chat.noProviderHint")}</p>
+        <p className="text-sm font-medium text-ink">{t("chat.noRoleAgent")}</p>
+        <p className="max-w-xs text-center text-xs text-ink-muted">{t("chat.noRoleAgentHint")}</p>
         <button
           type="button"
           onClick={() => setView("settings")}

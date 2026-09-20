@@ -7,29 +7,42 @@ import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
-import { isRoleReady, readAgentProfileId } from "../../lib/conversation/roleReady";
+import { readAgentProfileId, isRoleReady } from "../../lib/conversation/roleReady";
 import { RoleBindingPanel } from "./RoleBindingPanel";
 import { RoleForm } from "./RoleForm";
+import { RoleQuickBinding } from "./RoleQuickBinding";
 
 interface BindingBadgeProps {
   role: RoleDto;
   providerNames: Map<string, string>;
   profileNames: Map<string, string>;
+  profileModelIds: Map<string, string | null>;
+  providerModelIds: Map<string, string[]>;
 }
 
-/** Shows what the role binds to: a provider name, a CLI agent name or 默认. */
-function BindingBadge({ role, providerNames, profileNames }: BindingBadgeProps): ReactNode {
+/** Shows what the role binds to: Provider/ModelId or CLI Agent/ModelId or 默认. */
+function BindingBadge({
+  role,
+  providerNames,
+  profileNames,
+  profileModelIds,
+  providerModelIds,
+}: BindingBadgeProps): ReactNode {
   const { t } = useTranslation();
   let label = t("settings.roles.defaultBinding");
   const profileId = readAgentProfileId(role.params);
   if (profileId !== null) {
-    label = t("settings.roles.badgeCliAgent", {
-      name: profileNames.get(profileId) ?? profileId,
-    });
+    const agentName = profileNames.get(profileId) ?? profileId;
+    const modelId = profileModelIds.get(profileId) ?? null;
+    label = modelId !== null
+      ? t("settings.roles.badgeCliAgentModel", { name: agentName, model: modelId })
+      : t("settings.roles.badgeCliAgent", { name: agentName });
   } else if (role.providerId !== null) {
-    label = t("settings.roles.badgeProvider", {
-      name: providerNames.get(role.providerId) ?? role.providerId,
-    });
+    const providerName = providerNames.get(role.providerId) ?? role.providerId;
+    const modelIds = providerModelIds.get(role.providerId) ?? [];
+    label = modelIds.length > 0
+      ? t("settings.roles.badgeProviderModel", { name: providerName, model: modelIds[0] })
+      : t("settings.roles.badgeProvider", { name: providerName });
   }
   return (
     <span className="rounded bg-ink-accent/20 px-1.5 py-0.5 text-[10px] text-ink-accent">
@@ -63,11 +76,13 @@ function CapabilityBadges({ role }: { role: RoleDto }): ReactNode {
   );
 }
 
-/** One grouped role row with binding badge + two-step delete. */
+/** One role row with binding badge, capabilities, edit and delete. */
 function RoleRow({
   role,
   providerNames,
   profileNames,
+  profileModelIds,
+  providerModelIds,
   confirmingId,
   setConfirmingId,
   deleteMut,
@@ -76,6 +91,8 @@ function RoleRow({
   role: RoleDto;
   providerNames: Map<string, string>;
   profileNames: Map<string, string>;
+  profileModelIds: Map<string, string | null>;
+  providerModelIds: Map<string, string[]>;
   confirmingId: string | null;
   setConfirmingId: (id: string | null) => void;
   deleteMut: { isPending: boolean; mutate: (id: string) => void };
@@ -87,7 +104,13 @@ function RoleRow({
     <li className="sketch-card bg-surface-raised p-3 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-ink">{role.name}</span>
-        <BindingBadge role={role} providerNames={providerNames} profileNames={profileNames} />
+        <BindingBadge
+          role={role}
+          providerNames={providerNames}
+          profileNames={profileNames}
+          profileModelIds={profileModelIds}
+          providerModelIds={providerModelIds}
+        />
         <CapabilityBadges role={role} />
         {role.generated && (
           <span className="rounded border border-dashed border-cap-vi px-1.5 py-0.5 font-scribble text-[10px] leading-none text-cap-vi">
@@ -109,10 +132,10 @@ function RoleRow({
         <button
           type="button"
           onClick={() => onOpenBinding(role)}
-          aria-label={`${isRoleReady(role) ? t("settings.roles.editBinding") : t("settings.roles.goBind")} ${role.name}`}
+          aria-label={`${t("settings.roles.editBinding")} ${role.name}`}
           className="rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
         >
-          {isRoleReady(role) ? t("settings.roles.editBinding") : t("settings.roles.goBind")}
+          {t("settings.roles.editBinding")}
         </button>
         {protectedRole ? null : confirmingId === role.id ? (
           <button
@@ -139,75 +162,14 @@ function RoleRow({
   );
 }
 
-/** Role Director dialog: plain-language description → generated Role. */
-function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const [description, setDescription] = useState("");
-
-  const generateMut = useMutation({
-    mutationFn: (desc: string) => ipc.generateRole(desc),
-    onSuccess: (role) => {
-      void qc.invalidateQueries({ queryKey: ["roles"] });
-      toast.success(t("settings.roles.directorSuccess", { name: role.name }));
-      onClose();
-    },
-    onError: (e) => toast.error(`${t("settings.roles.directorFailed")}: ${describeError(e)}`),
-  });
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("settings.roles.directorTitle")}
-    >
-      <div className="w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
-        <h4 className="mb-2 text-sm font-semibold text-ink">
-          {t("settings.roles.directorTitle")}
-        </h4>
-        <p className="mb-2 text-xs text-ink-muted">{t("settings.roles.directorHint")}</p>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={4}
-          autoFocus
-          placeholder={t("settings.roles.directorPlaceholder") ?? ""}
-          aria-label={t("settings.roles.directorTitle")}
-          className="w-full rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-ink-muted px-3 py-1 text-sm text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
-          >
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            disabled={generateMut.isPending || description.trim().length === 0}
-            onClick={() => generateMut.mutate(description.trim())}
-            className="pixel-fill-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
-          >
-            {generateMut.isPending ? t("settings.roles.directorGenerating") : t("settings.roles.directorGenerate")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Settings section: preset restore, Role Director entry, grouped role list. */
+/** Settings section: Role form + quick binding + flat role list. */
 export function RolesSection(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const query = useQuery({ queryKey: ["roles"], queryFn: ipc.listRoles });
   const providersQuery = useQuery({ queryKey: ["providers"], queryFn: ipc.listProviders });
   const profilesQuery = useQuery({ queryKey: ["agentProfiles"], queryFn: ipc.listAgentProfiles });
-  /** roleId awaiting a second click on Delete (two-step confirm, keyboard friendly) */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [directorOpen, setDirectorOpen] = useState(false);
   const [bindingPanelRole, setBindingPanelRole] = useState<RoleDto | null>(null);
 
   const deleteMut = useMutation({
@@ -220,86 +182,44 @@ export function RolesSection(): ReactNode {
     onError: (e) => toast.error(`${t("settings.roles.deleteFailed")}: ${describeError(e)}`),
   });
 
-  const seedMut = useMutation({
-    mutationFn: () => ipc.seedBuiltinRoles(),
-    onSuccess: (report) => {
-      void qc.invalidateQueries({ queryKey: ["roles"] });
-      toast.success(
-        t("settings.roles.presetRestored", {
-          inserted: report.inserted,
-          updated: report.updated,
-        }),
-      );
-    },
-    onError: (e) => toast.error(`${t("settings.roles.presetRestoreFailed")}: ${describeError(e)}`),
-  });
-
   const providerNames = new Map((providersQuery.data ?? []).map((p) => [p.id, p.name]));
   const profileNames = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
+  const profileModelIds = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.modelId]));
+  const providerModelIds = new Map(
+    (providersQuery.data ?? []).map((p) => [p.id, (p.settings.models ?? []).map((m) => m.id)]),
+  );
   const roles = query.data ?? [];
-  const groups: Array<{ label: string; roles: RoleDto[] }> = [
-    { label: t("settings.roles.groupReady"), roles: roles.filter(isRoleReady) },
-    { label: t("settings.roles.groupUnbound"), roles: roles.filter((r) => !isRoleReady(r)) },
-  ];
+  const roleAgents = roles.filter(isRoleReady);
 
   return (
     <section aria-label={t("settings.roles.heading")} className="mb-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-ink">{t("settings.roles.heading")}</h3>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setDirectorOpen(true)}
-            className="rounded border border-ink-accent px-2 py-0.5 text-xs text-ink-accent hover:bg-ink-accent/10 focus-visible:ring-2 focus-visible:ring-ink-accent"
-          >
-            {t("settings.roles.directorOpen")}
-          </button>
-          <button
-            type="button"
-            onClick={() => seedMut.mutate()}
-            disabled={seedMut.isPending}
-            className="rounded border border-ink-muted px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
-          >
-            {seedMut.isPending ? t("settings.roles.restoringPresets") : t("settings.roles.restorePresets")}
-          </button>
-        </div>
-      </div>
+      <h3 className="mb-2 text-sm font-semibold text-ink">{t("settings.roles.heading")}</h3>
       <RoleForm />
+      <RoleQuickBinding />
       <AsyncBoundary
         isLoading={query.isLoading}
         error={query.error}
-        isEmpty={roles.length === 0}
-        emptyLabel={t("settings.roles.empty")}
+        isEmpty={roleAgents.length === 0}
+        emptyLabel={t("settings.roles.emptyAgents")}
         onRetry={() => void query.refetch()}
       >
-        <div className="flex flex-col gap-3">
-          {groups.map(
-            (group) =>
-              group.roles.length > 0 && (
-                <div key={group.label}>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                    {group.label} ({group.roles.length})
-                  </p>
-                  <ul className="flex flex-col gap-2">
-                    {group.roles.map((role) => (
-                      <RoleRow
-                        key={role.id}
-                        role={role}
-                        providerNames={providerNames}
-                        profileNames={profileNames}
-                        confirmingId={confirmingId}
-                        setConfirmingId={setConfirmingId}
-                        deleteMut={deleteMut}
-                        onOpenBinding={(r) => setBindingPanelRole(r)}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              ),
-          )}
-        </div>
+        <ul className="flex flex-col gap-2">
+          {roleAgents.map((role) => (
+            <RoleRow
+              key={role.id}
+              role={role}
+              providerNames={providerNames}
+              profileNames={profileNames}
+              profileModelIds={profileModelIds}
+              providerModelIds={providerModelIds}
+              confirmingId={confirmingId}
+              setConfirmingId={setConfirmingId}
+              deleteMut={deleteMut}
+              onOpenBinding={(r) => setBindingPanelRole(r)}
+            />
+          ))}
+        </ul>
       </AsyncBoundary>
-      {directorOpen && <RoleDirectorDialog onClose={() => setDirectorOpen(false)} />}
       {bindingPanelRole && (
         <RoleBindingPanel initialRole={bindingPanelRole} onClose={() => setBindingPanelRole(null)} />
       )}

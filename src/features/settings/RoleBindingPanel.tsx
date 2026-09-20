@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CapabilityDto, RoleDto, RoleInput } from "../../lib/ipc/bindings.gen";
 import { readAgentProfileId } from "../../lib/conversation/roleReady";
 import { CAPABILITY_KEYS, type BindingMode } from "./RoleForm";
+import { ToolTagInput } from "./ToolTagInput";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
@@ -61,7 +62,7 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
   const [maxTokens, setMaxTokens] = useState(
     initialRole?.maxTokens != null ? String(initialRole.maxTokens) : "",
   );
-  const [toolAllowlist, setToolAllowlist] = useState(initialRole?.toolAllowlist.join(", ") ?? "");
+  const [toolAllowlist, setToolAllowlist] = useState<string[]>(initialRole?.toolAllowlist ?? []);
   const [requiredCapabilities, setRequiredCapabilities] = useState<CapabilityDto[]>(
     initialRole?.requiredCapabilities ?? [],
   );
@@ -104,10 +105,7 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
               providerIds: boundProvider !== null ? [boundProvider] : [],
               systemPromptOverride:
                 systemPromptOverride.trim().length > 0 ? systemPromptOverride.trim() : null,
-              toolAllowlist: toolAllowlist
-                .split(",")
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0),
+              toolAllowlist,
               requiredCapabilities,
               temperature: parseOptionalFloat(temperature),
               maxTokens: parseOptionalInt(maxTokens),
@@ -235,12 +233,11 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
             </label>
             <label className="flex flex-1 flex-col gap-0.5 text-xs text-ink-muted">
               {t("settings.roles.toolAllowlist")}
-              <input
-                type="text"
+              <ToolTagInput
                 value={toolAllowlist}
-                onChange={(e) => setToolAllowlist(e.target.value)}
+                onChange={setToolAllowlist}
+                candidates={[]}
                 placeholder={t("settings.roles.toolAllowlistHint")}
-                className={`${field} bg-surface text-sm`}
               />
             </label>
           </div>

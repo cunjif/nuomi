@@ -26,8 +26,8 @@ describe("SettingsView — top tab navigation", () => {
     expect(await screen.findByRole("heading", { name: "Roles" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /\+ add provider/i })).toBeNull();
 
-    // Tools & Access hosts the sensitive-tools allowlist.
-    fireEvent.click(screen.getByRole("tab", { name: /tools & access/i }));
-    expect(await screen.findByRole("heading", { name: /sensitive tools/i })).toBeInTheDocument();
+    // Evolution tab hosts the four-dimension evolution settings panel.
+    fireEvent.click(screen.getByRole("tab", { name: /^Evolution$/ }));
+    expect(await screen.findByRole("heading", { name: /^Evolution$/ })).toBeInTheDocument();
   });
 });

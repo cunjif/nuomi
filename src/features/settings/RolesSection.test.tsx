@@ -55,6 +55,7 @@ function profile(overrides: Partial<AgentProfileDto> = {}): AgentProfileDto {
     env: {},
     workingDir: null,
     enabled: true,
+    modelId: null,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -66,13 +67,12 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     await i18n.changeLanguage("en");
   });
 
-  it("renders binding badges for provider-bound and CLI-agent-bound roles", async () => {
+  it("renders binding badges for ready roles (provider-bound and CLI-agent-bound)", async () => {
     injectIpcCommands({
       listRoles: vi.fn().mockResolvedValue(
         ok([
           role({ id: "r1", name: "coder", providerId: "prov-1" }),
           role({ id: "r2", name: "reviewer", providerId: null, params: { agent_profile_id: "agent-1" } }),
-          role({ id: "r3", name: "freerole", providerId: null }),
         ]),
       ),
       listProviders: vi.fn().mockResolvedValue(ok([provider()])),
@@ -82,20 +82,18 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     } as never);
     renderWithProviders(<RolesSection />);
 
-    expect(await screen.findByText("coder")).toBeInTheDocument();
-    expect(screen.getByText("reviewer")).toBeInTheDocument();
-    expect(screen.getByText("Provider: gpt-main")).toBeInTheDocument();
-    expect(screen.getByText("CLI Agent: alpha")).toBeInTheDocument();
-    expect(screen.getByText("Default")).toBeInTheDocument();
+    // Role names appear in both the quick-binding <select> options and the
+    // role list <span>s — assert at least one match for each.
+    expect((await screen.findAllByText("coder")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("reviewer")).length).toBeGreaterThan(0);
+    // Badge text appears once provider/profile data has loaded. The
+    // provider has a model, so the badge includes it.
+    expect(await screen.findByText("Provider: gpt-main/gpt-4o-mini")).toBeInTheDocument();
+    expect(await screen.findByText("CLI Agent: alpha")).toBeInTheDocument();
   });
 
-  it("submits a CLI-agent binding as params.agent_profile_id with providerId null", async () => {
-    const created = role({
-      id: "r9",
-      name: "scribe",
-      providerId: null,
-      params: { agent_profile_id: "agent-9" },
-    });
+  it("creates an unbound role template via the form (binding is done separately)", async () => {
+    const created = role({ id: "r9", name: "scribe", providerId: null });
     const upsertRole = vi.fn().mockResolvedValue(ok(created));
     injectIpcCommands({
       listRoles: vi
@@ -109,12 +107,13 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     } as never);
     renderWithProviders(<RolesSection />);
 
-    fireEvent.change(await screen.findByLabelText(/^name$/i), { target: { value: "scribe" } });
-    fireEvent.change(screen.getByLabelText(/^binding$/i), { target: { value: "cli" } });
-    fireEvent.change(screen.getByLabelText(/select cli agent/i), {
-      target: { value: "agent-9" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    // The "Name" label appears in both RoleForm and RoleQuickBinding;
+    // the form's input is the first one.
+    const nameInputs = await screen.findAllByLabelText(/^name$/i);
+    fireEvent.change(nameInputs[0]!, { target: { value: "scribe" } });
+    // The "Save" button also appears in both forms; use the first one.
+    const saveButtons = screen.getAllByRole("button", { name: /^save$/i });
+    fireEvent.click(saveButtons[0]!);
 
     await waitFor(() =>
       expect(upsertRole).toHaveBeenCalledWith({
@@ -126,45 +125,16 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
         requiredCapabilities: [],
         temperature: null,
         maxTokens: null,
-        params: { agent_profile_id: "agent-9" },
+        params: {},
       })
     );
-    // Invalidate triggers the second list fetch; the new role shows up.
-    expect(await screen.findByText("scribe")).toBeInTheDocument();
   });
 
-  it("switching the binding back to Provider clears the agent_profile_id param key", async () => {
-    const created = role({ id: "r8", name: "planner", providerId: "prov-1" });
-    const upsertRole = vi.fn().mockResolvedValue(ok(created));
-    injectIpcCommands({
-      listRoles: vi.fn().mockResolvedValue(ok([])),
-      listProviders: vi.fn().mockResolvedValue(ok([provider()])),
-      listAgentProfiles: vi.fn().mockResolvedValue(ok([profile({ id: "agent-9", name: "beta" })])),
-      upsertRole,
-      deleteRole: vi.fn(),
-    } as never);
-    renderWithProviders(<RolesSection />);
-
-    fireEvent.change(await screen.findByLabelText(/^name$/i), { target: { value: "planner" } });
-    fireEvent.change(screen.getByLabelText(/^binding$/i), { target: { value: "cli" } });
-    fireEvent.change(screen.getByLabelText(/select cli agent/i), { target: { value: "agent-9" } });
-    fireEvent.change(screen.getByLabelText(/^binding$/i), { target: { value: "provider" } });
-    fireEvent.change(screen.getByLabelText(/select provider/i), { target: { value: "prov-1" } });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-
-    await waitFor(() =>
-      expect(upsertRole).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "prov-1", params: {} })
-      )
-    );
-  });
-
-  it("groups roles into ready / unbound sections with binding buttons", async () => {
+  it("does not render unbound (not-ready) roles in the role list", async () => {
     injectIpcCommands({
       listRoles: vi.fn().mockResolvedValue(
         ok([
           role({ id: "r1", name: "Coder", builtin: true, providerId: "prov-1", requiredCapabilities: ["reasoning"] }),
-          role({ id: "r2", name: "weekly-bot", generated: true, providerId: "prov-1" }),
           role({ id: "r3", name: "mine" }),
         ]),
       ),
@@ -175,36 +145,17 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     } as never);
     renderWithProviders(<RolesSection />);
 
-    expect(await screen.findByText("Ready (2)")).toBeInTheDocument();
-    expect(screen.getByText("Unbound (1)")).toBeInTheDocument();
-    // Built-in roles expose no delete button but do expose a binding button.
-    expect(screen.queryByRole("button", { name: /^delete coder$/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /^delete mine$/i })).toBeInTheDocument();
-  });
-
-  it("restores presets via the seed command and reports the counts", async () => {
-    const seedBuiltinRoles = vi
-      .fn()
-      .mockResolvedValue(ok({ inserted: 11, updated: 0, skipped: 0 }));
-    // After invalidation the refetch shows the 11 seeded built-ins.
-    const presets = Array.from({ length: 11 }, (_, i) =>
-      role({ id: `preset-${i}`, name: `Preset ${i}`, builtin: true }),
-    );
-    injectIpcCommands({
-      listRoles: vi
-        .fn()
-        .mockResolvedValueOnce(ok([]))
-        .mockResolvedValueOnce(ok(presets)),
-      listProviders: vi.fn().mockResolvedValue(ok([])),
-      listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
-      seedBuiltinRoles,
-    } as never);
-    renderWithProviders(<RolesSection />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /restore presets/i }));
-    await waitFor(() => expect(seedBuiltinRoles).toHaveBeenCalled());
-    // The seeded double surfaces 11 built-in presets in the grouped list.
-    expect(await screen.findByText(/Unbound \(11\)/)).toBeInTheDocument();
+    // "Coder" appears in both the quick-binding <select> option and the
+    // role list — assert at least one match.
+    expect((await screen.findAllByText("Coder")).length).toBeGreaterThan(0);
+    // "mine" is unbound (no provider, no agent_profile_id) so it is not
+    // shown in the ready-only list (only in the <select> option).
+    // The role list <span> should not contain "mine".
+    const mineMatches = screen.queryAllByText("mine");
+    // All matches should be <option> elements, not <span> role names.
+    for (const el of mineMatches) {
+      expect(el.tagName).toBe("OPTION");
+    }
   });
 
   it("generates a role through the Role Director dialog", async () => {

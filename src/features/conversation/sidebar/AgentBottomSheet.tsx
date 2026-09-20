@@ -8,14 +8,19 @@ export interface AgentBottomSheetProps {
   agentKind: string;
   agentId: string;
   onClose: () => void;
+  /** Called when user clicks "Remove member". Only shown when canRemove=true. */
+  onRemove?: () => void;
+  /** Whether the "Remove member" button is available (group chat with >1 participants). */
+  canRemove?: boolean;
 }
 
 /**
  * Bottom sheet showing a single agent's detail (role, responsibility,
  * bound model, provider). Slides up from the bottom of the sidebar,
  * covering the lower half. 250ms transition.
+ * ADR 0013: "Remove member" button at the bottom (group chat only).
  */
-export function AgentBottomSheet({ agentKind, agentId, onClose }: AgentBottomSheetProps): ReactNode {
+export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRemove }: AgentBottomSheetProps): ReactNode {
   const { t } = useTranslation();
 
   const detailQuery = useQuery({
@@ -78,6 +83,15 @@ export function AgentBottomSheet({ agentKind, agentId, onClose }: AgentBottomShe
                   {detailQuery.data.provider ?? t("conversation.agentDetail.notSet")}
                 </div>
               </div>
+              {canRemove && onRemove && (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  className="w-full rounded border border-ink-muted/30 px-3 py-1.5 text-sm text-ink-muted hover:border-red-500 hover:text-red-500"
+                >
+                  {t("conversation.agentDetail.removeMember")}
+                </button>
+              )}
             </div>
           )}
         </AsyncBoundary>

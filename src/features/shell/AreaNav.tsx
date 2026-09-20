@@ -35,7 +35,7 @@ function WindowControls(): ReactNode {
   const base =
     "flex h-9 w-11 items-center justify-center text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
   return (
-    <div className="ml-auto flex items-stretch self-stretch">
+    <div className="relative z-10 ml-auto flex items-stretch self-stretch">
       <button type="button" aria-label={t("shell.minimize")} onClick={() => run(() => win.minimize())} className={base}>
         <Icon name="minimize" size={14} />
       </button>

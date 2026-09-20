@@ -3,7 +3,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-  CapabilityDto,
   ModelEntryDto,
   ProviderDto,
   ProviderInput,
@@ -11,10 +10,10 @@ import type {
   TestProviderConnectionInput,
 } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
-import { Icon } from "../../components/ui/Icon/Icon";
 import { fieldClass as field } from "../../components/ui/Field";
 import { IpcCommandError, ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { ModelHyperParamsRow } from "./ModelHyperParamsRow";
 
 /** Persisted per-provider connectivity outcome (drives the list dot). */
 export type ProviderTestStatus = "ok" | "error";
@@ -33,14 +32,6 @@ export function providerAvatarStyle(name: string): { backgroundColor: string } {
   for (const ch of name) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) % 360;
   return { backgroundColor: `hsl(${220 + (hash % 80)} 55% 45% / 0.35)` };
 }
-
-/** Per-model capability badges (KiloCode-style Re/I/Vo/Vi) — token ink. */
-const MODEL_CAPS: ReadonlyArray<{ key: CapabilityDto; short: string; cls: string; labelKey: string }> = [
-  { key: "reasoning", short: "Re", cls: "border-cap-re text-cap-re", labelKey: "provider.capReasoning" },
-  { key: "image", short: "I", cls: "border-cap-i text-cap-i", labelKey: "provider.capImage" },
-  { key: "voice", short: "Vo", cls: "border-cap-vo text-cap-vo", labelKey: "provider.capVoice" },
-  { key: "video", short: "Vi", cls: "border-cap-vi text-cap-vi", labelKey: "provider.capVideo" },
-];
 
 type TypeKey = "openai" | "anthropic" | "deepseek" | "ollama" | "custom";
 const TYPE_OPTIONS: ReadonlyArray<{ key: TypeKey; labelKey: string }> = [
@@ -97,9 +88,6 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
   const [models, setModels] = useState<ModelEntryDto[]>(settings?.models ?? []);
   const [modelInput, setModelInput] = useState("");
   const [defaultModel, setDefaultModel] = useState<string>(settings?.defaultModel ?? "");
-  const [temperature, setTemperature] = useState<number>(settings?.temperature ?? 0.7);
-  const [topP, setTopP] = useState<number>(settings?.topP ?? 1);
-  const [maxTokens, setMaxTokens] = useState<string>(settings?.maxTokens?.toString() ?? "");
   const [timeoutSecs, setTimeoutSecs] = useState<string>(settings?.timeoutSecs?.toString() ?? "");
   const [retry, setRetry] = useState<string>(settings?.retry?.toString() ?? "");
   const [maxConcurrency, setMaxConcurrency] = useState<string>(
@@ -193,19 +181,15 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     if (id.length > 0 && !models.some((m) => m.id === id)) {
       // New models default to reasoning-capable (mirrors the backend
       // normalization of legacy string model ids).
-      setModels([...models, { id, capabilities: ["reasoning"] }]);
+      setModels([...models, { id, capabilities: ["reasoning"], temperature: null, topP: null, maxTokens: null }]);
     }
     setModelInput("");
-  }
-
-  function removeModel(id: string): void {
-    setModels(models.filter((m) => m.id !== id));
   }
 
   function selectAllCatalog(): void {
     setModels((prev) => {
       const missing = (catalog ?? []).filter((id) => !prev.some((m) => m.id === id));
-      return [...prev, ...missing.map((id): ModelEntryDto => ({ id, capabilities: ["reasoning"] }))];
+      return [...prev, ...missing.map((id): ModelEntryDto => ({ id, capabilities: ["reasoning"], temperature: null, topP: null, maxTokens: null }))];
     });
   }
 
@@ -219,22 +203,7 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
     setModels((prev) =>
       prev.some((m) => m.id === id)
         ? prev.filter((m) => m.id !== id)
-        : [...prev, { id, capabilities: ["reasoning"] }],
-    );
-  }
-
-  function toggleModelCapability(id: string, cap: CapabilityDto): void {
-    setModels((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              capabilities: m.capabilities.includes(cap)
-                ? m.capabilities.filter((c) => c !== cap)
-                : [...m.capabilities, cap],
-            }
-          : m,
-      ),
+        : [...prev, { id, capabilities: ["reasoning"], temperature: null, topP: null, maxTokens: null }],
     );
   }
 
@@ -259,9 +228,9 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           settings: {
             models,
             defaultModel: defaultModel.length > 0 ? defaultModel : null,
-            temperature,
-            topP,
-            maxTokens: numberOrNull(maxTokens),
+            temperature: null,
+            topP: null,
+            maxTokens: null,
             timeoutSecs: numberOrNull(timeoutSecs),
             retry: numberOrNull(retry),
             maxConcurrency: numberOrNull(maxConcurrency),
@@ -475,42 +444,13 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
           </div>
         )}
         <ul className="flex flex-col gap-1">
-          {models.map((model) => (
-            <li
-              key={model.id}
-              className="flex flex-wrap items-center gap-1.5 rounded bg-surface-overlay px-1.5 py-1 text-ink"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">{model.id}</span>
-              <span className="flex items-center gap-1">
-                {MODEL_CAPS.map((cap) => {
-                  const active = model.capabilities.includes(cap.key);
-                  return (
-                    <button
-                      key={cap.key}
-                      type="button"
-                      aria-pressed={active}
-                      aria-label={`${cap.short} ${t(cap.labelKey)} ${model.id}`}
-                      title={t(cap.labelKey)}
-                      onClick={() => toggleModelCapability(model.id, cap.key)}
-                      className={`rounded border border-dashed px-1 py-0.5 font-scribble text-[10px] leading-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
-                        active
-                          ? cap.cls
-                          : "border-ink-muted/40 text-ink-muted opacity-60 hover:opacity-100"
-                      }`}
-                    >
-                      {cap.short}
-                    </button>
-                  );
-                })}
-              </span>
-              <button
-                type="button"
-                aria-label={`${t("common.remove")} ${model.id}`}
-                onClick={() => removeModel(model.id)}
-                className="text-ink-muted hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
-              >
-                <Icon name="close" size={14} />
-              </button>
+          {models.map((model, idx) => (
+            <li key={model.id}>
+              <ModelHyperParamsRow
+                model={model}
+                onChange={(next) => setModels(models.map((m, i) => i === idx ? next : m))}
+                onRemove={() => setModels(models.filter((_, i) => i !== idx))}
+              />
             </li>
           ))}
         </ul>
@@ -557,48 +497,6 @@ export function ProviderForm({ provider, onDone, onTested, onDeleted }: Provider
         </button>
         {advancedOpen && (
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-2">
-            <label className="flex flex-col gap-0.5 text-ink-muted">
-              {t("provider.temperature")}
-              <span className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={temperature}
-                  onChange={(e) => setTemperature(Number(e.target.value))}
-                  className="flex-1 accent-[var(--nuomi-accent)]"
-                />
-                <span className="w-8 text-right tabular-nums text-ink">
-                  {temperature.toFixed(1)}
-                </span>
-              </span>
-            </label>
-            <label className="flex flex-col gap-0.5 text-ink-muted">
-              {t("provider.topP")}
-              <span className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={topP}
-                  onChange={(e) => setTopP(Number(e.target.value))}
-                  className="flex-1 accent-[var(--nuomi-accent)]"
-                />
-                <span className="w-8 text-right tabular-nums text-ink">{topP.toFixed(2)}</span>
-              </span>
-            </label>
-            <label className="flex flex-col gap-0.5 text-ink-muted">
-              {t("provider.maxTokens")}
-              <input
-                type="number"
-                min={1}
-                value={maxTokens}
-                onChange={(e) => setMaxTokens(e.target.value)}
-                className={`${field} w-full bg-surface-overlay text-xs`}
-              />
-            </label>
             <label className="flex flex-col gap-0.5 text-ink-muted">
               {t("provider.timeoutSecs")}
               <input

@@ -69,7 +69,7 @@ export function GroupConversationView(): ReactNode {
     <div className="flex h-full flex-col">
       <RoundIndicator current={1} max={6} />
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="relative min-h-0 flex-1 overflow-y-auto p-2">
           {messages.map((msg) => {
             const role = (msg.payload as { role?: string }).role ?? "assistant";
             const content = (msg.payload as { content?: string }).content ?? "";

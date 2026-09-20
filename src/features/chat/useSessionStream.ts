@@ -59,6 +59,9 @@ export function useSessionStream(sessionId: string | null): {
   /** Live activity observed since last clear — guards duplicate final text. */
   hasLiveActivity: () => boolean;
   clearLive: () => void;
+  /** Optimistic user bubble shown before the persisted round-trip lands. */
+  addOptimistic: (text: string) => void;
+  clearOptimistic: () => void;
 } {
   const qc = useQueryClient();
   const historyQuery = useQuery({
@@ -68,6 +71,7 @@ export function useSessionStream(sessionId: string | null): {
   });
   const [streamText, setStreamText] = useState("");
   const [liveEntries, setLiveEntries] = useState<ChatEntry[]>([]);
+  const [optimisticText, setOptimisticText] = useState<string | null>(null);
   const liveActivityRef = useRef(false);
   const lastSeqRef = useRef(0);
   /** Highest persisted message seq already swapped into the live buffer. */
@@ -137,6 +141,14 @@ export function useSessionStream(sessionId: string | null): {
             ...prev,
             { id: `live-r${prev.length}`, kind: "tool_result", content: asString(p.content) },
           ]);
+        } else if (ev.type === "session.turn_end") {
+          // ADR 0015: turn finished — refresh the message queue list so the
+          // UI reflects any remaining queued items.
+          if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["messageQueue", sessionId] });
+        } else if (ev.type === "session.queue_error") {
+          // P0-3: a queued turn failed — refresh the queue list so the
+          // failed entry is removed from the pending list.
+          if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["messageQueue", sessionId] });
         }
       }
       if (gap && sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
@@ -149,22 +161,57 @@ export function useSessionStream(sessionId: string | null): {
     // means the counter restarts at 1 — forget our tracking.
     flow.resetDeltaTracking();
     lastMessageSeqRef.current = 0;
+    setOptimisticText(null);
   }, [flow, sessionId]);
 
   const entries = useMemo(() => {
     const history = historyQuery.data !== undefined ? toEntries(historyQuery.data) : [];
-    const streaming =
-      streamText.length > 0
-        ? [{ id: STREAM_ENTRY_ID, kind: "message", role: "assistant", text: streamText } satisfies ChatEntry]
+    const lastHistory = history[history.length - 1];
+    // Optimistic user bubble: hidden once history already contains the same
+    // user message (replaces the optimistic entry without a flicker).
+    const showOptimistic =
+      optimisticText !== null &&
+      !(lastHistory?.role === "user" && lastHistory?.text === optimisticText);
+    const optimistic =
+      showOptimistic
+        ? [
+            {
+              id: "__optimistic__",
+              kind: "message",
+              role: "user",
+              text: optimisticText!,
+            } satisfies ChatEntry,
+          ]
         : [];
-    return [...history, ...liveEntries, ...streaming];
-  }, [historyQuery.data, liveEntries, streamText]);
+    // Deduplicate: once history contains the same assistant content as the
+    // live stream buffer, drop the streaming entry to avoid rendering two
+    // identical bubbles.
+    const streamingDuplicate =
+      streamText.length > 0 &&
+      lastHistory?.role === "assistant" &&
+      lastHistory?.text === streamText;
+    const streaming =
+      streamText.length > 0 && !streamingDuplicate
+        ? [
+            {
+              id: STREAM_ENTRY_ID,
+              kind: "message",
+              role: "assistant",
+              text: streamText,
+            } satisfies ChatEntry,
+          ]
+        : [];
+    return [...history, ...optimistic, ...liveEntries, ...streaming];
+  }, [historyQuery.data, liveEntries, streamText, optimisticText]);
 
   const clearLive = useCallback(() => {
     liveActivityRef.current = false;
     setStreamText("");
     setLiveEntries([]);
   }, []);
+
+  const addOptimistic = useCallback((text: string) => setOptimisticText(text), []);
+  const clearOptimistic = useCallback(() => setOptimisticText(null), []);
 
   return {
     entries,
@@ -173,5 +220,7 @@ export function useSessionStream(sessionId: string | null): {
     retry: () => void historyQuery.refetch(),
     hasLiveActivity: () => liveActivityRef.current,
     clearLive,
+    addOptimistic,
+    clearOptimistic,
   };
 }

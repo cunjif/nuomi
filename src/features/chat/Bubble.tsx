@@ -29,7 +29,7 @@ export function Bubble({ entry, streaming = false }: BubbleProps): ReactNode {
       >
         {entry.roleName !== undefined && <p className="mb-0.5 text-xs font-semibold text-ink-accent">{speaker}</p>}
         <p className="whitespace-pre-wrap break-words">
-          {entry.text}
+          {entry.text || t("chat.emptyResponse")}
           {streaming && (
             <span aria-hidden="true" className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-ink-muted align-middle" />
           )}

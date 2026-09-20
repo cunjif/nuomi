@@ -33,6 +33,7 @@ function profile(overrides: Partial<AgentProfileDto> = {}): AgentProfileDto {
     env: {},
     workingDir: null,
     enabled: true,
+    modelId: null,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -85,9 +86,11 @@ describe("RoleBindingPanel", () => {
     fireEvent.change(await screen.findByLabelText(/^name$/i), { target: { value: "translator" } });
     fireEvent.change(screen.getByLabelText(/temperature/i), { target: { value: "0.3" } });
     fireEvent.change(screen.getByLabelText(/max tokens/i), { target: { value: "4096" } });
-    fireEvent.change(screen.getByLabelText(/tool allowlist/i), {
-      target: { value: "read_file, write_file" },
-    });
+    const toolInput = screen.getByPlaceholderText("Empty = no restriction (all tools allowed)");
+    fireEvent.change(toolInput, { target: { value: "read_file" } });
+    fireEvent.keyDown(toolInput, { key: "Enter" });
+    fireEvent.change(toolInput, { target: { value: "write_file" } });
+    fireEvent.keyDown(toolInput, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() =>
@@ -129,7 +132,8 @@ describe("RoleBindingPanel", () => {
     expect((nameInput as HTMLInputElement).value).toBe("reviewer");
     expect((screen.getByLabelText(/temperature/i) as HTMLInputElement).value).toBe("0.7");
     expect((screen.getByLabelText(/max tokens/i) as HTMLInputElement).value).toBe("2048");
-    expect((screen.getByLabelText(/tool allowlist/i) as HTMLInputElement).value).toBe("grep, glob");
+    expect(screen.getByText("grep")).toBeInTheDocument();
+    expect(screen.getByText("glob")).toBeInTheDocument();
   });
 
   it("submits a CLI-agent binding as params.agent_profile_id with providerId null", async () => {

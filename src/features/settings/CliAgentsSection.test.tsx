@@ -19,6 +19,7 @@ function profile(overrides: Partial<AgentProfileDto>): AgentProfileDto {
     env: {},
     workingDir: null,
     enabled: true,
+    modelId: null,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -113,6 +114,8 @@ describe("CliAgentsSection (SPEC cli-agents-m1 C5)", () => {
         env: { API_KEY: "x", OTHER: "y=2" },
         workingDir: null,
         enabled: true,
+        modelId: null,
+        resumeArgs: null,
       })
     );
     // Invalidate triggers the second list fetch; the new profile shows up.

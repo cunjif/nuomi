@@ -2,12 +2,10 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CliAgentsSection } from "./CliAgentsSection";
+import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
 import { IntegrationsSection } from "./IntegrationsSection";
-import { OnlineAuthToggle } from "./OnlineAuthToggle";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
-import { SensitiveToolsEditor } from "./SensitiveToolsEditor";
-import { TeamsSection } from "./TeamsSection";
 
 /**
  * Settings tabs (用户需求: 集中一页 → 顶部导航分 tab). One section per tab;
@@ -17,10 +15,9 @@ import { TeamsSection } from "./TeamsSection";
 const TABS = [
   { key: "providers", labelKey: "settings.tab.providers" },
   { key: "roles", labelKey: "settings.roles.heading" },
-  { key: "teams", labelKey: "settings.teams.heading" },
   { key: "agents", labelKey: "settings.cliAgents.heading" },
   { key: "integrations", labelKey: "settings.integrations.heading" },
-  { key: "access", labelKey: "settings.tab.access" },
+  { key: "access", labelKey: "settings.tab.evolution" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -31,23 +28,16 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       return <ProvidersSection />;
     case "roles":
       return <RolesSection />;
-    case "teams":
-      return <TeamsSection />;
     case "agents":
       return <CliAgentsSection />;
     case "integrations":
       return <IntegrationsSection />;
     case "access":
-      return (
-        <>
-          <SensitiveToolsEditor />
-          <OnlineAuthToggle />
-        </>
-      );
+      return <EvolutionSettingsPanel />;
   }
 }
 
-/** U13 settings: tabbed sections (providers / roles / teams / agents / integrations / access). */
+/** U13 settings: tabbed sections (providers / roles / agents / integrations / access). */
 export function SettingsView({ initialTab }: { initialTab?: string }): ReactNode {
   const { t } = useTranslation();
   const [tab, setTab] = useState<TabKey>(

@@ -139,7 +139,7 @@ describe("ProvidersSection", () => {
       name: "deep",
       protocol: "open_ai_compatible",
       settings: expect.objectContaining({
-        models: [{ id: "deepseek-chat", capabilities: ["reasoning"] }],
+        models: [{ id: "deepseek-chat", capabilities: ["reasoning"], temperature: null, topP: null, maxTokens: null }],
       }),
     });
   });
@@ -224,7 +224,8 @@ describe("ProvidersSection", () => {
     renderWithProviders(<ProvidersSection />);
 
     fireEvent.click(await screen.findByText("alpha"));
-    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    const deleteButtons = screen.getAllByRole("button", { name: /^delete$/i });
+    fireEvent.click(deleteButtons[deleteButtons.length - 1]!);
     fireEvent.click(screen.getByRole("button", { name: /delete this provider/i }));
     await waitFor(() => expect(deleteProvider).toHaveBeenCalledWith("prov-1", false));
     expect(await screen.findByText(/select a provider/i)).toBeInTheDocument();

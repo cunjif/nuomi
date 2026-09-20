@@ -17,10 +17,12 @@ export function Toaster(): ReactNode {
           className={`sketch-card sketch-shadow-md animate-draw-in pointer-events-auto border border-dashed px-3 py-2 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ink-accent ${
             toast.kind === "error"
               ? "border-state-danger bg-surface-overlay text-ink"
-              : "border-state-ok bg-surface-overlay text-ink"
+              : toast.kind === "warn"
+                ? "border-ink-accent bg-surface-overlay text-ink"
+                : "border-state-ok bg-surface-overlay text-ink"
           }`}
         >
-          <span className="sr-only">{toast.kind === "error" ? t("common.toastError") : t("common.toastSuccess")}: </span>
+          <span className="sr-only">{toast.kind === "error" ? t("common.toastError") : toast.kind === "warn" ? t("common.toastWarn") : t("common.toastSuccess")}: </span>
           {toast.message}
         </button>
       ))}
