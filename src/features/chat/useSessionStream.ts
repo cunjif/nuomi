@@ -110,25 +110,33 @@ export function useSessionStream(sessionId: string | null): {
           liveActivityRef.current = true;
           setStreamText((prev) => prev + asString(p.text));
         } else if (ev.type === "session.message") {
-          // Persisted authority arriving live. Order matters: record the
-          // message bookkeeping FIRST, then swap the buffer (the batch loop
-          // is synchronous, so no delta can slip in between).
+          // Persisted authority arriving live. Append as a completed entry
+          // so multiple messages in one batch all survive — overwriting
+          // streamText would drop earlier ones (e.g. group-chat turns).
           const msgSeq = typeof p.seq === "number" ? p.seq : null;
           if (msgSeq !== null && msgSeq <= lastMessageSeqRef.current) continue;
           if (msgSeq !== null) lastMessageSeqRef.current = msgSeq;
           liveActivityRef.current = true;
           const deltaTo = typeof p.deltaTo === "number" ? p.deltaTo : null;
           if (deltaTo !== null && sessionId !== null) {
-            // Retire exactly the delta range this answer covers; buffered
-            // deltas beyond it still apply.
             flow.markDeltasApplied(sessionId, deltaTo);
-            setStreamText(asString(p.role) === "assistant" ? asString(p.content) : "");
-          } else {
-            // No coverage info: the full persisted log supersedes whatever
-            // we buffered — clear and freeze deltas seen so far.
-            if (sessionId !== null) flow.dropPendingDeltas(sessionId);
-            setStreamText("");
-            setLiveEntries([]);
+          } else if (sessionId !== null) {
+            flow.dropPendingDeltas(sessionId);
+          }
+          // The durable text takes over from the streaming buffer.
+          setStreamText("");
+          const role = asString(p.role);
+          if (role === "user" || role === "assistant") {
+            setLiveEntries((prev) => [
+              ...prev,
+              {
+                id: `live-m${msgSeq ?? prev.length}`,
+                kind: "message",
+                role,
+                roleName: asString(p.role_name) || undefined,
+                text: asString(p.content),
+              },
+            ]);
           }
         } else if (ev.type === "tool.call") {
           liveActivityRef.current = true;
@@ -167,6 +175,16 @@ export function useSessionStream(sessionId: string | null): {
   const entries = useMemo(() => {
     const history = historyQuery.data !== undefined ? toEntries(historyQuery.data) : [];
     const lastHistory = history[history.length - 1];
+    // Drop live message entries whose seq is already covered by history —
+    // once the refetch lands the durable row, the live copy would duplicate.
+    const historyMessageSeqs = new Set<number>();
+    for (const e of historyQuery.data ?? []) {
+      if (e.kind === "message") historyMessageSeqs.add(e.seq);
+    }
+    const liveFiltered = liveEntries.filter((e) => {
+      const m = /^live-m(\d+)$/.exec(e.id);
+      return !(m && historyMessageSeqs.has(Number(m[1])));
+    });
     // Optimistic user bubble: hidden once history already contains the same
     // user message (replaces the optimistic entry without a flicker).
     const showOptimistic =
@@ -201,7 +219,7 @@ export function useSessionStream(sessionId: string | null): {
             } satisfies ChatEntry,
           ]
         : [];
-    return [...history, ...optimistic, ...liveEntries, ...streaming];
+    return [...history, ...optimistic, ...liveFiltered, ...streaming];
   }, [historyQuery.data, liveEntries, streamText, optimisticText]);
 
   const clearLive = useCallback(() => {

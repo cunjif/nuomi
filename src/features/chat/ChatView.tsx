@@ -112,7 +112,10 @@ export function ChatView(): ReactNode {
           if (isAgentBusy) {
             await enqueueMut.mutateAsync(input);
           } else {
-            await submitMut.mutateAsync(input);
+            // Fire-and-forget: the optimistic bubble gives immediate
+            // feedback and the composer clears right away; the turn keeps
+            // running in the background (failure surfaces via toast).
+            submitMut.mutate(input);
           }
         }}
       />

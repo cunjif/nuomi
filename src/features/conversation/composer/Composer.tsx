@@ -24,6 +24,7 @@ import { CompletionMenu, type CompletionItem } from "./CompletionMenu";
 import { useComposerTriggers } from "./useComposerTriggers";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { AttachmentShelf } from "./AttachmentShelf";
+import { Icon } from "../../../components/ui/Icon/Icon";
 
 export interface ComposerProps {
   disabled: boolean;
@@ -341,19 +342,30 @@ export function Composer({
           />
           <div className="absolute bottom-1 left-1 z-10">
             <ComposerToolbar
-              onVoiceClick={() => setVoiceActive((v) => !v)}
               onFunctionMenuClick={() => { /* function menu — task group 5 */ }}
               onAttachmentClick={() => fileInputRef.current?.click()}
-              voiceActive={voiceActive}
             />
           </div>
-          <button
-            type="submit"
-            disabled={disabled || pending || value.trim().length === 0}
-            className="pixel-fill-accent absolute bottom-1 right-1 z-10 px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
-          >
-            {pending ? t("chat.running") : t("chat.send")}
-          </button>
+          <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setVoiceActive((v) => !v)}
+              className={`flex h-7 w-7 items-center justify-center rounded p-1 text-ink-muted hover:bg-surface-overlay hover:text-ink-accent ${
+                voiceActive ? "text-ink-accent" : ""
+              }`}
+              aria-label={t("composer.toolbar.voice")}
+              title={t("composer.toolbar.voice")}
+            >
+              <Icon name="sparkles" size={16} />
+            </button>
+            <button
+              type="submit"
+              disabled={disabled || pending || value.trim().length === 0}
+              className="pixel-fill-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
+            >
+              {pending ? t("chat.running") : t("chat.send")}
+            </button>
+          </div>
         </div>
       </div>
       <input

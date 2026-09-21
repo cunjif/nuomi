@@ -152,4 +152,84 @@ describe("ChatView — live token stream (AC10)", () => {
     await waitFor(() => expect(screen.getAllByText("第一条")).toHaveLength(1));
     expect(screen.getAllByText("回复")).toHaveLength(1);
   });
+
+  it("keeps every message when multiple session.message events arrive in one batch", async () => {
+    seedConversation({ id: "s7", title: "multi", createdAt: 1, updatedAt: 1 });
+    useUiStore.getState().selectSession("s7");
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <ChatView />
+      </QueryClientProvider>,
+    );
+    await screen.findByText(/暂无消息/);
+
+    const ch = sessionChannel("s7");
+    // Simulate a group-chat turn: user + two RoleAgent replies arrive as
+    // persisted session.message events in a single batch. All three must
+    // remain visible — the earlier ones must not be overwritten.
+    act(() => {
+      emitTestEvent(ch, {
+        type: "session.message",
+        sessionId: "s7",
+        seq: 1,
+        payload: { sessionId: "s7", role: "user", content: "你好呀", seq: 1 },
+      });
+      emitTestEvent(ch, {
+        type: "session.message",
+        sessionId: "s7",
+        seq: 2,
+        payload: { sessionId: "s7", role: "assistant", content: "回复一", seq: 2, deltaTo: 1 },
+      });
+      emitTestEvent(ch, {
+        type: "session.message",
+        sessionId: "s7",
+        seq: 3,
+        payload: { sessionId: "s7", role: "assistant", content: "回复二", seq: 3, deltaTo: 1 },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("你好呀")).toBeInTheDocument());
+    expect(screen.getByText("回复一")).toBeInTheDocument();
+    expect(screen.getByText("回复二")).toBeInTheDocument();
+  });
+
+  it("drops a live message once history refetch covers the same seq", async () => {
+    seedConversation({ id: "s8", title: "dedupe", createdAt: 1, updatedAt: 1 });
+    useUiStore.getState().selectSession("s8");
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <ChatView />
+      </QueryClientProvider>,
+    );
+    await screen.findByText(/暂无消息/);
+
+    const ch = sessionChannel("s8");
+    act(() => {
+      emitTestEvent(ch, {
+        type: "session.message",
+        sessionId: "s8",
+        seq: 1,
+        payload: { sessionId: "s8", role: "assistant", content: "已持久化", seq: 1, deltaTo: 1 },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("已持久化")).toBeInTheDocument());
+
+    // History refetch lands with the same seq — the live copy must be
+    // dropped so the message renders exactly once.
+    tdState.events.set("s8", [
+      { seq: 1, kind: "message", payload: { role: "assistant", content: "已持久化" }, createdAt: 1 },
+    ]);
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: ["sessionEvents", "s8"] });
+    });
+    await waitFor(() => expect(screen.getAllByText("已持久化")).toHaveLength(1));
+  });
 });
