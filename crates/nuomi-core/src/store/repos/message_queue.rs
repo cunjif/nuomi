@@ -30,14 +30,15 @@ pub fn enqueue(
 }
 
 fn next_seq(conn: &Connection, session_id: &str) -> Result<i64, StoreError> {
-    let max: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(seq) FROM message_queue WHERE session_id = ?1",
-            params![session_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(max.unwrap_or(0) + 1)
+    // COALESCE is required: on an empty queue MAX(seq) yields a single row
+    // containing NULL (not zero rows), so `.optional()` never kicks in and
+    // decoding it as i64 fails with "Invalid column type: Null".
+    let max: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(seq), 0) FROM message_queue WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    Ok(max + 1)
 }
 
 /// Lists all `queued` messages for `session_id`, ordered by seq.
@@ -171,4 +172,57 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageQueueEntry> 
         seq: row.get(4)?,
         created_at: row.get(5)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::migrations;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrations::run(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1','','1','1')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn enqueues_on_empty_table_with_seq_one() {
+        // Regression: MAX(seq) over an empty queue returns a single NULL row;
+        // decoding it as i64 used to fail with "Invalid column type: Null".
+        let conn = db();
+        let entry = enqueue(&conn, "s1", "hello").unwrap();
+        assert_eq!(entry.seq, 1);
+        assert_eq!(entry.status, QueueStatus::Queued);
+        assert_eq!(entry.text, "hello");
+    }
+
+    #[test]
+    fn seq_is_monotonic_and_survives_terminal_statuses() {
+        let conn = db();
+        let e1 = enqueue(&conn, "s1", "a").unwrap();
+        let e2 = enqueue(&conn, "s1", "b").unwrap();
+        assert_eq!(e2.seq, e1.seq + 1);
+        mark_failed(&conn, &e1.id).unwrap();
+        let e3 = enqueue(&conn, "s1", "c").unwrap();
+        assert_eq!(e3.seq, e2.seq + 1);
+    }
+
+    #[test]
+    fn seq_scopes_are_independent_across_sessions() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s2','','1','1')",
+            [],
+        )
+        .unwrap();
+        let a = enqueue(&conn, "s1", "a").unwrap();
+        let b = enqueue(&conn, "s2", "b").unwrap();
+        assert_eq!(a.seq, 1);
+        assert_eq!(b.seq, 1);
+    }
 }
