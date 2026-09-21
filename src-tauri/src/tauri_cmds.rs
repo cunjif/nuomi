@@ -96,11 +96,12 @@ pub async fn list_events(
 #[tauri::command]
 #[specta::specta]
 pub async fn submit_task(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     session_id: String,
     input: String,
 ) -> Result<commands::RunResultDto, IpcError> {
-    commands::impl_submit_task(&state, session_id, input).await
+    commands::impl_submit_task(app_handle, &state, session_id, input).await
 }
 
 #[tauri::command]
@@ -981,4 +982,13 @@ pub async fn list_asr_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::AsrModelDto>, IpcError> {
     commands::impl_list_asr_models(&state).await
+}
+
+/// Frontend heartbeat: called once after the React root mounts to signal that
+/// the webview is alive. If this never arrives within the watchdog grace
+/// period, the shell auto-reloads the webview (see `shell_resilience`).
+#[tauri::command]
+#[specta::specta]
+pub fn __nuomi_heartbeat(state: tauri::State<'_, crate::shell_resilience::WatchdogState>) {
+    state.mark_ready();
 }

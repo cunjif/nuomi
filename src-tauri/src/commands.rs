@@ -542,6 +542,7 @@ async fn run_single_role_context(
 }
 
 pub async fn impl_submit_task(
+    app_handle: tauri::AppHandle,
     state: &AppState,
     session_id: String,
     input: String,
@@ -568,6 +569,11 @@ pub async fn impl_submit_task(
     let result = run_conversation_turn(state, &session_id, &input).await;
     // Release the busy lock and notify the frontend.
     release_busy_and_emit(state, &session_id).await;
+    // P0-5: lost-wakeup — a producer may have enqueued while this direct
+    // turn held the busy lock (impl_enqueue_message only spawns a drainer
+    // when IT acquires the lock). Re-check the queue and start a drainer
+    // if any messages were orphaned by this turn.
+    maybe_start_drainer(app_handle, state, &session_id).await;
     result
 }
 
@@ -621,6 +627,38 @@ async fn release_busy_and_emit(state: &AppState, session_id: &str) {
         "session.turn_end",
         serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
     ));
+}
+
+/// P0-5: Lost-wakeup recovery for direct turns. A producer may have enqueued
+/// via `impl_enqueue_message` while a `submit_task` turn held the busy lock —
+/// in that window the producer's `try_set_busy` fails and no drainer is
+/// spawned. After the direct turn releases the lock, atomically re-check the
+/// queue and re-acquire the lock; if both succeed, start the drainer.
+async fn maybe_start_drainer(
+    app_handle: tauri::AppHandle,
+    state: &AppState,
+    session_id: &str,
+) {
+    let db_path = state.db_path.clone();
+    let sid = session_id.to_string();
+    let reacquired = tokio::task::spawn_blocking(move || -> Result<bool, StoreError> {
+        let db = Db::open(&db_path)?;
+        let count = repos::message_queue::count_queued(&db.0, &sid)?;
+        if count == 0 {
+            return Ok(false);
+        }
+        repos::sessions::try_set_busy(&db.0, &sid)
+    })
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .unwrap_or(false);
+    if reacquired {
+        let sid = session_id.to_string();
+        tokio::task::spawn(async move {
+            process_queue(app_handle, sid).await;
+        });
+    }
 }
 
 // ---------------------------------------------------- ADR 0015: message queue

@@ -1070,6 +1070,9 @@ export function testDoubleCommands(): CommandSet {
     async journalRollback(_seq) {
       return ok(null);
     },
+    async nuomiHeartbeat() {
+      return;
+    },
   };
   return cmds;
 }

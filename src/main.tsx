@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./i18n";
 // Hand-drawn line-art fonts (Patrick Hand = titles, Kalam = emphasis,
@@ -22,3 +23,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Signal the Rust-side watchdog that the webview mounted successfully.
+// If this line never executes (JS crash / import failure), the watchdog
+// auto-reloads the webview after a grace period.
+invoke("__nuomi_heartbeat").catch(() => {});

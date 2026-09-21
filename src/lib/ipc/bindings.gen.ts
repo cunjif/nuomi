@@ -869,6 +869,14 @@ async listAsrModels() : Promise<Result<AsrModelDto[], IpcError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Frontend heartbeat: called once after the React root mounts to signal that
+ * the webview is alive. If this never arrives within the watchdog grace
+ * period, the shell auto-reloads the webview (see `shell_resilience`).
+ */
+async nuomiHeartbeat() : Promise<void> {
+    await TAURI_INVOKE("__nuomi_heartbeat");
 }
 }
 

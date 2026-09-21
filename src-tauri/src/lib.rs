@@ -11,6 +11,7 @@ mod events;
 mod ipc_error;
 pub mod notifier;
 pub mod schedule_dispatcher;
+pub mod shell_resilience;
 pub mod state;
 mod tauri_cmds;
 
@@ -143,6 +144,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::list_injectable_rules,
         tauri_cmds::transcribe_audio,
         tauri_cmds::list_asr_models,
+        tauri_cmds::__nuomi_heartbeat,
     ])
 }
 
@@ -415,6 +417,10 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            // OS-level fallbacks for white-screen recovery (tray + shortcut +
+            // watchdog). Installed before kernel boot so they are active even
+            // if boot_and_wire never completes.
+            shell_resilience::install(app.handle().clone())?;
             let db_path = std::env::var_os("NUOMI_DB_PATH")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| {
