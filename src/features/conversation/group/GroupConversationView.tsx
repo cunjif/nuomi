@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CommandContext } from "../../../lib/commands/registry";
@@ -8,6 +8,7 @@ import { ipc } from "../../../lib/ipc/client";
 import { toast } from "../../../lib/store/toastStore";
 import { useTheme } from "../../../lib/store/useTheme";
 import { useUiStore } from "../../../lib/store/uiStore";
+import { useStickToBottom } from "../../../components/ui/useStickToBottom";
 import { Composer } from "../composer/Composer";
 import { SpeakerBubble } from "./SpeakerBubble";
 import { RoundIndicator } from "./RoundIndicator";
@@ -65,11 +66,17 @@ export function GroupConversationView(): ReactNode {
   const events = eventsQuery.data ?? [];
   const messages = events.filter((e) => e.kind === "message");
 
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom();
+  const lastSeq = messages[messages.length - 1]?.seq ?? 0;
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [messages.length, lastSeq, scrollToBottomIfStuck]);
+
   return (
     <div className="flex h-full flex-col">
       <RoundIndicator current={1} max={6} />
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 flex-1 overflow-y-auto p-2">
+        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto p-2">
           {messages.map((msg) => {
             const role = (msg.payload as { role?: string }).role ?? "assistant";
             const content = (msg.payload as { content?: string }).content ?? "";
