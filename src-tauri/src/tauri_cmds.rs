@@ -309,6 +309,31 @@ pub async fn git_diff(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn git_staged_diff(
+    state: tauri::State<'_, AppState>,
+) -> Result<String, IpcError> {
+    commands::impl_git_staged_diff(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_commit_agents(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::CommitAgentOptionDto>, IpcError> {
+    commands::impl_list_commit_agents(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_commit_generate(
+    state: tauri::State<'_, AppState>,
+    role_agent: Option<commands::AgentRefInput>,
+) -> Result<commands::AiCommitResultDto, IpcError> {
+    commands::impl_ai_commit_generate(&state, role_agent).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_schedule(
     state: tauri::State<'_, AppState>,
     name: String,

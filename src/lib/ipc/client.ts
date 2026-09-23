@@ -104,6 +104,10 @@ export const ipc = {
   gitPush: (remote: string, branch: string) => unwrap(current.gitPush(remote, branch)),
   gitWorktrees: () => unwrap(current.gitWorktrees()),
   gitDiff: (path: string, staged: boolean) => unwrap(current.gitDiff(path, staged)),
+  gitStagedDiff: () => unwrap(current.gitStagedDiff()),
+  listCommitAgents: () => unwrap(current.listCommitAgents()),
+  aiCommitGenerate: (roleAgent?: { kind: string; id: string }) =>
+    unwrap(current.aiCommitGenerate(roleAgent ?? null)),
   getWorkspace: () => unwrap(current.getWorkspace()),
   setWorkspace: (path: string) => unwrap(current.setWorkspace(path)),
   createSchedule: (name: string, cronExpr: string, taskTitle: string, taskDescription: string) =>

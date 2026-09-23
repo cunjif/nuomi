@@ -1020,6 +1020,46 @@ pub struct AgentRefInput {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitAgentOptionDto {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommitResultDto {
+    pub message: String,
+    pub truncated: bool,
+    pub agent_name: String,
+    pub elapsed_ms: u64,
+}
+
+impl From<nuomi_core::services::CommitAgentOption> for CommitAgentOptionDto {
+    fn from(opt: nuomi_core::services::CommitAgentOption) -> Self {
+        Self {
+            kind: opt.kind.as_str().to_string(),
+            id: opt.id,
+            name: opt.name,
+            is_default: opt.is_default,
+        }
+    }
+}
+
+impl From<nuomi_core::services::AiCommitResult> for AiCommitResultDto {
+    fn from(r: nuomi_core::services::AiCommitResult) -> Self {
+        Self {
+            message: r.message,
+            truncated: r.truncated,
+            agent_name: r.agent_name,
+            elapsed_ms: r.elapsed_ms,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationInput {
@@ -1054,6 +1094,18 @@ pub struct AgentDetailDto {
     pub responsibility: Option<String>,
     pub bound_model: Option<String>,
     pub provider: Option<String>,
+    /// 绑定来源："provider" | "cli" | null。配合 provider/cli_agent_* 字段使用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_kind: Option<String>,
+    /// CLI Agent 名称（binding_kind="cli" 时填充）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_agent_name: Option<String>,
+    /// CLI Agent 方言："claude_code" | "codex" | "plain"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_agent_flavor: Option<String>,
+    /// CLI Agent 模型标识（来自 AgentProfile.model_id）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_agent_model: Option<String>,
     pub enabled: bool,
 }
 
@@ -1503,6 +1555,67 @@ pub async fn impl_git_diff(
         return Ok(state.git().diff_untracked(&path).await?);
     }
     Ok(out)
+}
+
+pub async fn impl_git_staged_diff(state: &AppState) -> Result<String, IpcError> {
+    Ok(state.git().diff_staged().await?)
+}
+
+// ---------- ai commit ----------
+
+pub async fn impl_list_commit_agents(
+    state: &AppState,
+) -> Result<Vec<CommitAgentOptionDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<_>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(nuomi_core::services::ai_commit_list_commit_agents(&db.0)?)
+    })
+    .await??;
+    Ok(rows.into_iter().map(CommitAgentOptionDto::from).collect())
+}
+
+pub async fn impl_ai_commit_generate(
+    state: &AppState,
+    role_agent: Option<AgentRefInput>,
+) -> Result<AiCommitResultDto, IpcError> {
+    let parsed = role_agent
+        .as_ref()
+        .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
+
+    let git = state.git();
+    let db_path = state.db_path.clone();
+    let secrets = state.secrets.clone();
+    let cwd = Some(state.current_workspace());
+
+    match nuomi_core::services::ai_commit_generate(parsed, db_path, secrets, cwd, &git).await {
+        Ok(result) => Ok(AiCommitResultDto::from(result)),
+        Err(e) => Err(map_ai_commit_error(e)),
+    }
+}
+
+fn map_ai_commit_error(e: nuomi_core::services::AiCommitError) -> IpcError {
+    use nuomi_core::services::AiCommitError;
+    match e {
+        AiCommitError::NoStagedChanges => {
+            IpcError::new("ai_commit.no_staged_changes", "no staged changes to commit")
+        }
+        AiCommitError::AgentUnavailable(msg) => {
+            IpcError::new("ai_commit.agent_unavailable", msg)
+        }
+        AiCommitError::GenerationFailed(msg) => {
+            IpcError::new("ai_commit.generation_failed", msg)
+        }
+        AiCommitError::EmptyResult => {
+            IpcError::new("ai_commit.empty_result", "AI returned empty content")
+        }
+        AiCommitError::Timeout(ms) => {
+            IpcError::new("ai_commit.timeout", format!("generation timed out after {ms}ms"))
+        }
+        AiCommitError::Join(e) => IpcError::from(e),
+        AiCommitError::Core(e) => IpcError::from(e),
+    }
 }
 
 // ---------- schedules ----------
@@ -4487,6 +4600,23 @@ pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcErro
 
 // ----------------------------------------------- get_agent_detail
 
+/// 从 Role.params JSON 中读取 `agent_profile_id`（CLI Agent 绑定）。
+fn read_role_agent_profile_id(params: &serde_json::Value) -> Option<String> {
+    params
+        .get("agent_profile_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// CliFlavor → snake_case 字符串，供 DTO 的 String 字段使用。
+fn flavor_to_string(f: CliFlavor) -> String {
+    match f {
+        CliFlavor::ClaudeCode => "claude_code".to_string(),
+        CliFlavor::Codex => "codex".to_string(),
+        CliFlavor::Plain => "plain".to_string(),
+    }
+}
+
 pub async fn impl_get_agent_detail(
     state: &AppState,
     agent_kind: String,
@@ -4507,26 +4637,58 @@ pub async fn impl_get_agent_detail(
                         avatar_url: None,
                         role: Some(p.adapter.clone()),
                         responsibility: None,
-                        bound_model: None,
+                        bound_model: p.model_id.clone(),
                         provider: None,
+                        binding_kind: Some("cli".to_string()),
+                        cli_agent_name: Some(p.name.clone()),
+                        cli_agent_flavor: Some(flavor_to_string(p.flavor)),
+                        cli_agent_model: p.model_id.clone(),
                         enabled: p.enabled,
                     })
                 }
                 "role" => {
                     let r = repos::roles::get(&db.0, &agent_id)?;
-                    Ok(AgentDetailDto {
-                        kind: "role".to_string(),
-                        id: r.id.clone(),
-                        name: r.name.clone(),
-                        avatar_url: None,
-                        role: Some("role".to_string()),
-                        responsibility: r.system_prompt_override.as_deref().map(|s| {
-                            if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
+                    let agent_profile_id = read_role_agent_profile_id(&r.params);
+                    match agent_profile_id {
+                        Some(pid) => {
+                            let p = repos::agent_profiles::get(&db.0, &pid)?;
+                            Ok(AgentDetailDto {
+                                kind: "role".to_string(),
+                                id: r.id.clone(),
+                                name: r.name.clone(),
+                                avatar_url: None,
+                                role: Some("role".to_string()),
+                                responsibility: r.system_prompt_override.as_deref().map(|s| {
+                                    if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
+                                }),
+                                bound_model: p.model_id.clone(),
+                                provider: None,
+                                binding_kind: Some("cli".to_string()),
+                                cli_agent_name: Some(p.name.clone()),
+                                cli_agent_flavor: Some(flavor_to_string(p.flavor)),
+                                cli_agent_model: p.model_id.clone(),
+                                enabled: true,
+                            })
+                        }
+                        None => Ok(AgentDetailDto {
+                            kind: "role".to_string(),
+                            id: r.id.clone(),
+                            name: r.name.clone(),
+                            avatar_url: None,
+                            role: Some("role".to_string()),
+                            responsibility: r.system_prompt_override.as_deref().map(|s| {
+                                if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
+                            }),
+                            // Role 未指定具体 model；model 由 Provider 配置决定。
+                            bound_model: None,
+                            provider: r.provider_ids.first().cloned(),
+                            binding_kind: r.provider_ids.first().map(|_| "provider".to_string()),
+                            cli_agent_name: None,
+                            cli_agent_flavor: None,
+                            cli_agent_model: None,
+                            enabled: true,
                         }),
-                        bound_model: r.provider_id.clone(),
-                        provider: r.provider_ids.first().cloned(),
-                        enabled: true,
-                    })
+                    }
                 }
                 _ => Err(IpcError::new(
                     "validation",

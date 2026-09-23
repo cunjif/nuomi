@@ -239,6 +239,15 @@ export function testDoubleCommands(): CommandSet {
     async gitDiff(_path, _staged) {
       return ok("");
     },
+    async gitStagedDiff() {
+      return ok("");
+    },
+    async listCommitAgents() {
+      return ok([]);
+    },
+    async aiCommitGenerate(_roleAgent) {
+      return ok({ message: "", truncated: false, agentName: "", elapsedMs: 0 });
+    },
     async getWorkspace() {
       return ok({ root: tdState.workspaceRoot, configured: tdState.workspaceConfigured });
     },
@@ -945,6 +954,10 @@ export function testDoubleCommands(): CommandSet {
         responsibility: null,
         boundModel: null,
         provider: null,
+        bindingKind: null,
+        cliAgentName: null,
+        cliAgentFlavor: null,
+        cliAgentModel: null,
         enabled: true,
       };
       return ok(detail);

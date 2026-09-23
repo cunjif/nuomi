@@ -222,6 +222,30 @@ async gitDiff(path: string, staged: boolean) : Promise<Result<string, IpcError>>
     else return { status: "error", error: e  as any };
 }
 },
+async gitStagedDiff() : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_staged_diff") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listCommitAgents() : Promise<Result<CommitAgentOptionDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_commit_agents") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async aiCommitGenerate(roleAgent: AgentRefInput | null) : Promise<Result<AiCommitResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_commit_generate", { roleAgent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createSchedule(name: string, cronExpr: string, taskTitle: string, taskDescription: string) : Promise<Result<ScheduleDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_schedule", { name, cronExpr, taskTitle, taskDescription }) };
@@ -890,7 +914,23 @@ async nuomiHeartbeat() : Promise<void> {
 
 /** user-defined types **/
 
-export type AgentDetailDto = { kind: string; id: string; name: string; avatarUrl: string | null; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null; enabled: boolean }
+export type AgentDetailDto = { kind: string; id: string; name: string; avatarUrl: string | null; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null; 
+/**
+ * 绑定来源："provider" | "cli" | null。配合 provider/cli_agent_* 字段使用。
+ */
+bindingKind?: string | null; 
+/**
+ * CLI Agent 名称（binding_kind="cli" 时填充）。
+ */
+cliAgentName?: string | null; 
+/**
+ * CLI Agent 方言："claude_code" | "codex" | "plain"。
+ */
+cliAgentFlavor?: string | null; 
+/**
+ * CLI Agent 模型标识（来自 AgentProfile.model_id）。
+ */
+cliAgentModel?: string | null; enabled: boolean }
 export type AgentOptionDto = { kind: string; id: string; name: string; enabled: boolean; builtin: boolean; role: string | null; responsibility: string | null; boundModel: string | null; provider: string | null }
 export type AgentProfileDto = { id: string; name: string; adapter: string; flavor: CliFlavorDto; command: string; args: string[]; env: Partial<{ [key in string]: string }>; workingDir: string | null; enabled: boolean; modelId: string | null; 
 /**
@@ -904,6 +944,7 @@ export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: s
 resumeArgs?: string | null }
 export type AgentRefDto = { kind: string; id: string; name: string }
 export type AgentRefInput = { kind: string; id: string }
+export type AiCommitResultDto = { message: string; truncated: boolean; agentName: string; elapsedMs: number }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
@@ -913,6 +954,7 @@ export type AttachmentDto = { id: string; sessionId: string; seq: number | null;
 export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
+export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
 export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
