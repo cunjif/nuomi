@@ -4617,6 +4617,16 @@ fn flavor_to_string(f: CliFlavor) -> String {
     }
 }
 
+/// Truncates a string to at most `limit` Unicode characters (not bytes),
+/// avoiding panics on multi-byte UTF-8 boundaries.
+fn truncate_chars(s: &str, limit: usize) -> String {
+    if s.chars().count() > limit {
+        s.chars().take(limit).collect()
+    } else {
+        s.to_string()
+    }
+}
+
 pub async fn impl_get_agent_detail(
     state: &AppState,
     agent_kind: String,
@@ -4649,36 +4659,44 @@ pub async fn impl_get_agent_detail(
                 "role" => {
                     let r = repos::roles::get(&db.0, &agent_id)?;
                     let agent_profile_id = read_role_agent_profile_id(&r.params);
-                    match agent_profile_id {
-                        Some(pid) => {
-                            let p = repos::agent_profiles::get(&db.0, &pid)?;
-                            Ok(AgentDetailDto {
-                                kind: "role".to_string(),
-                                id: r.id.clone(),
-                                name: r.name.clone(),
-                                avatar_url: None,
-                                role: Some("role".to_string()),
-                                responsibility: r.system_prompt_override.as_deref().map(|s| {
-                                    if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
-                                }),
-                                bound_model: p.model_id.clone(),
-                                provider: None,
-                                binding_kind: Some("cli".to_string()),
-                                cli_agent_name: Some(p.name.clone()),
-                                cli_agent_flavor: Some(flavor_to_string(p.flavor)),
-                                cli_agent_model: p.model_id.clone(),
-                                enabled: true,
-                            })
-                        }
-                        None => Ok(AgentDetailDto {
+
+                    // Resolve the bound CLI agent profile. If it has been
+                    // deleted (NotFound) or any store error occurs, fall back
+                    // to the provider-binding branch so the detail page still
+                    // opens with the Role's basic info.
+                    let cli_profile = agent_profile_id
+                        .as_deref()
+                        .and_then(|pid| repos::agent_profiles::get(&db.0, pid).ok());
+
+                    let responsibility = r
+                        .system_prompt_override
+                        .as_deref()
+                        .map(|s| truncate_chars(s, 200));
+
+                    if let Some(p) = cli_profile {
+                        Ok(AgentDetailDto {
                             kind: "role".to_string(),
                             id: r.id.clone(),
                             name: r.name.clone(),
                             avatar_url: None,
                             role: Some("role".to_string()),
-                            responsibility: r.system_prompt_override.as_deref().map(|s| {
-                                if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
-                            }),
+                            responsibility,
+                            bound_model: p.model_id.clone(),
+                            provider: None,
+                            binding_kind: Some("cli".to_string()),
+                            cli_agent_name: Some(p.name.clone()),
+                            cli_agent_flavor: Some(flavor_to_string(p.flavor)),
+                            cli_agent_model: p.model_id.clone(),
+                            enabled: true,
+                        })
+                    } else {
+                        Ok(AgentDetailDto {
+                            kind: "role".to_string(),
+                            id: r.id.clone(),
+                            name: r.name.clone(),
+                            avatar_url: None,
+                            role: Some("role".to_string()),
+                            responsibility,
                             // Role 未指定具体 model；model 由 Provider 配置决定。
                             bound_model: None,
                             provider: r.provider_ids.first().cloned(),
@@ -4687,7 +4705,7 @@ pub async fn impl_get_agent_detail(
                             cli_agent_flavor: None,
                             cli_agent_model: None,
                             enabled: true,
-                        }),
+                        })
                     }
                 }
                 _ => Err(IpcError::new(
