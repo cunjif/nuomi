@@ -1,0 +1,165 @@
+diff --git a/src/features/chat/ChatView.test.tsx b/src/features/chat/ChatView.test.tsx
+index 46196ba..0319971 100644
+--- a/src/features/chat/ChatView.test.tsx
++++ b/src/features/chat/ChatView.test.tsx
+@@ -152,4 +152,84 @@ describe("ChatView — live token stream (AC10)", () => {
+     await waitFor(() => expect(screen.getAllByText("第一条")).toHaveLength(1));
+     expect(screen.getAllByText("回复")).toHaveLength(1);
+   });
++
++  it("keeps every message when multiple session.message events arrive in one batch", async () => {
++    seedConversation({ id: "s7", title: "multi", createdAt: 1, updatedAt: 1 });
++    useUiStore.getState().selectSession("s7");
++
++    const qc = new QueryClient({
++      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
++    });
++    render(
++      <QueryClientProvider client={qc}>
++        <ChatView />
++      </QueryClientProvider>,
++    );
++    await screen.findByText(/暂无消息/);
++
++    const ch = sessionChannel("s7");
++    // Simulate a group-chat turn: user + two RoleAgent replies arrive as
++    // persisted session.message events in a single batch. All three must
++    // remain visible — the earlier ones must not be overwritten.
++    act(() => {
++      emitTestEvent(ch, {
++        type: "session.message",
++        sessionId: "s7",
++        seq: 1,
++        payload: { sessionId: "s7", role: "user", content: "你好呀", seq: 1 },
++      });
++      emitTestEvent(ch, {
++        type: "session.message",
++        sessionId: "s7",
++        seq: 2,
++        payload: { sessionId: "s7", role: "assistant", content: "回复一", seq: 2, deltaTo: 1 },
++      });
++      emitTestEvent(ch, {
++        type: "session.message",
++        sessionId: "s7",
++        seq: 3,
++        payload: { sessionId: "s7", role: "assistant", content: "回复二", seq: 3, deltaTo: 1 },
++      });
++    });
++
++    await waitFor(() => expect(screen.getByText("你好呀")).toBeInTheDocument());
++    expect(screen.getByText("回复一")).toBeInTheDocument();
++    expect(screen.getByText("回复二")).toBeInTheDocument();
++  });
++
++  it("drops a live message once history refetch covers the same seq", async () => {
++    seedConversation({ id: "s8", title: "dedupe", createdAt: 1, updatedAt: 1 });
++    useUiStore.getState().selectSession("s8");
++
++    const qc = new QueryClient({
++      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
++    });
++    render(
++      <QueryClientProvider client={qc}>
++        <ChatView />
++      </QueryClientProvider>,
++    );
++    await screen.findByText(/暂无消息/);
++
++    const ch = sessionChannel("s8");
++    act(() => {
++      emitTestEvent(ch, {
++        type: "session.message",
++        sessionId: "s8",
++        seq: 1,
++        payload: { sessionId: "s8", role: "assistant", content: "已持久化", seq: 1, deltaTo: 1 },
++      });
++    });
++    await waitFor(() => expect(screen.getByText("已持久化")).toBeInTheDocument());
++
++    // History refetch lands with the same seq — the live copy must be
++    // dropped so the message renders exactly once.
++    tdState.events.set("s8", [
++      { seq: 1, kind: "message", payload: { role: "assistant", content: "已持久化" }, createdAt: 1 },
++    ]);
++    await act(async () => {
++      await qc.invalidateQueries({ queryKey: ["sessionEvents", "s8"] });
++    });
++    await waitFor(() => expect(screen.getAllByText("已持久化")).toHaveLength(1));
++  });
+ });
+diff --git a/src/features/chat/useSessionStream.ts b/src/features/chat/useSessionStream.ts
+index 8661f31..234ff73 100644
+--- a/src/features/chat/useSessionStream.ts
++++ b/src/features/chat/useSessionStream.ts
+@@ -110,25 +110,33 @@ export function useSessionStream(sessionId: string | null): {
+           liveActivityRef.current = true;
+           setStreamText((prev) => prev + asString(p.text));
+         } else if (ev.type === "session.message") {
+-          // Persisted authority arriving live. Order matters: record the
+-          // message bookkeeping FIRST, then swap the buffer (the batch loop
+-          // is synchronous, so no delta can slip in between).
++          // Persisted authority arriving live. Append as a completed entry
++          // so multiple messages in one batch all survive — overwriting
++          // streamText would drop earlier ones (e.g. group-chat turns).
+           const msgSeq = typeof p.seq === "number" ? p.seq : null;
+           if (msgSeq !== null && msgSeq <= lastMessageSeqRef.current) continue;
+           if (msgSeq !== null) lastMessageSeqRef.current = msgSeq;
+           liveActivityRef.current = true;
+           const deltaTo = typeof p.deltaTo === "number" ? p.deltaTo : null;
+           if (deltaTo !== null && sessionId !== null) {
+-            // Retire exactly the delta range this answer covers; buffered
+-            // deltas beyond it still apply.
+             flow.markDeltasApplied(sessionId, deltaTo);
+-            setStreamText(asString(p.role) === "assistant" ? asString(p.content) : "");
+-          } else {
+-            // No coverage info: the full persisted log supersedes whatever
+-            // we buffered — clear and freeze deltas seen so far.
+-            if (sessionId !== null) flow.dropPendingDeltas(sessionId);
+-            setStreamText("");
+-            setLiveEntries([]);
++          } else if (sessionId !== null) {
++            flow.dropPendingDeltas(sessionId);
++          }
++          // The durable text takes over from the streaming buffer.
++          setStreamText("");
++          const role = asString(p.role);
++          if (role === "user" || role === "assistant") {
++            setLiveEntries((prev) => [
++              ...prev,
++              {
++                id: `live-m${msgSeq ?? prev.length}`,
++                kind: "message",
++                role,
++                roleName: asString(p.role_name) || undefined,
++                text: asString(p.content),
++              },
++            ]);
+           }
+         } else if (ev.type === "tool.call") {
+           liveActivityRef.current = true;
+@@ -167,6 +175,16 @@ export function useSessionStream(sessionId: string | null): {
+   const entries = useMemo(() => {
+     const history = historyQuery.data !== undefined ? toEntries(historyQuery.data) : [];
+     const lastHistory = history[history.length - 1];
++    // Drop live message entries whose seq is already covered by history —
++    // once the refetch lands the durable row, the live copy would duplicate.
++    const historyMessageSeqs = new Set<number>();
++    for (const e of historyQuery.data ?? []) {
++      if (e.kind === "message") historyMessageSeqs.add(e.seq);
++    }
++    const liveFiltered = liveEntries.filter((e) => {
++      const m = /^live-m(\d+)$/.exec(e.id);
++      return !(m && historyMessageSeqs.has(Number(m[1])));
++    });
+     // Optimistic user bubble: hidden once history already contains the same
+     // user message (replaces the optimistic entry without a flicker).
+     const showOptimistic =
+@@ -201,7 +219,7 @@ export function useSessionStream(sessionId: string | null): {
+             } satisfies ChatEntry,
+           ]
+         : [];
+-    return [...history, ...optimistic, ...liveEntries, ...streaming];
++    return [...history, ...optimistic, ...liveFiltered, ...streaming];
+   }, [historyQuery.data, liveEntries, streamText, optimisticText]);
+ 
+   const clearLive = useCallback(() => {

@@ -1,0 +1,11 @@
+{
+  "issue_number": "msg-queue-overwrite",
+  "outcome": "confirmed",
+  "root_cause": "src/features/chat/useSessionStream.ts 的 session.message 事件处理中，setStreamText 直接赋值覆盖（原第125行）导致多条 assistant message 依次到达时只保留最后一条；且无 deltaTo 分支的 setLiveEntries([])（原第131行）清空整个 live 缓冲，进一步丢失已累积消息。后端 facade.rs 第491-504行在任务完成后批量发布所有 appended 记录为 session.message 事件，多条 assistant message 共享同一 deltaTo，前端依次处理时 streamText 被反复覆盖。",
+  "impact_scope": {
+    "files": ["src/features/chat/useSessionStream.ts"],
+    "functions": ["useSessionStream (handleBatch session.message 分支)", "entries useMemo"],
+    "scenario": "群聊多 RoleAgent 依次发言 / 一次任务产出多条 assistant 消息 / 同一批次含 user+assistant+tool_result 多种记录"
+  },
+  "fix": "将 session.message 的 message 追加到 liveEntries（作为已完成条目）而非覆盖 streamText；移除分支2的 setLiveEntries([]) 清空；在 entries useMemo 中按 seq 对 liveEntries 去重，避免 history refetch 后重复。"
+}
