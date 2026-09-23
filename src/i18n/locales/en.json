@@ -23,7 +23,22 @@
     "selectFileHint": "Click a file in the changes list",
     "diffEmpty": "No changes",
     "diffEmptyHint": "This file has no diff content",
-    "diffBinary": "Binary file diff not shown"
+    "diffBinary": "Binary file diff not shown",
+    "aiCommit": {
+      "generate": "AI Generate",
+      "selectAgent": "Select AI",
+      "noAgents": "No AI configured. Please add and enable one in Settings first.",
+      "sensitiveWarning": "The staged diff will be sent to the selected AI service. Continue?",
+      "overwriteWarning": "The input already has content. Replace it with the generated message?",
+      "truncated": "Diff was truncated",
+      "loading": "Generating...",
+      "noStagedChanges": "No staged changes. Please stage files first.",
+      "agentUnavailable": "The selected AI is unavailable. Please reselect.",
+      "generationFailed": "AI generation failed. Please retry or type manually.",
+      "emptyResult": "AI returned no content. Please retry or type manually.",
+      "timeout": "Generation timed out. Please retry or type manually.",
+      "defaultAgent": "Default"
+    }
   },
   "common": {
     "retry": "Retry",
@@ -282,6 +297,8 @@
       "responsibility": "Responsibility",
       "boundModel": "Bound Model",
       "provider": "Provider",
+      "cliAgent": "CLI Agent",
+      "modelFromCli": "Managed by CLI Agent",
       "notSet": "Not set",
       "removeMember": "Remove member",
       "removeMemberFailed": "Failed to remove member"

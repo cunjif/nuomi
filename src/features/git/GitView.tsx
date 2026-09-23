@@ -12,6 +12,7 @@ import { Field, TextareaField } from "../../components/ui/Field";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { DiffView } from "./DiffView";
+import { AiCommitBar } from "./AiCommitBar";
 
 function statusTone(status: string): BadgeTone {
   switch (status) {
@@ -147,6 +148,7 @@ export function GitView(): ReactNode {
             <Icon name="commit" size={14} />
             {t("git.commit")}
           </Button>
+          <AiCommitBar currentMessage={message} onMessageChange={setMessage} />
         </Card>
 
         <Card flush className="p-2">

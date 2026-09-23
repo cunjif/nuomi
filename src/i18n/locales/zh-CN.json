@@ -23,7 +23,22 @@
     "selectFileHint": "点击左侧变更列表中的文件",
     "diffEmpty": "暂无差异",
     "diffEmptyHint": "该文件没有差异内容",
-    "diffBinary": "二进制文件无法显示差异"
+    "diffBinary": "二进制文件无法显示差异",
+    "aiCommit": {
+      "generate": "AI 生成",
+      "selectAgent": "选择 AI",
+      "noAgents": "未配置可用的 AI，请先在设置中添加并启用",
+      "sensitiveWarning": "暂存区差异将发送至所选 AI 服务，是否继续？",
+      "overwriteWarning": "输入框已有内容，确定要替换吗？",
+      "truncated": "差异已截断",
+      "loading": "AI 生成中...",
+      "noStagedChanges": "暂存区无变更，请先暂存文件",
+      "agentUnavailable": "所选 AI 不可用，请重新选择",
+      "generationFailed": "AI 生成失败，请重试或手动输入",
+      "emptyResult": "AI 未生成有效内容，请重试或手动输入",
+      "timeout": "生成超时，请重试或手动输入",
+      "defaultAgent": "默认"
+    }
   },
   "common": {
     "retry": "重试",
@@ -282,6 +297,8 @@
       "responsibility": "职责",
       "boundModel": "绑定模型",
       "provider": "Provider",
+      "cliAgent": "CLI Agent",
+      "modelFromCli": "由 CLI Agent 自治",
       "notSet": "未设置",
       "removeMember": "移除成员",
       "removeMemberFailed": "移除成员失败"
