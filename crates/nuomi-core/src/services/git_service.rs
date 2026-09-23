@@ -220,6 +220,13 @@ impl GitService {
         self.exec(&["diff"]).await
     }
 
+    /// Staged diff of the entire index vs HEAD (`git diff --cached`).
+    /// Returns the unified diff text for all staged changes at once,
+    /// preserving cross-file context for AI-assisted commit generation.
+    pub async fn diff_staged(&self) -> Result<String, GitError> {
+        self.exec(&["diff", "--cached"]).await
+    }
+
     /// Diff for a specific path. `staged` selects `--cached` (index vs HEAD)
     /// vs the default working-tree-vs-index diff. `--` blocks option injection.
     pub async fn diff_for_path(&self, path: &str, staged: bool) -> Result<String, GitError> {

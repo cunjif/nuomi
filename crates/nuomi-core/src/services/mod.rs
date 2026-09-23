@@ -3,6 +3,7 @@
 //! Each service owns its own `thiserror` error type.
 
 pub mod capability_router;
+pub mod ai_commit_service;
 pub mod conversation_service;
 pub mod debug_event_publisher;
 pub mod git_service;
@@ -28,6 +29,12 @@ pub use capability_router::{
 pub use conversation_service::{
     compose_user_message, create_conversation, is_role_ready, name_agent_ref, resolve_agent,
     resolve_default_agent, resolve_participants, AgentRef, ResolvedAgent, DEFAULT_AGENT_KEY,
+};
+pub use ai_commit_service::{
+    generate as ai_commit_generate, get_default_agent as ai_commit_get_default_agent,
+    list_commit_agents as ai_commit_list_commit_agents,
+    set_default_agent as ai_commit_set_default_agent, AiCommitError, AiCommitResult,
+    CommitAgentOption, AI_COMMIT_DEFAULT_AGENT_KEY, AI_COMMIT_DIFF_LIMIT, AI_COMMIT_TIMEOUT_MS,
 };
 pub use git_service::{
     create_worktree, merge_base_into_worktree, merge_worktree_into_base, recover_merges,
