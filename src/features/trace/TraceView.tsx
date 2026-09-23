@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
+import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { ipc } from "../../lib/ipc/client";
 import { sessionChannel } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
@@ -97,17 +98,23 @@ function TraceTimeline(): ReactNode {
 }
 
 function TimelineList({ entries, speakerFallback }: { entries: ReturnType<typeof buildTimeline>; speakerFallback: string }): ReactNode {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualized = entries.length > VIRTUALIZE_THRESHOLD;
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom({ rebindKey: virtualized });
+
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [entries.length, virtualized, scrollToBottomIfStuck]);
+
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 64,
     overscan: 10,
-    enabled: entries.length > VIRTUALIZE_THRESHOLD,
+    enabled: virtualized,
   });
-  if (entries.length <= VIRTUALIZE_THRESHOLD) {
+  if (!virtualized) {
     return (
-      <div className="overflow-y-auto py-1">
+      <div ref={scrollRef} className="h-full overflow-y-auto py-1">
         {entries.map((entry) => (
           <TimelineRow key={entry.seq} entry={entry} speakerFallback={speakerFallback} />
         ))}

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { useRef } from "react";
+import { useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { Bubble } from "./Bubble";
 import type { ChatEntry } from "./useSessionStream";
 
@@ -13,18 +14,27 @@ interface MessageListProps {
 const VIRTUALIZE_THRESHOLD = 100;
 
 export function MessageList({ entries, streamingId }: MessageListProps): ReactNode {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualized = entries.length > VIRTUALIZE_THRESHOLD;
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom({ rebindKey: virtualized });
+
+  // Snap to the latest message whenever the list grows or the streaming
+  // bubble updates — but only while the user is following the tail.
+  const lastText = entries[entries.length - 1]?.text ?? "";
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [entries.length, lastText, streamingId, virtualized, scrollToBottomIfStuck]);
+
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 56,
     overscan: 10,
-    enabled: entries.length > VIRTUALIZE_THRESHOLD,
+    enabled: virtualized,
   });
 
-  if (entries.length <= VIRTUALIZE_THRESHOLD) {
+  if (!virtualized) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+      <div ref={scrollRef} className="min-h-0 h-full overflow-y-auto py-2">
         {entries.map((entry) => (
           <Bubble key={entry.id} entry={entry} streaming={entry.id === streamingId} />
         ))}
@@ -32,7 +42,7 @@ export function MessageList({ entries, streamingId }: MessageListProps): ReactNo
     );
   }
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={scrollRef} className="min-h-0 h-full overflow-y-auto">
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((item) => (
           <div

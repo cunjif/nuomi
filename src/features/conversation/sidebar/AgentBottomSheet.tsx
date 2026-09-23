@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { AsyncBoundary } from "../../../components/ui/AsyncBoundary";
+import { flavorLabel } from "../../../lib/conversation/agentResolve";
 
 export interface AgentBottomSheetProps {
   agentKind: string;
@@ -71,18 +72,42 @@ export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRem
                   {detailQuery.data.responsibility ?? t("conversation.agentDetail.notSet")}
                 </div>
               </div>
-              <div>
-                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.boundModel")}</div>
-                <div className="text-sm text-ink">
-                  {detailQuery.data.boundModel ?? t("conversation.agentDetail.notSet")}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-ink-muted">{t("conversation.agentDetail.provider")}</div>
-                <div className="text-sm text-ink">
-                  {detailQuery.data.provider ?? t("conversation.agentDetail.notSet")}
-                </div>
-              </div>
+              {detailQuery.data.bindingKind === "cli" ? (
+                <>
+                  <div>
+                    <div className="text-xs text-ink-muted">{t("conversation.agentDetail.cliAgent")}</div>
+                    <div className="text-sm text-ink">
+                      {detailQuery.data.cliAgentName ?? t("conversation.agentDetail.notSet")}
+                      {detailQuery.data.cliAgentFlavor && (
+                        <span className="ml-1 text-xs text-ink-muted">
+                          ({flavorLabel(detailQuery.data.cliAgentFlavor)})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-ink-muted">{t("conversation.agentDetail.boundModel")}</div>
+                    <div className="text-sm text-ink">
+                      {detailQuery.data.cliAgentModel ?? t("conversation.agentDetail.modelFromCli")}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <div className="text-xs text-ink-muted">{t("conversation.agentDetail.provider")}</div>
+                    <div className="text-sm text-ink">
+                      {detailQuery.data.provider ?? t("conversation.agentDetail.notSet")}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-ink-muted">{t("conversation.agentDetail.boundModel")}</div>
+                    <div className="text-sm text-ink">
+                      {detailQuery.data.boundModel ?? t("conversation.agentDetail.notSet")}
+                    </div>
+                  </div>
+                </>
+              )}
               {canRemove && onRemove && (
                 <button
                   type="button"

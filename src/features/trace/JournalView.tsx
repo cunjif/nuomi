@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
+import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { ipc } from "../../lib/ipc/client";
 import type { JsonValue } from "../../lib/ipc/bindings.gen";
 import { asRecord, asString } from "../../lib/events/payload";
@@ -53,6 +54,12 @@ export function JournalView(): ReactNode {
     return seqs;
   }, [entries]);
 
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom();
+
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [entries.length, scrollToBottomIfStuck]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {drift !== null && (
@@ -79,7 +86,7 @@ export function JournalView(): ReactNode {
           emptyLabel={t("journal.empty")}
           onRetry={() => void journalQuery.refetch()}
         >
-          <div className="overflow-y-auto py-1">
+          <div ref={scrollRef} className="h-full overflow-y-auto py-1">
             {entries.map((entry) => (
               <JournalRow
                 key={`${entry.seq}-${entry.ts}`}

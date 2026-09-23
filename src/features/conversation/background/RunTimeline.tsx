@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
+import { useStickToBottom } from "../../../components/ui/useStickToBottom";
 import type { EventDto } from "../../../lib/ipc/client";
 import { ToolCard } from "../../chat/ToolCard";
 
@@ -9,8 +11,14 @@ export interface RunTimelineProps {
 
 /** Tool calls + messages timeline for background runs. */
 export function RunTimeline({ events, streamingId }: RunTimelineProps): ReactNode {
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom();
+  const lastSeq = events[events.length - 1]?.seq ?? 0;
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [events.length, lastSeq, streamingId, scrollToBottomIfStuck]);
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-2">
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-2">
       {events.map((e) => {
         if (e.kind === "tool_call") {
           const tool = (e.payload as { tool?: string }).tool ?? "";
