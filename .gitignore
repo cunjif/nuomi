@@ -31,6 +31,7 @@ session*.md
 # Local docs (not for repo)
 principle.md
 code-review-*.md
+pi-subagents-external-cli-实现原理.md
 .codebuddy/
 
 # Third-party agent scratch dirs
