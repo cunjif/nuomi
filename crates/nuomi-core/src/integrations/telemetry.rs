@@ -86,6 +86,7 @@ fn is_exportable_topic(topic: &str) -> bool {
         || topic.starts_with("approval.")
         || topic.starts_with("schedule.")
         || topic.starts_with("team.")
+        || topic.starts_with("perf.")
 }
 
 fn ndjson_line(event: &Event) -> String {
