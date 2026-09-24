@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use nuomi_core::facade::{NuomiConfig, NuomiKernel, ProviderSource};
 use nuomi_core::providers::{OsKeyring, SecretStore};
 use nuomi_core::services::{
-    workspace_migration, workspace_registry::WorkspaceRegistry, GitService, WorkspaceService,
+    workspace_layout::WorkspaceLayoutService, workspace_migration,
+    workspace_registry::WorkspaceRegistry, GitService, WorkspaceService,
 };
 use nuomi_core::{CoreError, CoreResult};
 use tokio::sync::watch;
@@ -249,6 +250,28 @@ impl AppState {
         // their cwd, and a missing dir fails the spawn (os error 267).
         std::fs::create_dir_all(&workspace_root)
             .map_err(|e| CoreError::Store(nuomi_core::store::StoreError::Io(e)))?;
+        // Phase 4: restore multi-workspace layout snapshot (open set + focus +
+        // split). Pinned workspaces are always restored; non-pinned are restored
+        // per app_settings (default true). Directory-missing workspaces are
+        // silently skipped — restore never blocks startup.
+        {
+            let path = db_path.clone();
+            let _ = tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
+                let db = nuomi_core::store::Db::open(&path)?;
+                nuomi_core::store::migrations::run(&db.0)?;
+                let restore_non_pinned =
+                    nuomi_core::store::repos::settings::get(
+                        &db.0,
+                        nuomi_core::store::repos::settings::RESTORE_NON_PINNED_ON_STARTUP,
+                    )?
+                    .map(|v| v != "false")
+                    .unwrap_or(true);
+                let svc = WorkspaceLayoutService::new(PathBuf::from(path.to_string()));
+                let _ = svc.restore_snapshot(restore_non_pinned);
+                Ok(())
+            })
+            .await;
+        }
         let (integrations_reload_tx, integrations_reload) = watch::channel(0u64);
         tracing::info!(
             kernel_boot_ms,

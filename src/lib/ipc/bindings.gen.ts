@@ -422,9 +422,121 @@ async getActiveWorkspace() : Promise<Result<WorkspaceEntryDto | null, IpcError>>
     else return { status: "error", error: e  as any };
 }
 },
+async openWorkspace(id: string) : Promise<Result<OpenWorkspaceResult, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async closeWorkspace(id: string, force: boolean) : Promise<Result<CloseWorkspaceResult, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("close_workspace", { id, force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async focusWorkspace(id: string) : Promise<Result<FocusWorkspaceResult, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("focus_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async closeAllWorkspaces(excludePinned: boolean) : Promise<Result<CloseWorkspaceResult[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("close_all_workspaces", { excludePinned }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getOpenSet() : Promise<Result<OpenSetDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_open_set") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pinWorkspace(id: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pin_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async unpinWorkspace(id: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unpin_workspace", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getLayoutSnapshot() : Promise<Result<LayoutSnapshotDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_layout_snapshot") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setLayoutSnapshot(mode: string, splitWorkspaceIds: [string, string] | null) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_layout_snapshot", { mode, splitWorkspaceIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getRecentWorkspaces(limit: number) : Promise<Result<RecentWorkspaceDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_recent_workspaces", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async crossWorkspaceSearch(query: string, matchContent: boolean) : Promise<Result<CrossSearchOutcomeDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cross_workspace_search", { query, matchContent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async crossWorkspaceReference(sourceWorkspaceId: string, filePath: string) : Promise<Result<FileReferenceDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cross_workspace_reference", { sourceWorkspaceId, filePath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async crossWorkspaceCompare(workspaceA: string, fileA: string, workspaceB: string, fileB: string) : Promise<Result<DiffResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cross_workspace_compare", { workspaceA, fileA, workspaceB, fileB }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listOrphanSessions() : Promise<Result<OrphanSessionDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_orphan_sessions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async detectIsolationViolations() : Promise<Result<IsolationViolationDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("detect_isolation_violations") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -954,12 +1066,28 @@ export type AttachmentDto = { id: string; sessionId: string; seq: number | null;
 export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
+/**
+ * Result of closing a workspace.
+ */
+export type CloseWorkspaceResult = { closedId: string; newFocusedId: string | null }
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
 export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
 export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null }
 export type ConversationUpdateInput = { title: string | null; goal: string | null }
+/**
+ * A cross-workspace search result group.
+ */
+export type CrossSearchGroupDto = { workspaceId: string; workspaceName: string; matches: FileMatchDto[] }
+/**
+ * Cross-workspace search outcome.
+ */
+export type CrossSearchOutcomeDto = { groups: CrossSearchGroupDto[]; skippedWorkspaceIds: string[] }
+/**
+ * Diff result DTO for cross-workspace file comparison.
+ */
+export type DiffResultDto = { workspaceAId: string; workspaceBId: string; fileAPath: string; fileBPath: string; contentA: string; contentB: string; isIdentical: boolean }
 /**
  * One `[[editor.commands]]` entry (ADR 0010).
  */
@@ -989,6 +1117,18 @@ export type EditorOverlayDto = { id: string; title: string; url: string; width: 
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
 export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
+/**
+ * A single file match.
+ */
+export type FileMatchDto = { relativePath: string; matchType: string }
+/**
+ * File reference DTO (read-only snapshot from another workspace).
+ */
+export type FileReferenceDto = { sourceWorkspaceId: string; sourceRelativePath: string; contentSnapshot: string }
+/**
+ * Result of focusing a workspace.
+ */
+export type FocusWorkspaceResult = { workspaceId: string }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
 export type GitWorktreeDto = { path: string; head: string | null; branch: string | null; isCurrent: boolean }
@@ -1019,7 +1159,16 @@ export type IntegrationKindDto = "feishu_bot" | "qq_webhook" | "telemetry"
  * Outward-facing error for every command.
  */
 export type IpcError = { generic: { code: string; message: string; details?: JsonValue | null } }
+/**
+ * A workspace isolation violation: a run whose workspace_id differs from
+ * its parent task's workspace_id (cross-workspace data leakage).
+ */
+export type IsolationViolationDto = { runId: string; taskId: string; runWorkspaceId: string | null; taskWorkspaceId: string | null }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * Layout snapshot DTO for persistence/restoration.
+ */
+export type LayoutSnapshotDto = { mode: string; splitWorkspaceIds: [string, string] | null; focusedWorkspaceId: string | null; capturedAt: number }
 export type ListProviderModelsDto = { 
 /**
  * Sorted, de-duplicated ids exposed by `GET {base_url}/models`.
@@ -1047,6 +1196,18 @@ export type MessageQueueItemDto = { id: string; text: string; seq: number; creat
  */
 export type ModelEntryDto = { id: string; capabilities: CapabilityDto[]; temperature?: number | null; topP?: number | null; maxTokens?: number | null }
 export type OnlineLearningConfigDto = { authorized: boolean; allowlist: string[] }
+/**
+ * The current open set + focused workspace + pinned ids.
+ */
+export type OpenSetDto = { openWorkspaces: OpenWorkspaceDto[]; focusedWorkspaceId: string | null; pinnedWorkspaceIds: string[]; unreadIndicators: UnreadIndicatorDto[] }
+/**
+ * A single open workspace in the open set.
+ */
+export type OpenWorkspaceDto = { workspaceId: string; openedAt: number; lastFocusedAt: number; isFocused: boolean }
+/**
+ * Result of opening a workspace.
+ */
+export type OpenWorkspaceResult = { workspaceId: string }
 /**
  * A session whose `workspace_id` points to a removed workspace.
  */
@@ -1109,6 +1270,10 @@ models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | n
  * Per-provider local network proxy (`http://host:port`); `None` = direct.
  */
 proxy?: string | null; enabled?: boolean }
+/**
+ * A recent workspace entry.
+ */
+export type RecentWorkspaceDto = { workspaceId: string; lastUsedAt: number; isPinned: boolean }
 export type RefineConfigDto = { triggerFailures: number; minEditStrategy: RefineStrategyDto; evidenceThreshold: number; rollbackEnabled: boolean }
 export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_spec"
 /**
@@ -1187,12 +1352,36 @@ proxy: string | null;
  */
 model: string | null }
 export type TodoItemDto = { id: string; description: string; completed: boolean }
+/**
+ * Unread indicator for a workspace tab (task completions, failures, pending approvals).
+ */
+export type UnreadIndicatorDto = { workspaceId: string; count: number }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
 /**
  * A registered workspace entry as seen by the frontend. `directory_present`
  * is a runtime probe (the root dir may have been deleted out-of-band).
  */
-export type WorkspaceEntryDto = { id: string; rootPath: string; colorTag: string; createdAt: number; isActive: boolean; directoryPresent: boolean }
+export type WorkspaceEntryDto = { id: string; rootPath: string; colorTag: string; createdAt: number; isActive: boolean; directoryPresent: boolean; 
+/**
+ * Pinned flag (always restored on startup).
+ */
+isPinned?: boolean | null; 
+/**
+ * Whether this workspace is in the open set.
+ */
+isOpen?: boolean | null; 
+/**
+ * Whether this workspace is currently focused.
+ */
+isFocused?: boolean | null; 
+/**
+ * When the workspace was opened (unix-ms), if open.
+ */
+openedAt?: number | null; 
+/**
+ * When the workspace was last focused (unix-ms), if open.
+ */
+lastFocusedAt?: number | null }
 /**
  * Workspace contract: the active sandbox root plus whether the workspace has
  * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env

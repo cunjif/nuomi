@@ -7,20 +7,30 @@ import type {
   AgentDetailDto,
   AgentProfileInput,
   AsrModelDto,
+  CloseWorkspaceResult,
   ContextInjectionDto,
   ContextInjectionInput,
   ConversationDto,
   ConversationUpdateInput,
+  CrossSearchOutcomeDto,
+  DiffResultDto,
+  FileReferenceDto,
+  FocusWorkspaceResult,
   IpcError,
   InjectableRuleDto,
   InjectableSessionDto,
   IntegrationDto,
   IntegrationInput,
+  IsolationViolationDto,
   JsonValue,
+  LayoutSnapshotDto,
+  OpenSetDto,
+  OpenWorkspaceResult,
   OrphanSessionDto,
   PluginInfoDto,
   PluginListResultDto,
   ProviderInput,
+  RecentWorkspaceDto,
   RemoveWorkspaceResult,
   Result,
   RoleDto,
@@ -300,6 +310,65 @@ export function testDoubleCommands(): CommandSet {
     },
     async reclaimOrphanSessions(_workspaceId: string) {
       return ok(0);
+    },
+    async openWorkspace(id: string) {
+      return ok({ workspaceId: id } as OpenWorkspaceResult);
+    },
+    async closeWorkspace(id: string, _force: boolean) {
+      return ok({ closedId: id, newFocusedId: null } as CloseWorkspaceResult);
+    },
+    async focusWorkspace(id: string) {
+      return ok({ workspaceId: id } as FocusWorkspaceResult);
+    },
+    async closeAllWorkspaces(_excludePinned: boolean) {
+      return ok([] as CloseWorkspaceResult[]);
+    },
+    async getOpenSet() {
+      return ok({
+        openWorkspaces: [],
+        focusedWorkspaceId: null,
+        pinnedWorkspaceIds: [],
+        unreadIndicators: [],
+      } as OpenSetDto);
+    },
+    async pinWorkspace(_id: string) {
+      return ok(null);
+    },
+    async unpinWorkspace(_id: string) {
+      return ok(null);
+    },
+    async getLayoutSnapshot() {
+      return ok(null as LayoutSnapshotDto | null);
+    },
+    async setLayoutSnapshot(_mode: string, _splitWorkspaceIds: [string, string] | null) {
+      return ok(null);
+    },
+    async getRecentWorkspaces(_limit: number) {
+      return ok([] as RecentWorkspaceDto[]);
+    },
+    async crossWorkspaceSearch(_query: string, _matchContent: boolean) {
+      return ok({ groups: [], skippedWorkspaceIds: [] } as CrossSearchOutcomeDto);
+    },
+    async crossWorkspaceReference(_sourceWorkspaceId: string, _filePath: string) {
+      return ok({
+        sourceWorkspaceId: "",
+        sourceRelativePath: "",
+        contentSnapshot: "",
+      } as FileReferenceDto);
+    },
+    async crossWorkspaceCompare(_workspaceA: string, _fileA: string, _workspaceB: string, _fileB: string) {
+      return ok({
+        workspaceAId: "",
+        workspaceBId: "",
+        fileAPath: "",
+        fileBPath: "",
+        contentA: "",
+        contentB: "",
+        isIdentical: true,
+      } as DiffResultDto);
+    },
+    async detectIsolationViolations() {
+      return ok([] as IsolationViolationDto[]);
     },
     async createSchedule(name, cronExpr, taskTitle, taskDescription) {
       const s: ScheduleDto = {

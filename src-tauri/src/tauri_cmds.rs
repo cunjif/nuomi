@@ -525,12 +525,144 @@ pub async fn get_active_workspace(
     commands::impl_get_active_workspace(&state).await
 }
 
+// ---- Multi-workspace open-set commands ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<commands::OpenWorkspaceResult, IpcError> {
+    commands::impl_open_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn close_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    force: bool,
+) -> Result<commands::CloseWorkspaceResult, IpcError> {
+    commands::impl_close_workspace(&state, id, force).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn focus_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<commands::FocusWorkspaceResult, IpcError> {
+    commands::impl_focus_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn close_all_workspaces(
+    state: tauri::State<'_, AppState>,
+    exclude_pinned: bool,
+) -> Result<Vec<commands::CloseWorkspaceResult>, IpcError> {
+    commands::impl_close_all_workspaces(&state, exclude_pinned).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_open_set(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::OpenSetDto, IpcError> {
+    commands::impl_get_open_set(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn pin_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), IpcError> {
+    commands::impl_pin_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn unpin_workspace(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), IpcError> {
+    commands::impl_unpin_workspace(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_layout_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<commands::LayoutSnapshotDto>, IpcError> {
+    commands::impl_get_layout_snapshot(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_layout_snapshot(
+    state: tauri::State<'_, AppState>,
+    mode: String,
+    split_workspace_ids: Option<[String; 2]>,
+) -> Result<(), IpcError> {
+    commands::impl_set_layout_snapshot(&state, mode, split_workspace_ids).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_recent_workspaces(
+    state: tauri::State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<commands::RecentWorkspaceDto>, IpcError> {
+    commands::impl_get_recent_workspaces(&state, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn cross_workspace_search(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    match_content: bool,
+) -> Result<commands::CrossSearchOutcomeDto, IpcError> {
+    commands::impl_cross_workspace_search(&state, query, match_content).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn cross_workspace_reference(
+    state: tauri::State<'_, AppState>,
+    source_workspace_id: String,
+    file_path: String,
+) -> Result<commands::FileReferenceDto, IpcError> {
+    commands::impl_cross_workspace_reference(&state, source_workspace_id, file_path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn cross_workspace_compare(
+    state: tauri::State<'_, AppState>,
+    workspace_a: String,
+    file_a: String,
+    workspace_b: String,
+    file_b: String,
+) -> Result<commands::DiffResultDto, IpcError> {
+    commands::impl_cross_workspace_compare(&state, workspace_a, file_a, workspace_b, file_b).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_orphan_sessions(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::OrphanSessionDto>, IpcError> {
     commands::impl_list_orphan_sessions(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn detect_isolation_violations(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::IsolationViolationDto>, IpcError> {
+    commands::impl_detect_isolation_violations(&state).await
 }
 
 #[tauri::command]

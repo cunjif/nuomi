@@ -44,6 +44,16 @@ use tokio_util::sync::CancellationToken;
 use crate::ipc_error::IpcError;
 use crate::state::{join_err, AppState};
 
+/// Returns the currently focused workspace id, if any. Used to bind runs to
+/// their workspace context for parallel-run isolation (task 7.1).
+fn focused_workspace_id(db_path: &str) -> Option<String> {
+    let db = Db::open(db_path).ok()?;
+    migrations::run(&db.0).ok()?;
+    repos::workspace_open_state::find_focused(&db.0)
+        .ok()?
+        .map(|r| r.workspace_id)
+}
+
 // ---------- sessions / chat ----------
 
 pub async fn impl_create_session(state: &AppState) -> Result<SessionDto, IpcError> {
@@ -278,7 +288,8 @@ pub async fn run_conversation_turn(
             let secrets = state.secrets.clone();
             let cwd = Some(state.current_workspace());
             let bus = state.kernel.context().bus();
-            let outcome = core_run_team(db_path, Some(bus), team_id, session_id, text, secrets, cwd)
+            let ws_id = focused_workspace_id(&db_path);
+            let outcome = core_run_team(db_path, Some(bus), team_id, session_id, text, secrets, cwd, ws_id)
                 .await
                 .map_err(|e| IpcError::new("team.run_failed", &e.to_string()))?;
             LoopRunResult {
@@ -936,6 +947,9 @@ pub async fn impl_create_task(
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
         repos::tasks_runs::insert_task(&db.0, &task)?;
+        if let Some(ws) = repos::workspace_open_state::find_focused(&db.0)? {
+            repos::tasks_runs::bind_task_workspace(&db.0, &task.id, &ws.workspace_id)?;
+        }
         append_domain_event(
             &db.0,
             "task.created",
@@ -1245,6 +1259,9 @@ async fn dispatch_run(state: &AppState, task_id: String) -> Result<String, IpcEr
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             repos::tasks_runs::insert_run(&db.0, &run)?;
+            if let Some(ws) = repos::workspace_open_state::find_focused(&db.0)? {
+                repos::tasks_runs::bind_run_workspace(&db.0, &run.id, &ws.workspace_id)?;
+            }
             transition_run(&db.0, &run.id, RunState::Queued, RunEvent::Start)?;
             Ok(())
         })
@@ -2697,14 +2714,6 @@ fn failed_check(message: String) -> CliAgentCheckDto {
     }
 }
 
-fn truncate_chars(raw: &str, max_chars: usize) -> String {
-    if raw.chars().count() <= max_chars {
-        raw.to_string()
-    } else {
-        raw.chars().take(max_chars).collect()
-    }
-}
-
 /// Drains probe pipes so a chatty `--version` cannot deadlock `wait()`;
 /// returns the first non-empty stdout line plus the truncated stderr.
 async fn collect_probe_output(
@@ -3718,6 +3727,9 @@ pub async fn impl_run_team_on_task(
             updated_at: now,
         };
         repos::tasks_runs::insert_run(&db.0, &run)?;
+        if let Some(ws) = repos::workspace_open_state::find_focused(&db.0)? {
+            repos::tasks_runs::bind_run_workspace(&db.0, &run.id, &ws.workspace_id)?;
+        }
         // Iron rule: persist queued→running BEFORE spawning any executor.
         transition_run(&db.0, &run.id, RunState::Queued, RunEvent::Start)?;
         Ok(PreparedTeamRun { run, task_text })
@@ -3763,6 +3775,7 @@ fn spawn_team_run(
     let cwd = Some(state.current_workspace());
     let bus = state.kernel.context().bus();
     let registry = state.run_cancels.clone();
+    let ws_id = focused_workspace_id(&db_path);
 
     tokio::spawn(async move {
         let mut exec = tokio::spawn({
@@ -3776,6 +3789,7 @@ fn spawn_team_run(
                     &task_text,
                     secrets,
                     cwd,
+                    ws_id,
                 )
                 .await
             }
@@ -3856,6 +3870,7 @@ pub async fn impl_run_team_session(
         &task,
         state.secrets.clone(),
         Some(state.current_workspace()),
+        focused_workspace_id(&state.db_path),
     )
     .await
     .map_err(map_orchestrator_error)?;
@@ -4282,7 +4297,7 @@ pub async fn impl_create_conversation(
             None,
         )?;
         let active_ws =
-            repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+            repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
         if !active_ws.is_empty() {
             repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
         }
@@ -4302,7 +4317,7 @@ pub async fn impl_list_conversations(
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ConversationDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws = repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        let active_ws = repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
         let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
         let sessions = repos::sessions::list(&db.0, filter_ws, 200)?;
         let mut out = Vec::with_capacity(sessions.len());
@@ -4574,7 +4589,7 @@ pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcErro
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
         let active_ws =
-            repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+            repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
         let ws_id = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
         // List the sessions about to be soft-deleted so we can cascade
         // queue cleanup + turn cancellation outside the blocking closure.
@@ -5048,7 +5063,7 @@ pub async fn impl_list_injectable_sessions(
     tokio::task::spawn_blocking(move || -> Result<Vec<InjectableSessionDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws = repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+        let active_ws = repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
         let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
         let sessions = repos::sessions::list(&db.0, filter_ws, 50)?;
         Ok(sessions
@@ -5649,6 +5664,147 @@ pub struct WorkspaceEntryDto {
     pub created_at: i64,
     pub is_active: bool,
     pub directory_present: bool,
+    /// Pinned flag (always restored on startup).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_pinned: Option<bool>,
+    /// Whether this workspace is in the open set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_open: Option<bool>,
+    /// Whether this workspace is currently focused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_focused: Option<bool>,
+    /// When the workspace was opened (unix-ms), if open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opened_at: Option<i64>,
+    /// When the workspace was last focused (unix-ms), if open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_focused_at: Option<i64>,
+}
+
+/// A single open workspace in the open set.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWorkspaceDto {
+    pub workspace_id: String,
+    pub opened_at: i64,
+    pub last_focused_at: i64,
+    pub is_focused: bool,
+}
+
+/// Unread indicator for a workspace tab (task completions, failures, pending approvals).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadIndicatorDto {
+    pub workspace_id: String,
+    pub count: i64,
+}
+
+/// The current open set + focused workspace + pinned ids.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenSetDto {
+    pub open_workspaces: Vec<OpenWorkspaceDto>,
+    pub focused_workspace_id: Option<String>,
+    pub pinned_workspace_ids: Vec<String>,
+    pub unread_indicators: Vec<UnreadIndicatorDto>,
+}
+
+/// Layout snapshot DTO for persistence/restoration.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutSnapshotDto {
+    pub mode: String,
+    pub split_workspace_ids: Option<[String; 2]>,
+    pub focused_workspace_id: Option<String>,
+    pub captured_at: i64,
+}
+
+/// A recent workspace entry.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentWorkspaceDto {
+    pub workspace_id: String,
+    pub last_used_at: i64,
+    pub is_pinned: bool,
+}
+
+/// Result of opening a workspace.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWorkspaceResult {
+    pub workspace_id: String,
+}
+
+/// Result of closing a workspace.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseWorkspaceResult {
+    pub closed_id: String,
+    pub new_focused_id: Option<String>,
+}
+
+/// Details when close requires confirmation.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseConfirmDetails {
+    pub workspace_id: String,
+    pub reason: String,
+    pub dirty_files: Vec<String>,
+    pub running_tasks: Vec<String>,
+}
+
+/// Result of focusing a workspace.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusWorkspaceResult {
+    pub workspace_id: String,
+}
+
+/// A cross-workspace search result group.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossSearchGroupDto {
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub matches: Vec<FileMatchDto>,
+}
+
+/// A single file match.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMatchDto {
+    pub relative_path: String,
+    pub match_type: String,
+}
+
+/// Cross-workspace search outcome.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossSearchOutcomeDto {
+    pub groups: Vec<CrossSearchGroupDto>,
+    pub skipped_workspace_ids: Vec<String>,
+}
+
+/// File reference DTO (read-only snapshot from another workspace).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReferenceDto {
+    pub source_workspace_id: String,
+    pub source_relative_path: String,
+    pub content_snapshot: String,
+}
+
+/// Diff result DTO for cross-workspace file comparison.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffResultDto {
+    pub workspace_a_id: String,
+    pub workspace_b_id: String,
+    pub file_a_path: String,
+    pub file_b_path: String,
+    pub content_a: String,
+    pub content_b: String,
+    pub is_identical: bool,
 }
 
 /// Result of removing a workspace: the removed id plus the new active id
@@ -5670,24 +5826,53 @@ pub struct OrphanSessionDto {
     pub updated_at: i64,
 }
 
+/// A workspace isolation violation: a run whose workspace_id differs from
+/// its parent task's workspace_id (cross-workspace data leakage).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IsolationViolationDto {
+    pub run_id: String,
+    pub task_id: String,
+    pub run_workspace_id: Option<String>,
+    pub task_workspace_id: Option<String>,
+}
+
 pub async fn impl_list_workspaces(
     state: &AppState,
 ) -> Result<Vec<WorkspaceEntryDto>, IpcError> {
     let reg = state.workspace_registry.clone();
-    let entries = tokio::task::spawn_blocking(move || reg.list())
-        .await
-        .map_err(join_err)??;
-    Ok(entries
-        .into_iter()
-        .map(|wp| WorkspaceEntryDto {
-            id: wp.entry.id,
-            root_path: wp.entry.root_path,
-            color_tag: wp.entry.color_tag,
-            created_at: wp.entry.created_at,
-            is_active: wp.entry.is_active,
-            directory_present: wp.directory_present,
-        })
-        .collect())
+    let db_path = state.db_path.clone();
+    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<WorkspaceEntryDto>, IpcError> {
+        let list = reg.list()?;
+        let db = Db::open(&db_path)?;
+        let open_state: std::collections::HashMap<String, repos::workspace_open_state::WorkspaceOpenStateRow> =
+            repos::workspace_open_state::list(&db.0)?
+                .into_iter()
+                .map(|r| (r.workspace_id.clone(), r))
+                .collect();
+        Ok(list
+            .into_iter()
+            .map(|wp| {
+                let os = open_state.get(&wp.entry.id);
+                WorkspaceEntryDto {
+                    id: wp.entry.id.clone(),
+                    root_path: wp.entry.root_path,
+                    color_tag: wp.entry.color_tag,
+                    created_at: wp.entry.created_at,
+                    is_active: wp.entry.is_active,
+                    directory_present: wp.directory_present,
+                    is_pinned: Some(wp.entry.is_pinned),
+                    is_open: Some(os.is_some()),
+                    is_focused: Some(os.map(|r| r.is_focused).unwrap_or(false)),
+                    opened_at: os.map(|r| r.opened_at),
+                    last_focused_at: os.map(|r| r.last_focused_at),
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(entries)
 }
 
 pub async fn impl_add_workspace(
@@ -5710,6 +5895,11 @@ pub async fn impl_add_workspace(
         created_at: entry.created_at,
         is_active: entry.is_active,
         directory_present,
+        is_pinned: Some(entry.is_pinned),
+        is_open: Some(entry.is_active),
+        is_focused: Some(entry.is_active),
+        opened_at: if entry.is_active { Some(nuomi_core::domain::now_ms()) } else { None },
+        last_focused_at: if entry.is_active { Some(nuomi_core::domain::now_ms()) } else { None },
     })
 }
 
@@ -5773,6 +5963,11 @@ pub async fn impl_activate_workspace(
         created_at: entry.created_at,
         is_active: true,
         directory_present: root.is_dir(),
+        is_pinned: Some(entry.is_pinned),
+        is_open: Some(true),
+        is_focused: Some(true),
+        opened_at: Some(nuomi_core::domain::now_ms()),
+        last_focused_at: Some(nuomi_core::domain::now_ms()),
     })
 }
 
@@ -5792,8 +5987,358 @@ pub async fn impl_get_active_workspace(
             created_at: entry.created_at,
             is_active: entry.is_active,
             directory_present,
+            is_pinned: Some(entry.is_pinned),
+            is_open: Some(entry.is_active),
+            is_focused: Some(entry.is_active),
+            opened_at: None,
+            last_focused_at: None,
         }
     }))
+}
+
+// ---- Multi-workspace open-set commands ----
+
+pub async fn impl_open_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<OpenWorkspaceResult, IpcError> {
+    let db_path = state.db_path.clone();
+    let id_for_open = id.clone();
+    tokio::task::spawn_blocking(move || -> Result<OpenWorkspaceResult, IpcError> {
+        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        svc.open(&id_for_open).map_err(map_open_set_error)?;
+        Ok(OpenWorkspaceResult { workspace_id: id_for_open })
+    })
+    .await
+    .map_err(join_err)??;
+    // Sync in-memory root to the opened workspace.
+    let reg = state.workspace_registry.clone();
+    let id_clone = id.clone();
+    let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&id_clone))
+        .await
+        .map_err(join_err)??;
+    if let Some(e) = entry {
+        let _ = state.switch_workspace(PathBuf::from(&e.root_path));
+    }
+    Ok(OpenWorkspaceResult { workspace_id: id })
+}
+
+pub async fn impl_close_workspace(
+    state: &AppState,
+    id: String,
+    force: bool,
+) -> Result<CloseWorkspaceResult, IpcError> {
+    let db_path = state.db_path.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<nuomi_core::services::workspace_open_set::CloseOutcome, IpcError> {
+        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        svc.close(&id, force).map_err(map_open_set_error)
+    })
+    .await
+    .map_err(join_err)??;
+    // Sync in-memory root if focus transferred.
+    if let Some(ref new_focused) = result.new_focused_id {
+        let reg = state.workspace_registry.clone();
+        let nid = new_focused.clone();
+        let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&nid))
+            .await
+            .map_err(join_err)??;
+        if let Some(e) = entry {
+            let _ = state.switch_workspace(PathBuf::from(&e.root_path));
+        }
+    }
+    Ok(CloseWorkspaceResult {
+        closed_id: result.closed_id,
+        new_focused_id: result.new_focused_id,
+    })
+}
+
+pub async fn impl_focus_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<FocusWorkspaceResult, IpcError> {
+    let db_path = state.db_path.clone();
+    let id_for_focus = id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        svc.focus(&id_for_focus).map_err(map_open_set_error)
+    })
+    .await
+    .map_err(join_err)??;
+    // Sync in-memory root to the focused workspace.
+    let reg = state.workspace_registry.clone();
+    let id_clone = id.clone();
+    let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&id_clone))
+        .await
+        .map_err(join_err)??;
+    if let Some(e) = entry {
+        let _ = state.switch_workspace(PathBuf::from(&e.root_path));
+    }
+    Ok(FocusWorkspaceResult { workspace_id: id })
+}
+
+pub async fn impl_close_all_workspaces(
+    state: &AppState,
+    exclude_pinned: bool,
+) -> Result<Vec<CloseWorkspaceResult>, IpcError> {
+    let db_path = state.db_path.clone();
+    let outcomes = tokio::task::spawn_blocking(move || -> Result<Vec<nuomi_core::services::workspace_open_set::CloseOutcome>, IpcError> {
+        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        svc.close_all(exclude_pinned).map_err(map_open_set_error)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(outcomes
+        .into_iter()
+        .map(|o| CloseWorkspaceResult {
+            closed_id: o.closed_id,
+            new_focused_id: o.new_focused_id,
+        })
+        .collect())
+}
+
+pub async fn impl_get_open_set(
+    state: &AppState,
+) -> Result<OpenSetDto, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<OpenSetDto, IpcError> {
+        let db = Db::open(&db_path)?;
+        let open_state = repos::workspace_open_state::list(&db.0)?;
+        let focused = repos::workspace_open_state::find_focused(&db.0)?;
+        let all_workspaces = repos::workspaces::list(&db.0)?;
+        let pinned_ids: Vec<String> = all_workspaces
+            .iter()
+            .filter(|w| w.is_pinned)
+            .map(|w| w.id.clone())
+            .collect();
+        let unread_indicators = open_state
+            .iter()
+            .filter_map(|r| {
+                let count =
+                    repos::tasks_runs::count_unread_since(&db.0, &r.workspace_id, r.last_focused_at)
+                        .unwrap_or(0);
+                if count > 0 {
+                    Some(UnreadIndicatorDto {
+                        workspace_id: r.workspace_id.clone(),
+                        count,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(OpenSetDto {
+            open_workspaces: open_state
+                .into_iter()
+                .map(|r| OpenWorkspaceDto {
+                    workspace_id: r.workspace_id,
+                    opened_at: r.opened_at,
+                    last_focused_at: r.last_focused_at,
+                    is_focused: r.is_focused,
+                })
+                .collect(),
+            focused_workspace_id: focused.map(|r| r.workspace_id),
+            pinned_workspace_ids: pinned_ids,
+            unread_indicators,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ---- Pin/unpin commands ----
+
+pub async fn impl_pin_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<(), IpcError> {
+    let reg = state.workspace_registry.clone();
+    tokio::task::spawn_blocking(move || reg.pin(&id))
+        .await
+        .map_err(join_err)??;
+    Ok(())
+}
+
+pub async fn impl_unpin_workspace(
+    state: &AppState,
+    id: String,
+) -> Result<(), IpcError> {
+    let reg = state.workspace_registry.clone();
+    tokio::task::spawn_blocking(move || reg.unpin(&id))
+        .await
+        .map_err(join_err)??;
+    Ok(())
+}
+
+// ---- Layout snapshot commands ----
+
+pub async fn impl_get_layout_snapshot(
+    state: &AppState,
+) -> Result<Option<LayoutSnapshotDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<LayoutSnapshotDto>, IpcError> {
+        let db = Db::open(&db_path)?;
+        let snap = repos::workspace_layout_snapshot::get(&db.0)?;
+        Ok(snap.map(|s| LayoutSnapshotDto {
+            mode: s.mode.as_str().to_string(),
+            split_workspace_ids: s.split_workspace_ids,
+            focused_workspace_id: s.focused_workspace_id,
+            captured_at: s.captured_at,
+        }))
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_set_layout_snapshot(
+    state: &AppState,
+    mode: String,
+    split_workspace_ids: Option<[String; 2]>,
+) -> Result<(), IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let svc = nuomi_core::services::WorkspaceLayoutService::new(PathBuf::from(db_path.as_ref()));
+        let layout_mode = match mode.as_str() {
+            "split" => nuomi_core::services::LayoutMode::Split,
+            "overview" => nuomi_core::services::LayoutMode::Overview,
+            _ => nuomi_core::services::LayoutMode::Single,
+        };
+        svc.capture_snapshot(layout_mode, split_workspace_ids)
+            .map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        Ok(())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_get_recent_workspaces(
+    state: &AppState,
+    limit: u32,
+) -> Result<Vec<RecentWorkspaceDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<RecentWorkspaceDto>, IpcError> {
+        let db = Db::open(&db_path)?;
+        let entries = repos::workspace_recent::list(&db.0, limit as usize)?;
+        Ok(entries
+            .into_iter()
+            .map(|e| RecentWorkspaceDto {
+                workspace_id: e.workspace_id,
+                last_used_at: e.last_used_at,
+                is_pinned: e.is_pinned,
+            })
+            .collect())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ---- Cross-workspace commands ----
+
+pub async fn impl_cross_workspace_search(
+    state: &AppState,
+    query: String,
+    match_content: bool,
+) -> Result<CrossSearchOutcomeDto, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<CrossSearchOutcomeDto, IpcError> {
+        let svc = nuomi_core::services::CrossWorkspaceService::new(PathBuf::from(db_path.as_ref()));
+        let outcome = svc.search_all_open(&query, match_content).map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        Ok(CrossSearchOutcomeDto {
+            groups: outcome
+                .groups
+                .into_iter()
+                .map(|g| CrossSearchGroupDto {
+                    workspace_id: g.workspace_id,
+                    workspace_name: g.workspace_name,
+                    matches: g
+                        .matches
+                        .into_iter()
+                        .map(|m| FileMatchDto {
+                            relative_path: m.relative_path,
+                            match_type: match m.match_type {
+                                nuomi_core::services::MatchType::FileName => "fileName".into(),
+                                nuomi_core::services::MatchType::FileContent => "fileContent".into(),
+                            },
+                        })
+                        .collect(),
+                })
+                .collect(),
+            skipped_workspace_ids: outcome.skipped_workspace_ids,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_cross_workspace_reference(
+    state: &AppState,
+    source_workspace_id: String,
+    file_path: String,
+) -> Result<FileReferenceDto, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<FileReferenceDto, IpcError> {
+        let svc = nuomi_core::services::CrossWorkspaceService::new(PathBuf::from(db_path.as_ref()));
+        let ref_ = svc
+            .create_file_reference(&source_workspace_id, &file_path)
+            .map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        Ok(FileReferenceDto {
+            source_workspace_id: ref_.source_workspace_id,
+            source_relative_path: ref_.source_relative_path,
+            content_snapshot: ref_.content_snapshot,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_cross_workspace_compare(
+    state: &AppState,
+    workspace_a: String,
+    file_a: String,
+    workspace_b: String,
+    file_b: String,
+) -> Result<DiffResultDto, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<DiffResultDto, IpcError> {
+        let svc = nuomi_core::services::CrossWorkspaceService::new(PathBuf::from(db_path.as_ref()));
+        let diff = svc
+            .compare_files(&workspace_a, &file_a, &workspace_b, &file_b)
+            .map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        Ok(DiffResultDto {
+            workspace_a_id: diff.workspace_a_id,
+            workspace_b_id: diff.workspace_b_id,
+            file_a_path: diff.file_a_path,
+            file_b_path: diff.file_b_path,
+            content_a: diff.content_a,
+            content_b: diff.content_b,
+            is_identical: diff.is_identical,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+/// Maps `OpenSetError` to `IpcError`.
+fn map_open_set_error(e: nuomi_core::services::OpenSetError) -> IpcError {
+    use nuomi_core::services::OpenSetError as E;
+    match e {
+        E::NotFound(id) => IpcError::new("workspace.not_found", format!("workspace not found: {id}")),
+        E::AlreadyOpen(id) => IpcError::new("workspace.already_open", format!("workspace already open: {id}")),
+        E::OpenSetFull(n) => IpcError::new("workspace.open_set_full", format!("open set full (max {n})")),
+        E::DirectoryMissing(p) => IpcError::new("workspace.directory_missing", format!("directory missing: {p}")),
+        E::ProbeTimeout(ms) => IpcError::new("workspace.probe_timeout", format!("directory probe timed out: {ms}ms")),
+        E::Store(e) => IpcError::from(e),
+        E::NeedConfirm { workspace_id, reason, dirty_files, running_tasks } => {
+            IpcError::with_details(
+                "workspace.need_confirm",
+                format!("close needs confirmation for workspace {workspace_id}: {reason}"),
+                serde_json::json!({
+                    "workspaceId": workspace_id,
+                    "dirtyFiles": dirty_files,
+                    "runningTasks": running_tasks,
+                }),
+            )
+        }
+    }
 }
 
 pub async fn impl_list_orphan_sessions(
@@ -5823,6 +6368,29 @@ pub async fn impl_list_orphan_sessions(
     .await
     .map_err(join_err)??;
     Ok(orphans)
+}
+
+pub async fn impl_detect_isolation_violations(
+    state: &AppState,
+) -> Result<Vec<IsolationViolationDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let violations =
+        tokio::task::spawn_blocking(move || -> Result<Vec<IsolationViolationDto>, IpcError> {
+            let db = Db::open(&db_path)?;
+            let raw = repos::tasks_runs::detect_isolation_violations(&db.0)?;
+            Ok(raw
+                .into_iter()
+                .map(|v| IsolationViolationDto {
+                    run_id: v.run_id,
+                    task_id: v.task_id,
+                    run_workspace_id: v.run_workspace_id,
+                    task_workspace_id: v.task_workspace_id,
+                })
+                .collect())
+        })
+        .await
+        .map_err(join_err)??;
+    Ok(violations)
 }
 
 pub async fn impl_reclaim_orphan_sessions(
