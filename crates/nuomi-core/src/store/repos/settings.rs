@@ -10,6 +10,15 @@ use crate::store::StoreError;
 /// Persisted sandbox root shown on first launch and restored on boot.
 pub const WORKSPACE_ROOT: &str = "workspace_root";
 
+/// Whether to restore non-pinned workspaces on startup (default: true).
+pub const RESTORE_NON_PINNED_ON_STARTUP: &str = "restore_non_pinned_on_startup";
+
+/// Max open workspaces override (default: 8). Advanced users may lower this.
+pub const MAX_OPEN_WORKSPACES_KEY: &str = "max_open_workspaces";
+
+/// Recent list capacity override (default: 20).
+pub const RECENT_LIST_CAPACITY_KEY: &str = "recent_list_capacity";
+
 /// Returns the stored value for `key`, or `None` when unset.
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
     let value = conn

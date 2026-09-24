@@ -15,6 +15,7 @@ pub struct WorkspaceEntry {
     pub color_tag: String,
     pub created_at: i64,
     pub is_active: bool,
+    pub is_pinned: bool,
 }
 
 const ENTITY: &str = "workspace";
@@ -23,14 +24,15 @@ const ENTITY: &str = "workspace";
 /// already registered (UNIQUE constraint).
 pub fn insert(conn: &Connection, entry: &WorkspaceEntry) -> Result<(), StoreError> {
     match conn.execute(
-        "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             entry.id,
             entry.root_path,
             entry.color_tag,
             entry.created_at,
             entry.is_active as i64,
+            entry.is_pinned as i64,
         ],
     ) {
         Ok(_) => Ok(()),
@@ -49,7 +51,7 @@ pub fn insert(conn: &Connection, entry: &WorkspaceEntry) -> Result<(), StoreErro
 /// Lists all registered workspaces ordered by `created_at ASC`.
 pub fn list(conn: &Connection) -> Result<Vec<WorkspaceEntry>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, root_path, color_tag, created_at, is_active
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
          FROM workspaces ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map([], row_to_entry)?;
@@ -59,7 +61,7 @@ pub fn list(conn: &Connection) -> Result<Vec<WorkspaceEntry>, StoreError> {
 /// Finds a workspace by its (normalized) root path.
 pub fn find_by_path(conn: &Connection, root_path: &str) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
          FROM workspaces WHERE root_path = ?1",
         params![root_path],
         row_to_entry,
@@ -71,7 +73,7 @@ pub fn find_by_path(conn: &Connection, root_path: &str) -> Result<Option<Workspa
 /// Finds a workspace by id.
 pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
          FROM workspaces WHERE id = ?1",
         params![id],
         row_to_entry,
@@ -83,7 +85,7 @@ pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<WorkspaceEntry>,
 /// Returns the currently active workspace, if any.
 pub fn find_active(conn: &Connection) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
          FROM workspaces WHERE is_active = 1",
         [],
         row_to_entry,
@@ -127,14 +129,48 @@ pub fn remove(conn: &Connection, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Pins a workspace (sets `is_pinned = 1`). Returns `NotFound` when the id does
+/// not match any row.
+pub fn pin(conn: &Connection, id: &str) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE workspaces SET is_pinned = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: ENTITY,
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Unpins a workspace (sets `is_pinned = 0`). Returns `NotFound` when the id
+/// does not match any row.
+pub fn unpin(conn: &Connection, id: &str) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE workspaces SET is_pinned = 0 WHERE id = ?1",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: ENTITY,
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceEntry> {
     let is_active: i64 = row.get(4)?;
+    let is_pinned: i64 = row.get(5)?;
     Ok(WorkspaceEntry {
         id: row.get(0)?,
         root_path: row.get(1)?,
         color_tag: row.get(2)?,
         created_at: row.get(3)?,
         is_active: is_active != 0,
+        is_pinned: is_pinned != 0,
     })
 }
 
@@ -156,6 +192,7 @@ mod tests {
             color_tag: "paper-yellow".into(),
             created_at: 1,
             is_active: false,
+            is_pinned: false,
         }
     }
 

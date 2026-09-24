@@ -185,6 +185,22 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0023_message_queue.sql"
         )),
     ),
+    (
+        24,
+        "0024_workspace_open_state",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0024_workspace_open_state.sql"
+        )),
+    ),
+    (
+        25,
+        "0025_tasks_runs_workspace",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0025_tasks_runs_workspace.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

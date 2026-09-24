@@ -436,6 +436,150 @@ pub fn list_schedules(conn: &Connection, limit: u32) -> Result<Vec<Schedule>, St
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+// ---------------------------------------------------------------- workspace-scoped
+
+/// Lists tasks belonging to a specific workspace, ordered by `created_at DESC`.
+pub fn list_tasks_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+    limit: u32,
+) -> Result<Vec<Task>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, title, description, status, created_at, updated_at
+         FROM tasks WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![workspace_id, limit], row_to_task)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Lists runs belonging to a specific workspace, ordered by `created_at ASC`.
+pub fn list_runs_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<Run>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, session_id, status, heartbeat_at, created_at, updated_at
+         FROM runs WHERE workspace_id = ?1 ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![workspace_id], row_to_run)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Lists active runs (running/queued/awaiting_approval) for a workspace.
+pub fn list_active_runs_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<Run>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, session_id, status, heartbeat_at, created_at, updated_at
+         FROM runs
+         WHERE workspace_id = ?1 AND status IN ('running', 'queued', 'awaiting_approval')
+         ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![workspace_id], row_to_run)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Counts "unread" task completions/failures and pending approvals for a
+/// workspace since the given timestamp (typically `last_focused_at`). Used
+/// for the unread indicator on non-focused workspace tabs.
+pub fn count_unread_since(
+    conn: &Connection,
+    workspace_id: &str,
+    since: i64,
+) -> Result<i64, StoreError> {
+    let task_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tasks
+         WHERE workspace_id = ?1 AND updated_at > ?2
+         AND status IN ('done', 'failed')",
+        params![workspace_id, since],
+        |row| row.get(0),
+    )?;
+    let run_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM runs
+         WHERE workspace_id = ?1 AND updated_at > ?2
+         AND status = 'awaiting_approval'",
+        params![workspace_id, since],
+        |row| row.get(0),
+    )?;
+    Ok(task_count + run_count)
+}
+
+/// Binds a task to a workspace (sets `workspace_id` on an existing task row).
+pub fn bind_task_workspace(
+    conn: &Connection,
+    task_id: &str,
+    workspace_id: &str,
+) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE tasks SET workspace_id = ?2 WHERE id = ?1",
+        params![task_id, workspace_id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "task",
+            id: task_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Binds a run to a workspace (sets `workspace_id` on an existing run row).
+pub fn bind_run_workspace(
+    conn: &Connection,
+    run_id: &str,
+    workspace_id: &str,
+) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE runs SET workspace_id = ?2 WHERE id = ?1",
+        params![run_id, workspace_id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "run",
+            id: run_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Returns the currently focused workspace id, if any. Delegates to
+/// `workspace_open_state::find_focused`.
+pub fn find_focused_workspace_id(conn: &Connection) -> Result<Option<String>, StoreError> {
+    Ok(super::workspace_open_state::find_focused(conn)?.map(|row| row.workspace_id))
+}
+
+/// Isolation violation record: a run whose `workspace_id` differs from its
+/// parent task's `workspace_id`, indicating cross-workspace data leakage.
+#[derive(Debug, Clone)]
+pub struct IsolationViolation {
+    pub run_id: String,
+    pub task_id: String,
+    pub run_workspace_id: Option<String>,
+    pub task_workspace_id: Option<String>,
+}
+
+/// Detects workspace isolation violations: runs whose `workspace_id` differs
+/// from their parent task's `workspace_id`. Returns an empty vec when all
+/// runs are properly isolated. Used for audit logging and alerting (task 10.2.3).
+pub fn detect_isolation_violations(conn: &Connection) -> Result<Vec<IsolationViolation>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT r.id, r.task_id, r.workspace_id, t.workspace_id
+         FROM runs r
+         JOIN tasks t ON r.task_id = t.id
+         WHERE r.workspace_id IS NOT t.workspace_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(IsolationViolation {
+            run_id: row.get(0)?,
+            task_id: row.get(1)?,
+            run_workspace_id: row.get(2)?,
+            task_workspace_id: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 // ---------------------------------------------------------------- helpers
 
 fn schedule_select(where_clause: &str) -> String {
@@ -913,5 +1057,39 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn detect_isolation_violations_finds_mismatched_workspace() {
+        let conn = db();
+        let t1 = task("t1", TaskStatus::Queued);
+        insert_task(&conn, &t1).unwrap();
+        bind_task_workspace(&conn, "t1", "ws-a").unwrap();
+
+        let r1 = run("r1", "t1", RunState::Queued);
+        insert_run(&conn, &r1).unwrap();
+        bind_run_workspace(&conn, "r1", "ws-b").unwrap();
+
+        let violations = detect_isolation_violations(&conn).unwrap();
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].run_id, "r1");
+        assert_eq!(violations[0].task_id, "t1");
+        assert_eq!(violations[0].run_workspace_id.as_deref(), Some("ws-b"));
+        assert_eq!(violations[0].task_workspace_id.as_deref(), Some("ws-a"));
+    }
+
+    #[test]
+    fn detect_isolation_violations_none_when_consistent() {
+        let conn = db();
+        let t1 = task("t1", TaskStatus::Queued);
+        insert_task(&conn, &t1).unwrap();
+        bind_task_workspace(&conn, "t1", "ws-a").unwrap();
+
+        let r1 = run("r1", "t1", RunState::Queued);
+        insert_run(&conn, &r1).unwrap();
+        bind_run_workspace(&conn, "r1", "ws-a").unwrap();
+
+        let violations = detect_isolation_violations(&conn).unwrap();
+        assert!(violations.is_empty());
     }
 }
