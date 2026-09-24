@@ -294,13 +294,9 @@ fn build_user_prompt(diff: &str, history: &[&str]) -> String {
 }
 
 fn parse_agent_ref(s: &str) -> Option<(AgentRefKind, String)> {
-    if let Some(id) = s.strip_prefix("cli:") {
-        Some((AgentRefKind::Cli, id.to_string()))
-    } else if let Some(id) = s.strip_prefix("role:") {
-        Some((AgentRefKind::Role, id.to_string()))
-    } else {
-        None
-    }
+    s.strip_prefix("cli:")
+        .map(|id| (AgentRefKind::Cli, id.to_string()))
+        .or_else(|| s.strip_prefix("role:").map(|id| (AgentRefKind::Role, id.to_string())))
 }
 
 async fn resolve_role_agent(

@@ -960,47 +960,32 @@ pub struct Attachment {
 // ---------------------------------------------------------------------------
 
 /// Minimum-edit strategy for GEPA-style prompt refinement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RefineStrategy {
+    #[default]
     PromptNote,
     Memory,
     Skill,
     SubAgentSpec,
 }
 
-impl Default for RefineStrategy {
-    fn default() -> Self {
-        RefineStrategy::PromptNote
-    }
-}
-
 /// Format for auto-created skill documents (agentskills.io compatible).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillFormat {
+    #[default]
     SkillMd,
 }
 
-impl Default for SkillFormat {
-    fn default() -> Self {
-        SkillFormat::SkillMd
-    }
-}
-
 /// Cross-session memory retrieval strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalStrategy {
+    #[default]
     Keyword,
     Semantic,
     Hybrid,
-}
-
-impl Default for RetrievalStrategy {
-    fn default() -> Self {
-        RetrievalStrategy::Keyword
-    }
 }
 
 /// Dimension (1): allowlisted online learning sources.
@@ -1043,19 +1028,10 @@ impl Default for RefineConfig {
 }
 
 /// Dimension (3): automatic skill creation (Hermes-style).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SkillCreationConfig {
     pub enabled: bool,
     pub format: SkillFormat,
-}
-
-impl Default for SkillCreationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            format: SkillFormat::default(),
-        }
-    }
 }
 
 /// Dimension (4): persistent memory policy.
@@ -1076,23 +1052,12 @@ impl Default for MemoryPolicy {
 
 /// Top-level self-evolution configuration aggregating all four dimensions.
 /// Stored as JSON in `app_settings` (key = `evolution_settings`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EvolutionSettings {
     pub online_learning: OnlineLearningConfig,
     pub refine: RefineConfig,
     pub skill_creation: SkillCreationConfig,
     pub memory_policy: MemoryPolicy,
-}
-
-impl Default for EvolutionSettings {
-    fn default() -> Self {
-        Self {
-            online_learning: OnlineLearningConfig::default(),
-            refine: RefineConfig::default(),
-            skill_creation: SkillCreationConfig::default(),
-            memory_policy: MemoryPolicy::default(),
-        }
-    }
 }
 
 /// Default research domains — mirrors `evolution::research::ResearchAllowlist::DOMAINS`.
@@ -1185,7 +1150,7 @@ mod tests {
         };
         let json = serde_json::to_string(&original).unwrap();
         let decoded: EvolutionSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded.online_learning.authorized, true);
+        assert!(decoded.online_learning.authorized);
         assert_eq!(decoded.online_learning.allowlist, vec!["custom.dev"]);
         assert_eq!(decoded.refine.trigger_failures, 5);
         assert!(matches!(decoded.refine.min_edit_strategy, RefineStrategy::Skill));

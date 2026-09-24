@@ -21,7 +21,7 @@ fn tempdb() -> (PathBuf, tempfile::TempDir) {
     (db_path, dir)
 }
 
-fn open_db(path: &PathBuf) -> Db {
+fn open_db(path: &std::path::Path) -> Db {
     Db::open(&path.to_string_lossy()).unwrap()
 }
 

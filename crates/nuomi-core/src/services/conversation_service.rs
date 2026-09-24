@@ -193,13 +193,9 @@ fn resolve_ref(
 
 /// Parses `"cli:<id>"` or `"role:<id>"` into `(AgentRefKind, id)`.
 fn parse_agent_ref(s: &str) -> Option<(AgentRefKind, String)> {
-    if let Some(id) = s.strip_prefix("cli:") {
-        Some((AgentRefKind::Cli, id.to_string()))
-    } else if let Some(id) = s.strip_prefix("role:") {
-        Some((AgentRefKind::Role, id.to_string()))
-    } else {
-        None
-    }
+    s.strip_prefix("cli:")
+        .map(|id| (AgentRefKind::Cli, id.to_string()))
+        .or_else(|| s.strip_prefix("role:").map(|id| (AgentRefKind::Role, id.to_string())))
 }
 
 #[cfg(test)]

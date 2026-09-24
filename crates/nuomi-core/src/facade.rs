@@ -705,7 +705,7 @@ fn keyword_title(text: &str) -> String {
     let mut freq: HashMap<&str, usize> = HashMap::new();
     for token in tokenize(text) {
         let len = token.chars().count();
-        if len < 2 || len > 12 || is_stopword(token) {
+        if !(2..=12).contains(&len) || is_stopword(token) {
             continue;
         }
         *freq.entry(token).or_insert(0) += 1;

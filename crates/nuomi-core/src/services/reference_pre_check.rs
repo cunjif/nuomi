@@ -223,7 +223,7 @@ mod tests {
 
         let refs = check_provider_refs(&conn, "p1").unwrap();
         assert_eq!(refs.roles, vec!["r1".to_string()]);
-        assert!(refs.is_empty() == false);
+        assert!(!refs.is_empty());
     }
 
     #[test]
