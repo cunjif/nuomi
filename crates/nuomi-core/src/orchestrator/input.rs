@@ -14,6 +14,9 @@ pub struct TeamRunInput {
     pub roles: Vec<Role>,
     pub team: Team,
     pub model: String,
+    /// The workspace this run belongs to (for parallel-run isolation).
+    /// `None` means the run is not bound to any workspace (legacy/CLI path).
+    pub workspace_id: Option<String>,
 }
 
 impl TeamRunInput {

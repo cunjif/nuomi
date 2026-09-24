@@ -21,6 +21,9 @@ pub mod nuomi_dir;
 pub mod codebase_memory_migrator;
 pub mod workspace_registry;
 pub mod workspace_migration;
+pub mod workspace_open_set;
+pub mod workspace_layout;
+pub mod cross_workspace;
 
 pub use capability_router::{
     cleanup_expired_temps, cleanup_temp, load_routing_rules, route, save_routing_rules,
@@ -73,3 +76,12 @@ pub use workspace_registry::{
 pub use workspace_migration::{
     run_if_needed as run_workspace_migration, MigrationOrchestrationError, MigrationOutcome,
 };
+pub use workspace_open_set::{
+    OpenSetError, OpenSetProvider, WorkspaceOpenSetService, MAX_OPEN_WORKSPACES,
+};
+pub use workspace_layout::{LayoutError, WorkspaceLayoutService, RestoreOutcome};
+pub use cross_workspace::{
+    CrossWorkspaceError, CrossWorkspaceService, CrossSearchOutcome, CrossSearchResultGroup,
+    FileMatch, FileReference, DiffResult, MatchType,
+};
+pub use crate::store::repos::workspace_layout_snapshot::LayoutMode;

@@ -127,6 +127,7 @@ mod tests {
             roles: vec![role("a")],
             team,
             model: "m".into(),
+            workspace_id: None,
         };
         let providers =
             ProviderResolver::new(Arc::new(crate::providers::FakeLlm::new("d", vec![])));

@@ -144,6 +144,7 @@ pub async fn materialize(
 /// 3. dispatches by topology onto pipeline / router / group-chat executors,
 ///    recording every turn on the session whiteboard (and mirroring to `bus`
 ///    when given).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_team(
     db_path: Arc<str>,
     bus: Option<EventBus>,
@@ -152,6 +153,7 @@ pub async fn run_team(
     task: &str,
     secrets: Arc<dyn SecretStore>,
     cwd: Option<PathBuf>,
+    workspace_id: Option<String>,
 ) -> Result<TeamRunOutcome, OrchestratorError> {
     let (team, mut roles) = load_team(db_path.clone(), team_id).await?;
     let materialized = materialize(db_path.clone(), secrets, cwd)
@@ -208,6 +210,7 @@ pub async fn run_team(
         roles,
         team: team.clone(),
         model,
+        workspace_id,
     };
 
     match team.topology {

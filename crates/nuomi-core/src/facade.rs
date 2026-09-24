@@ -150,7 +150,7 @@ impl NuomiKernel {
                 migrations::run(&db.0)?;
                 let _ = crate::services::workspace_migration::run_if_needed(&db.0)?;
                 let active_ws =
-                    repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+                    repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
                 let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
                 repos::sessions::insert(&db.0, &session)?;
                 if !active_ws.is_empty() {
@@ -538,7 +538,7 @@ impl NuomiKernel {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             let active_ws =
-                repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
             repos::sessions::insert(&db.0, &session)?;
             if !active_ws.is_empty() {
                 repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
@@ -562,7 +562,7 @@ impl NuomiKernel {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             let active_ws =
-                repos::workspaces::find_active(&db.0)?.map(|e| e.id).unwrap_or_default();
+                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
             let filter_ws = if active_ws.is_empty() {
                 "__migrated__"
             } else {

@@ -58,8 +58,12 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
     let existing = repo::list(conn)?;
 
     match (legacy_root, existing.is_empty()) {
-        (None, true) => return Ok(MigrationOutcome::NeedsSetup),
-        (None, false) => return Ok(MigrationOutcome::Skipped),
+        (None, true) => Ok(MigrationOutcome::NeedsSetup),
+        (None, false) => {
+            ensure_active_in_open_set(conn)?;
+            reclaim_migrated_tasks_runs(conn)?;
+            Ok(MigrationOutcome::Skipped)
+        }
         (Some(root_path), _) => {
             // Legacy root exists — check if the registry has a placeholder row
             // (id not in uuid-v7 format) or needs a fresh entry.
@@ -80,6 +84,7 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
                     color_tag: color_for_path(&root_path),
                     created_at: crate::domain::now_ms(),
                     is_active: existing.is_empty(),
+                    is_pinned: false,
                 };
                 repo::insert(conn, &entry)?;
                 if entry.is_active {
@@ -90,6 +95,12 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
 
             // Reparent sessions carrying the placeholder workspace_id.
             reparent_migrated_sessions(conn, &migrated_id)?;
+
+            // Reparent tasks/runs carrying the placeholder workspace_id.
+            reparent_migrated_tasks_runs(conn, &migrated_id)?;
+
+            // Ensure the active workspace is present in workspace_open_state.
+            ensure_active_in_open_set(conn)?;
 
             // Migrate codebase-memory products for the active workspace.
             if let Some(active) = repo::find_active(conn)? {
@@ -145,6 +156,66 @@ fn reparent_migrated_sessions(
     Ok(())
 }
 
+/// Reparents tasks and runs carrying the `__migrated__` placeholder workspace_id
+/// to the real workspace id. Idempotent — a second run finds no rows to update.
+fn reparent_migrated_tasks_runs(
+    conn: &Connection,
+    new_workspace_id: &str,
+) -> Result<(), MigrationOrchestrationError> {
+    conn.execute(
+        "UPDATE tasks SET workspace_id = ?1 WHERE workspace_id = ?2",
+        rusqlite::params![new_workspace_id, MIGRATED_PLACEHOLDER],
+    )
+    .map_err(StoreError::Sqlite)?;
+    conn.execute(
+        "UPDATE runs SET workspace_id = ?1 WHERE workspace_id = ?2",
+        rusqlite::params![new_workspace_id, MIGRATED_PLACEHOLDER],
+    )
+    .map_err(StoreError::Sqlite)?;
+    Ok(())
+}
+
+/// Ensures the legacy `is_active = 1` workspace is present in
+/// `workspace_open_state` (migration 0024 backfill). Idempotent — skips rows
+/// that already exist. Called on every boot to cover databases created before
+/// 0024 was applied.
+fn ensure_active_in_open_set(conn: &Connection) -> Result<(), MigrationOrchestrationError> {
+    let now = crate::domain::now_ms();
+    conn.execute(
+        "INSERT INTO workspace_open_state (workspace_id, opened_at, last_focused_at, is_focused)
+         SELECT id, ?1, ?1, 1
+         FROM workspaces
+         WHERE is_active = 1
+           AND NOT EXISTS (SELECT 1 FROM workspace_open_state WHERE workspace_id = workspaces.id)",
+        rusqlite::params![now],
+    )
+    .map_err(StoreError::Sqlite)?;
+    Ok(())
+}
+
+/// Reclaims `__migrated__` tasks/runs by binding them to the currently focused
+/// workspace (if any). Called on boot when no legacy root is present but the
+/// registry is non-empty. Idempotent — a second run finds no rows to update.
+fn reclaim_migrated_tasks_runs(conn: &Connection) -> Result<(), MigrationOrchestrationError> {
+    conn.execute(
+        "UPDATE tasks SET workspace_id = (
+             SELECT workspace_id FROM workspace_open_state WHERE is_focused = 1
+         ) WHERE workspace_id = ?1
+           AND EXISTS (SELECT 1 FROM workspace_open_state WHERE is_focused = 1)",
+        rusqlite::params![MIGRATED_PLACEHOLDER],
+    )
+    .map_err(StoreError::Sqlite)?;
+    conn.execute(
+        "UPDATE runs SET workspace_id = (
+             SELECT workspace_id FROM workspace_open_state WHERE is_focused = 1
+         ) WHERE workspace_id = ?1
+           AND EXISTS (SELECT 1 FROM workspace_open_state WHERE is_focused = 1)",
+        rusqlite::params![MIGRATED_PLACEHOLDER],
+    )
+    .map_err(StoreError::Sqlite)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +243,7 @@ mod tests {
             color_tag: "paper-yellow".into(),
             created_at: 1,
             is_active: true,
+            is_pinned: false,
         };
         repo::insert(&conn, &entry).unwrap();
         repo::set_active(&conn, &entry.id).unwrap();
@@ -189,6 +261,7 @@ mod tests {
             color_tag: "paper-yellow".into(),
             created_at: 1,
             is_active: true,
+            is_pinned: false,
         };
         repo::insert(&conn, &placeholder).unwrap();
         // Add a session with __migrated__ placeholder.
@@ -220,6 +293,7 @@ mod tests {
             color_tag: "paper-yellow".into(),
             created_at: 1,
             is_active: true,
+            is_pinned: false,
         };
         repo::insert(&conn, &placeholder).unwrap();
         let first = run_if_needed(&conn).unwrap();

@@ -12,6 +12,7 @@ use super::codebase_memory_migrator;
 use super::nuomi_dir;
 use super::workspace_guard;
 use super::workspace_palette;
+use crate::store::repos::events;
 use crate::store::repos::workspaces as repo;
 use crate::store::repos::workspaces::WorkspaceEntry;
 use crate::store::{migrations, Db, StoreError};
@@ -124,6 +125,7 @@ impl WorkspaceRegistry {
             color_tag: workspace_palette::color_for(&canonical.to_string_lossy()).0.to_string(),
             created_at: crate::domain::now_ms(),
             is_active: false,
+            is_pinned: false,
         };
         repo::insert(&conn, &entry)?;
         if was_empty {
@@ -136,6 +138,25 @@ impl WorkspaceRegistry {
                 "UPDATE sessions SET workspace_id = ?1 WHERE workspace_id = '__migrated__'",
                 rusqlite::params![entry.id],
             ).map_err(StoreError::Sqlite)?;
+            // Also add to open set + focus (multi-workspace model).
+            let now = crate::domain::now_ms();
+            let _ = crate::store::repos::workspace_open_state::insert(
+                &conn,
+                &crate::store::repos::workspace_open_state::WorkspaceOpenStateRow {
+                    workspace_id: entry.id.clone(),
+                    opened_at: now,
+                    last_focused_at: now,
+                    is_focused: true,
+                },
+            );
+            let _ = crate::store::repos::workspace_recent::touch(
+                &conn,
+                &entry.id,
+                now,
+                false,
+            );
+            emit_workspace_event(&conn, &entry.id, "workspace.opened");
+            emit_workspace_event(&conn, &entry.id, "workspace.focused");
         }
         Ok(entry)
     }
@@ -205,6 +226,12 @@ impl WorkspaceRegistry {
         Ok(repo::find_active(&conn)?)
     }
 
+    /// Finds a workspace by id.
+    pub fn find_by_id(&self, id: &str) -> Result<Option<WorkspaceEntry>, RegistryError> {
+        let conn = self.conn()?;
+        Ok(repo::find_by_id(&conn, id)?)
+    }
+
     /// Finds a workspace by (canonicalized) path.
     pub fn find_by_path(&self, path: &Path) -> Result<Option<WorkspaceEntry>, RegistryError> {
         let conn = self.conn()?;
@@ -220,6 +247,34 @@ impl WorkspaceRegistry {
         };
         Ok(repo::find_by_path(&conn, &canonical.to_string_lossy())?)
     }
+
+    /// Pins a workspace (marks it as always-restored on startup).
+    pub fn pin(&self, id: &str) -> Result<(), RegistryError> {
+        let conn = self.conn()?;
+        repo::pin(&conn, id)?;
+        emit_workspace_event(&conn, id, "workspace.pinned");
+        Ok(())
+    }
+
+    /// Unpins a workspace.
+    pub fn unpin(&self, id: &str) -> Result<(), RegistryError> {
+        let conn = self.conn()?;
+        repo::unpin(&conn, id)?;
+        emit_workspace_event(&conn, id, "workspace.unpinned");
+        Ok(())
+    }
+}
+
+fn emit_workspace_event(conn: &Connection, workspace_id: &str, kind: &str) {
+    let now = crate::domain::now_ms();
+    let _ = events::append(
+        conn,
+        "workspace",
+        workspace_id,
+        kind,
+        &serde_json::json!({}),
+        now,
+    );
 }
 
 #[cfg(test)]

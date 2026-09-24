@@ -343,8 +343,8 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                             Some(s.id.as_str()),
                         )?;
                         let new_sid = session.id.clone();
-                        let active_ws = repos::workspaces::find_active(conn)?
-                            .map(|e| e.id)
+                        let active_ws = repos::workspace_open_state::find_focused(conn)?
+                            .map(|r| r.workspace_id)
                             .unwrap_or_default();
                         if !active_ws.is_empty() {
                             repos::sessions::set_workspace_id(conn, &session.id, &active_ws)?;

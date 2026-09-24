@@ -211,6 +211,7 @@ mod tests {
                 updated_at: 0,
             },
             model: "m".into(),
+            workspace_id: None,
         }
     }
 
