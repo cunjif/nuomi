@@ -366,6 +366,7 @@ async fn formed_team_runs_end_to_end_with_cli_member() {
             "produce the spec",
             secrets_for(&["kr-p-spec", "kr-p-plan"]).await,
             None,
+            None,
         ),
     )
     .await

@@ -149,6 +149,7 @@ async fn handoff_transfers_control_and_syncs_context() {
         roles: vec![alice.clone(), bob.clone(), carol.clone()],
         team: team(&[&alice, &bob, &carol], json!({})),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, db_path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(
@@ -247,6 +248,7 @@ async fn handoff_to_unknown_target_is_a_clear_error() {
         roles: vec![alice.clone(), bob.clone()],
         team: team(&[&alice, &bob], json!({})),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, _path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(
@@ -287,6 +289,7 @@ async fn handoff_loop_beyond_max_hops_is_detected() {
         roles: vec![alice.clone(), bob.clone()],
         team: team(&[&alice, &bob], json!({ "max_hops": 1 })),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, _path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(
@@ -330,6 +333,7 @@ async fn same_agent_consecutive_speech_is_capped() {
         roles: vec![a.clone(), b.clone()],
         team: team(&[&a, &b], json!({ "max_consecutive": 1, "max_rounds": 4 })),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, _path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(
@@ -364,6 +368,7 @@ async fn max_rounds_exhaustion_terminates() {
         roles: vec![a.clone()],
         team: team(&[&a], json!({ "max_rounds": 3, "max_consecutive": 10 })),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, _path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(
@@ -406,6 +411,7 @@ async fn round_robin_baseline_contrast() {
         roles: vec![a.clone(), b.clone(), c.clone()],
         team: team(&[&a, &b, &c], json!({ "max_rounds": 3 })),
         model: "m".into(),
+        workspace_id: None,
     };
     let (wb, _path) = seeded_board(&session_id, &input.roles).await;
     let providers = resolver(

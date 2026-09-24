@@ -213,6 +213,7 @@ async fn pipeline_relays_outputs_between_members_end_to_end() {
         "write the spec",
         secrets_for(&["kr-p-spec", "kr-p-review"]).await,
         None,
+        None,
     )
     .await
     .expect("pipeline run");
@@ -287,6 +288,7 @@ async fn router_hits_matching_capability_and_fails_without_match() {
         "fix the bug",
         secrets_for(&["kr-p-code", "kr-p-docs"]).await,
         None,
+        None,
     )
     .await
     .expect("routed run");
@@ -314,6 +316,7 @@ async fn router_hits_matching_capability_and_fails_without_match() {
         session_id,
         "fix the bug",
         secrets_for(&["kr-p-code", "kr-p-docs"]).await,
+        None,
         None,
     )
     .await
@@ -366,6 +369,7 @@ async fn group_chat_round_robin_respects_max_rounds_and_records_whiteboard() {
         session_id,
         "discuss the plan",
         secrets_for(&["kr-p-main"]).await,
+        None,
         None,
     )
     .await
@@ -435,6 +439,7 @@ async fn group_chat_llm_selector_converges_before_any_turn() {
         session_id,
         "converge quickly",
         secrets_for(&["kr-p-judge"]).await,
+        None,
         None,
     )
     .await
@@ -511,6 +516,7 @@ async fn cli_agent_profile_joins_pipeline_as_team_member() {
             "produce the spec",
             secrets_for(&["kr-p-spec"]).await,
             None,
+            None,
         ),
     )
     .await
@@ -567,6 +573,7 @@ async fn missing_member_role_fails_with_member_not_found() {
         "task",
         Arc::new(MemorySecretStore::default()),
         None,
+        None,
     )
     .await
     .expect_err("member lookup must fail");
@@ -587,6 +594,7 @@ async fn unknown_team_fails_with_invalid_team_not_found() {
         "sess-none",
         "task",
         Arc::new(MemorySecretStore::default()),
+        None,
         None,
     )
     .await

@@ -82,6 +82,7 @@ async fn pipeline_runs_three_roles_end_to_end_with_whiteboard_and_events() {
         roles,
         team,
         model: "test-model".into(),
+        workspace_id: None,
     };
 
     let mut resolver =

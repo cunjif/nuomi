@@ -124,6 +124,7 @@ async fn cli_agent_joins_pipeline_team_end_to_end() {
         roles,
         team,
         model: "test-model".into(),
+        workspace_id: None,
     };
 
     let client = CliAgentClient::new(
