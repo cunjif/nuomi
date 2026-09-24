@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Spinner } from "../../components/ui/Spinner";
 import { ipc } from "../../lib/ipc/client";
 import { ErrorBoundary } from "../../components/ui/ErrorBoundary";
-import { useUiStore, type View } from "../../lib/store/uiStore";
+import { useUiStore, type View, type LayoutMode } from "../../lib/store/uiStore";
 import { ApprovalsView } from "../approvals/ApprovalsView";
 import { BoardView } from "../board/BoardView";
 import { ConversationView } from "../conversation/ConversationView";
@@ -21,6 +21,10 @@ import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
+import { WorkspaceBar } from "./WorkspaceBar";
+import { SplitView } from "./SplitView";
+import { OverviewGrid } from "./OverviewGrid";
+import { EmptyStateGuide } from "./EmptyStateGuide";
 
 type WorkspaceInfo = { root: string; configured: boolean };
 
@@ -87,20 +91,47 @@ function BootScreen({ error }: { error?: string }): ReactNode {
 function useGlobalNavShortcuts(): void {
   const handler = useRef<(e: KeyboardEvent) => void>(() => {});
   handler.current = (e: KeyboardEvent): void => {
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    if (e.code === "KeyH") {
-      // 不可覆盖: toggle workbench ↔ chat.
+    // Ctrl+Tab / Ctrl+Shift+Tab: cycle focused workspace (task 8.1).
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === "Tab") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const { activeArea, setActiveArea } = useUiStore.getState();
-      setActiveArea(activeArea === "workbench" ? "chat" : "workbench");
-    } else if (e.code === "KeyE") {
-      // 不可覆盖: focus the workbench area with the editor sub-tab.
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const { setActiveArea, setWorkbenchSubTab } = useUiStore.getState();
-      setActiveArea("workbench");
-      setWorkbenchSubTab("editor");
+      const { openWorkspaceIds, focusWorkspace } = useUiStore.getState();
+      if (openWorkspaceIds.length < 2) return;
+      const focused = useUiStore.getState().focusedWorkspaceId;
+      const idx = focused ? openWorkspaceIds.indexOf(focused) : -1;
+      const next = e.shiftKey
+        ? (idx <= 0 ? openWorkspaceIds.length - 1 : idx - 1)
+        : (idx < 0 || idx >= openWorkspaceIds.length - 1 ? 0 : idx + 1);
+      const target = openWorkspaceIds[next];
+      if (target) void focusWorkspace(target);
+      return;
+    }
+    // Alt+1..Alt+8: focus the Nth open workspace (task 8.1).
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const digit = e.code.match(/^Digit([1-8])$/);
+      if (digit) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const { openWorkspaceIds, focusWorkspace } = useUiStore.getState();
+        const n = parseInt(digit[1] ?? "0", 10) - 1;
+        if (n < openWorkspaceIds.length) {
+          const target = openWorkspaceIds[n];
+          if (target) void focusWorkspace(target);
+        }
+        return;
+      }
+      if (e.code === "KeyH") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const { activeArea, setActiveArea } = useUiStore.getState();
+        setActiveArea(activeArea === "workbench" ? "chat" : "workbench");
+      } else if (e.code === "KeyE") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const { setActiveArea, setWorkbenchSubTab } = useUiStore.getState();
+        setActiveArea("workbench");
+        setWorkbenchSubTab("editor");
+      }
     }
   };
   useEffect(() => {
@@ -114,6 +145,8 @@ function useGlobalNavShortcuts(): void {
 export function Shell(): ReactNode {
   const view = useUiStore((s) => s.view);
   const activeArea = useUiStore((s) => s.activeArea);
+  const openWorkspaceIds = useUiStore((s) => s.openWorkspaceIds);
+  const layoutMode = useUiStore((s) => s.layoutMode);
   useGlobalNavShortcuts();
   useGlobalPaletteShortcuts();
   const queryClient = useQueryClient();
@@ -134,6 +167,9 @@ export function Shell(): ReactNode {
             // Unblock the gated workspace query immediately instead of
             // waiting out the current retry backoff.
             void queryClient.invalidateQueries({ queryKey: ["workspace"] });
+            // Sync the frontend open-set mirror from the backend (which has
+            // already restored the layout snapshot during boot).
+            void useUiStore.getState().syncFromOpenSet();
           }),
           listen<string>("kernel-failed", (e) => {
             setBootFailed(e.payload);
@@ -203,19 +239,57 @@ export function Shell(): ReactNode {
       <BackgroundTray />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
-        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {/* Mutually exclusive surfaces (需求 5): the workbench occupies the
-          same area as the conversation view; opening a file flips
-          activeArea to "workbench" with sub-tab "editor", Alt+H flips back. */}
-          <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
-            {activeArea === "workbench" ? <WorkbenchArea /> : renderView(view)}
-          </ErrorBoundary>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {/* WorkspaceBar is always rendered at the top of the main area,
+          regardless of layoutMode (task 6.7.2). */}
+          <WorkspaceBar />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
+              {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode })}
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
       {/* Global palette overlay (Ctrl+P / Ctrl+Shift+P / Ctrl+F). */}
       <QuickOpen />
     </div>
   );
+}
+
+/**
+ * Dispatches the main content area based on the multi-workspace layout state
+ * (task 6.7.1). Precedence:
+ * 1. layoutMode "overview" → OverviewGrid (or EmptyStateGuide if no open ws)
+ * 2. layoutMode "split" → SplitView (or EmptyStateGuide if no open ws)
+ * 3. layoutMode "single" (default) → the existing mutually-exclusive surface
+ *    (WorkbenchArea or the active view) — preserves legacy single-workspace behavior
+ */
+function renderMainContent({
+  activeArea,
+  view,
+  openWorkspaceIds,
+  layoutMode,
+}: {
+  activeArea: string;
+  view: View;
+  openWorkspaceIds: string[];
+  layoutMode: LayoutMode;
+}): ReactNode {
+  if (layoutMode === "overview") {
+    return openWorkspaceIds.length === 0 ? <EmptyStateGuide /> : <OverviewGrid />;
+  }
+  if (layoutMode === "split") {
+    if (openWorkspaceIds.length === 0) return <EmptyStateGuide />;
+    return (
+      <SplitView
+        renderWorkspace={() =>
+          activeArea === "workbench" ? <WorkbenchArea /> : renderView(view)
+        }
+      />
+    );
+  }
+  // layoutMode === "single"
+  return activeArea === "workbench" ? <WorkbenchArea /> : renderView(view);
 }
 
 function renderView(view: View): ReactNode {

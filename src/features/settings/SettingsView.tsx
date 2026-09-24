@@ -6,6 +6,7 @@ import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
+import { WorkspaceSettingsPanel } from "./WorkspaceSettingsPanel";
 
 /**
  * Settings tabs (用户需求: 集中一页 → 顶部导航分 tab). One section per tab;
@@ -17,6 +18,7 @@ const TABS = [
   { key: "roles", labelKey: "settings.roles.heading" },
   { key: "agents", labelKey: "settings.cliAgents.heading" },
   { key: "integrations", labelKey: "settings.integrations.heading" },
+  { key: "workspace", labelKey: "settings.workspace.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
 ] as const;
 
@@ -32,6 +34,8 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       return <CliAgentsSection />;
     case "integrations":
       return <IntegrationsSection />;
+    case "workspace":
+      return <WorkspaceSettingsPanel />;
     case "access":
       return <EvolutionSettingsPanel />;
   }

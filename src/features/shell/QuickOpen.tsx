@@ -19,6 +19,7 @@ import { listWorkspaceFiles, triggerActiveEditorFind } from "../../lib/editor-ex
 import { registerPaletteCommand, usePaletteCommands, type PaletteCommand } from "../../lib/commands/palette";
 import { usePaletteStore } from "../../lib/store/paletteStore";
 import { THEME_STORAGE_KEY, nextTheme, useUiStore } from "../../lib/store/uiStore";
+import { invoke } from "@tauri-apps/api/core";
 
 const MAX_RESULTS = 50;
 
@@ -81,6 +82,47 @@ function registerBuiltinCommands(): void {
     run: () => {
       const { activeFile, closeFile } = ui();
       if (activeFile !== null) closeFile(activeFile);
+    },
+  });
+  // Workspace commands (task 8.2).
+  registerPaletteCommand({
+    id: "workspace.openDirectory",
+    title: "打开工作区目录…",
+    run: () => {
+      void import("@tauri-apps/plugin-dialog").then(({ open }) =>
+        open({ directory: true }).then((selected) => {
+          if (typeof selected !== "string") return;
+          void invoke("add_workspace", { path: selected }).then((entry: unknown) => {
+            const id = (entry as { id: string }).id;
+            void ui().openWorkspace(id);
+          });
+        }),
+      );
+    },
+  });
+  registerPaletteCommand({
+    id: "workspace.single",
+    title: "单工作区视图",
+    run: () => void ui().setLayoutMode("single"),
+  });
+  registerPaletteCommand({
+    id: "workspace.split",
+    title: "分屏视图",
+    run: () => void ui().setLayoutMode("split"),
+  });
+  registerPaletteCommand({
+    id: "workspace.overview",
+    title: "概览模式",
+    run: () => void ui().setLayoutMode("overview"),
+  });
+  registerPaletteCommand({
+    id: "workspace.closeAll",
+    title: "关闭所有非固定工作区",
+    run: () => {
+      const { openWorkspaceIds, pinnedWorkspaceIds, closeWorkspace } = ui();
+      for (const id of openWorkspaceIds) {
+        if (!pinnedWorkspaceIds.includes(id)) void closeWorkspace(id, true);
+      }
     },
   });
 }

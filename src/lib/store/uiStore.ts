@@ -3,6 +3,8 @@
  * here — server data lives in TanStack Query).
  */
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
+import { measureAsync } from "../perf/metrics";
 
 export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins";
 
@@ -76,6 +78,9 @@ interface WorkspaceTabSnapshot {
   activeFile: string | null;
 }
 
+/** Layout mode for the main content area. */
+export type LayoutMode = "single" | "split" | "overview";
+
 interface UiState {
   view: View;
   activeArea: ActiveArea;
@@ -91,6 +96,16 @@ interface UiState {
   activeWorkspaceId: string | null;
   /** Per-workspace editor tab snapshots, keyed by workspace id. */
   workspaceTabs: Record<string, WorkspaceTabSnapshot>;
+  /** Open workspace ids ordered by most-recently-focused. */
+  openWorkspaceIds: string[];
+  /** Focused workspace id (the one the user is currently interacting with). */
+  focusedWorkspaceId: string | null;
+  /** Pinned workspace ids (always restored on startup). */
+  pinnedWorkspaceIds: string[];
+  /** Current layout mode for the main content area. */
+  layoutMode: LayoutMode;
+  /** Split-screen workspace ids (two workspaces shown side-by-side). */
+  splitWorkspaceIds: [string, string] | null;
   setView: (view: View) => void;
   setActiveArea: (area: ActiveArea) => void;
   setWorkbenchSubTab: (sub: WorkbenchSubTab) => void;
@@ -110,6 +125,22 @@ interface UiState {
    * it stays on (or falls back to) the workspace list.
    */
   switchWorkspace: (workspaceId: string) => void;
+  /** Opens a workspace (adds to open set + focuses). Calls IPC openWorkspace. */
+  openWorkspace: (id: string) => Promise<void>;
+  /** Closes a workspace (removes from open set). Calls IPC closeWorkspace. */
+  closeWorkspace: (id: string, force: boolean) => Promise<void>;
+  /** Focuses an already-open workspace. Calls IPC focusWorkspace. */
+  focusWorkspace: (id: string) => Promise<void>;
+  /** Sets the layout mode and persists via IPC. */
+  setLayoutMode: (mode: LayoutMode) => Promise<void>;
+  /** Sets split-screen workspace ids and persists via IPC. */
+  setSplitWorkspaceIds: (ids: [string, string] | null) => Promise<void>;
+  /** Pins a workspace. Calls IPC pinWorkspace. */
+  pinWorkspace: (id: string) => Promise<void>;
+  /** Unpins a workspace. Calls IPC unpinWorkspace. */
+  unpinWorkspace: (id: string) => Promise<void>;
+  /** Syncs the local open-set mirror from the backend (call on startup). */
+  syncFromOpenSet: () => Promise<void>;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -124,6 +155,11 @@ export const useUiStore = create<UiState>((set) => ({
   dirtyPaths: {},
   activeWorkspaceId: null,
   workspaceTabs: {},
+  openWorkspaceIds: [],
+  focusedWorkspaceId: null,
+  pinnedWorkspaceIds: [],
+  layoutMode: "single",
+  splitWorkspaceIds: null,
   /**
    * Switch the view surface. Also releases the main area from the workbench:
    * `activeArea === "workbench"` short-circuits `renderView` in Shell, so a
@@ -195,4 +231,72 @@ export const useUiStore = create<UiState>((set) => ({
         workspaceTabs,
       };
     }),
+  openWorkspace: async (id) => {
+    await measureAsync("workspace.open", () => invoke("open_workspace", { id }), { workspaceId: id });
+    set((s) => ({
+      openWorkspaceIds: s.openWorkspaceIds.includes(id)
+        ? s.openWorkspaceIds
+        : [...s.openWorkspaceIds, id],
+      focusedWorkspaceId: id,
+      activeWorkspaceId: id,
+    }));
+  },
+  closeWorkspace: async (id, force) => {
+    const result = await measureAsync(
+      "workspace.close",
+      () => invoke<{ closedId: string; newFocusedId: string | null }>("close_workspace", { id, force }),
+      { workspaceId: id, force },
+    );
+    set((s) => ({
+      openWorkspaceIds: s.openWorkspaceIds.filter((w) => w !== id),
+      focusedWorkspaceId: result.newFocusedId,
+      activeWorkspaceId: result.newFocusedId,
+    }));
+  },
+  focusWorkspace: async (id) => {
+    // Optimistic update for ≤150ms UI response.
+    set({ focusedWorkspaceId: id, activeWorkspaceId: id });
+    await measureAsync("workspace.focus", () => invoke("focus_workspace", { id }), { workspaceId: id });
+  },
+  setLayoutMode: async (mode) => {
+    set({ layoutMode: mode });
+    await invoke("set_layout_snapshot", {
+      mode,
+      splitWorkspaceIds: useUiStore.getState().splitWorkspaceIds,
+    });
+  },
+  setSplitWorkspaceIds: async (ids) => {
+    set({ splitWorkspaceIds: ids });
+    await invoke("set_layout_snapshot", {
+      mode: ids ? "split" : "single",
+      splitWorkspaceIds: ids,
+    });
+  },
+  pinWorkspace: async (id) => {
+    await invoke("pin_workspace", { id });
+    set((s) => ({
+      pinnedWorkspaceIds: s.pinnedWorkspaceIds.includes(id)
+        ? s.pinnedWorkspaceIds
+        : [...s.pinnedWorkspaceIds, id],
+    }));
+  },
+  unpinWorkspace: async (id) => {
+    await invoke("unpin_workspace", { id });
+    set((s) => ({
+      pinnedWorkspaceIds: s.pinnedWorkspaceIds.filter((w) => w !== id),
+    }));
+  },
+  syncFromOpenSet: async () => {
+    const openSet = await invoke<{
+      openWorkspaces: { workspaceId: string; isFocused: boolean }[];
+      focusedWorkspaceId: string | null;
+      pinnedWorkspaceIds: string[];
+    }>("get_open_set");
+    set({
+      openWorkspaceIds: openSet.openWorkspaces.map((w) => w.workspaceId),
+      focusedWorkspaceId: openSet.focusedWorkspaceId,
+      activeWorkspaceId: openSet.focusedWorkspaceId,
+      pinnedWorkspaceIds: openSet.pinnedWorkspaceIds,
+    });
+  },
 }));
