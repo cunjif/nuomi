@@ -99,7 +99,10 @@ impl NuomiConfig {
 }
 
 struct SessionState {
-    session_id: String,
+    /// `None` until the first operation that needs a session (lazy create
+    /// on first `run_task`/`ensure_session_id`). Avoids creating an empty
+    /// session row on every boot.
+    session_id: Option<String>,
     /// Rebuilt transcript prefix (populated by `resume`, extended after
     /// every successful run).
     history: Vec<ChatMessage>,
@@ -138,32 +141,28 @@ pub struct NuomiKernel {
 }
 
 impl NuomiKernel {
-    /// Opens the database, runs migrations, creates the first session row,
-    /// builds the provider and registers the core plugins.
+    /// Opens the database, runs migrations, builds the provider and
+    /// registers the core plugins. No session row is created here — the
+    /// active session is created lazily on the first `run_task`/
+    /// `ensure_session_id` call, so booting no longer leaves an empty
+    /// session behind on every launch.
     pub async fn boot(config: NuomiConfig) -> CoreResult<Self> {
         let boot_started = std::time::Instant::now();
         let db_path: Arc<str> = Arc::from(config.db_path.to_string_lossy().to_string());
-        let session_id = {
+        {
             let path = db_path.clone();
-            tokio::task::spawn_blocking(move || -> Result<String, CoreError> {
+            tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
                 let db = Db::open(&path)?;
                 migrations::run(&db.0)?;
                 let _ = crate::services::workspace_migration::run_if_needed(&db.0)?;
-                let active_ws =
-                    repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-                let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
-                repos::sessions::insert(&db.0, &session)?;
-                if !active_ws.is_empty() {
-                    repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
-                }
-                Ok(session.id)
+                Ok(())
             })
             .await
-            .map_err(join_err)??
-        };
+            .map_err(join_err)??;
+        }
         tracing::info!(
             db_boot_ms = boot_started.elapsed().as_millis() as u64,
-            "kernel database boot complete (open + migrations + first session)"
+            "kernel database boot complete (open + migrations)"
         );
 
         let model = match &config.provider {
@@ -267,7 +266,7 @@ impl NuomiKernel {
             delta_cb: None,
             delta_seqs: Mutex::new(HashMap::new()),
             state: Mutex::new(SessionState {
-                session_id,
+                session_id: None,
                 history: Vec::new(),
                 delta_seq: Arc::new(AtomicU64::new(0)),
             }),
@@ -297,15 +296,58 @@ impl NuomiKernel {
         &self.ctx
     }
 
-    pub async fn session_id(&self) -> String {
+    /// Returns the active session id, or `None` if no session has been
+    /// created/selected yet (lazy model — boot no longer pre-creates one).
+    pub async fn session_id(&self) -> Option<String> {
         self.state.lock().await.session_id.clone()
+    }
+
+    /// Returns the active session id, creating one lazily if none exists
+    /// yet. Use this when a caller needs a concrete session row (task
+    /// dispatch, team runs) rather than the passive [`session_id`].
+    pub async fn ensure_session_id(&self) -> CoreResult<String> {
+        let mut state = self.state.lock().await;
+        if let Some(id) = state.session_id.as_ref() {
+            return Ok(id.clone());
+        }
+        // Hold the state lock across creation so two concurrent callers
+        // can't both observe `None` and insert duplicate session rows.
+        let id = self.create_session_row().await?;
+        state.session_id = Some(id.clone());
+        state.history = Vec::new();
+        state.delta_seq = self.delta_counter(&id).await;
+        Ok(id)
+    }
+
+    /// Inserts a fresh session row (shared by `ensure_session_id` and
+    /// `new_session`) bound to the focused workspace when one is active.
+    async fn create_session_row(&self) -> CoreResult<String> {
+        let path = self.db_path.clone();
+        let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
+        let id = session.id.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let active_ws =
+                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
+            repos::sessions::insert(&db.0, &session)?;
+            if !active_ws.is_empty() {
+                repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(join_err)??;
+        Ok(id)
     }
 
     /// Runs one user task through the Loop Engine, persists the transcript
     /// as append-only session events, and extends the in-memory history.
     pub async fn run_task(&self, task: &str) -> CoreResult<LoopRunResult> {
+        // Lazy session creation: the first turn materializes the session
+        // row instead of boot doing it unconditionally.
+        let session_id = self.ensure_session_id().await?;
         let mut state = self.state.lock().await;
-        let session_id = state.session_id.clone();
         // One ordinal per session (not per SessionState) so it survives
         // resume/switch and matches the isolated session path below.
         let delta_counter = self.delta_counter(&session_id).await;
@@ -521,7 +563,7 @@ impl NuomiKernel {
             .map_err(join_err)??;
 
         let mut state = self.state.lock().await;
-        state.session_id = session_id.to_string();
+        state.session_id = Some(session_id.to_string());
         state.history = history;
         // The ordinal belongs to the session, not to the live stream: keep
         // the same counter across resumes so consumers can still dedupe.
@@ -531,25 +573,10 @@ impl NuomiKernel {
 
     /// Starts a fresh session (`/new` in the REPL).
     pub async fn new_session(&self) -> CoreResult<String> {
-        let path = self.db_path.clone();
-        let session = Session::new_chat(new_id(), DEFAULT_SESSION_TITLE.into(), now_ms());
-        let id = session.id.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
-            let db = Db::open(&path)?;
-            migrations::run(&db.0)?;
-            let active_ws =
-                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-            repos::sessions::insert(&db.0, &session)?;
-            if !active_ws.is_empty() {
-                repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(join_err)??;
+        let id = self.create_session_row().await?;
 
         let mut state = self.state.lock().await;
-        state.session_id = id.clone();
+        state.session_id = Some(id.clone());
         state.history = Vec::new();
         // Fresh session ⇒ the live delta ordinal starts at 1.
         state.delta_seq = self.delta_counter(&id).await;
@@ -860,7 +887,7 @@ mod tests {
         let path = dir.path().join("k.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
         let events =
-            repos::events::list_by_aggregate(&conn, "session", &kernel.session_id().await, None)
+            repos::events::list_by_aggregate(&conn, "session", &kernel.session_id().await.unwrap(), None)
                 .unwrap();
         let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
         assert!(kinds.contains(&"message"));
@@ -880,7 +907,7 @@ mod tests {
         let first = NuomiKernel::boot(fake_config(db_path.clone()))
             .await
             .unwrap();
-        let session_id = first.session_id().await;
+        let session_id = first.ensure_session_id().await.unwrap();
         first.run_task("hello").await.unwrap();
 
         // Second instance over the same db: resume + continue (own script).
@@ -922,11 +949,11 @@ mod tests {
             .await
             .unwrap();
         let sessions = kernel.list_sessions().await.unwrap();
-        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions.len(), 0);
 
         let new_id = kernel.new_session().await.unwrap();
         let sessions = kernel.list_sessions().await.unwrap();
-        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions.len(), 1);
         assert!(sessions.iter().any(|s| s.id == new_id));
         // History was reset with the fresh session.
         let result = kernel.run_task("fresh start").await.unwrap();
@@ -1036,7 +1063,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let sid = kernel.session_id().await;
+        let sid = kernel.ensure_session_id().await.unwrap();
 
         kernel
             .run_task("fix the login bug\nrepro steps inside")
@@ -1121,7 +1148,7 @@ mod tests {
         let kernel = NuomiKernel::boot(fake_config(db_path.clone()))
             .await
             .unwrap();
-        let sid = kernel.session_id().await;
+        let sid = kernel.ensure_session_id().await.unwrap();
         let mut rx = kernel.context().subscribe();
 
         kernel.run_task("hello").await.unwrap();

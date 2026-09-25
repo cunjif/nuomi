@@ -577,7 +577,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let original = kernel.session_id().await;
+        let original = kernel.ensure_session_id().await.unwrap();
         kernel.run_task("hello").await.unwrap();
 
         // Start a fresh session, then resume the original via the REPL command.

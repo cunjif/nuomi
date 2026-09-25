@@ -637,6 +637,9 @@ impl TaskStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
+    /// `None` when the task was created before any session was active
+    /// (lazy session model). Dispatch/team-run falls back to the kernel's
+    /// current session via `unwrap_or(fallback)`.
     pub session_id: Option<String>,
     pub title: String,
     pub description: String,

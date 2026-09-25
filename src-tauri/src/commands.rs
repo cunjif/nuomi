@@ -934,7 +934,7 @@ pub async fn impl_create_task(
     }
     let task = Task {
         id: nuomi_core::domain::new_id(),
-        session_id: Some(state.kernel.session_id().await),
+        session_id: state.kernel.session_id().await,
         title,
         description,
         status: TaskStatus::Queued,
@@ -1242,7 +1242,7 @@ pub async fn impl_update_task_status(
 async fn dispatch_run(state: &AppState, task_id: String) -> Result<String, IpcError> {
     let path = state.db_path.clone();
     let run_id = nuomi_core::domain::new_id();
-    let session_id = state.kernel.session_id().await;
+    let session_id = state.kernel.ensure_session_id().await?;
     let run = nuomi_core::domain::Run {
         id: run_id.clone(),
         task_id: task_id.clone(),
@@ -3678,7 +3678,7 @@ pub async fn impl_run_team_on_task(
         task_text: String,
     }
 
-    let fallback_session = state.kernel.session_id().await;
+    let fallback_session = state.kernel.ensure_session_id().await?;
     let path = state.db_path.clone();
     let tid = task_id;
     let team = team_id.clone();

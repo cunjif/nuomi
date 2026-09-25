@@ -22,7 +22,8 @@ async fn repl_flow_sessions_task_and_exit() {
     .await;
 
     let mut out: Vec<u8> = Vec::new();
-    // /sessions lists the boot-created session.
+    // /sessions lists the active session (lazy-created on first ensure).
+    let sid = kernel.ensure_session_id().await.unwrap();
     assert_eq!(
         handle_repl_line(&kernel, "/sessions", &mut out)
             .await
@@ -30,10 +31,7 @@ async fn repl_flow_sessions_task_and_exit() {
         ReplAction::Continue
     );
     let listed = String::from_utf8(out.clone()).unwrap();
-    assert!(
-        listed.contains(&kernel.session_id().await),
-        "session id not listed"
-    );
+    assert!(listed.contains(&sid), "session id not listed");
 
     // A task line produces the scripted answer.
     out.clear();
@@ -114,7 +112,7 @@ async fn end_to_end_run_resume_via_cli_surface() {
         vec!["first answer".into(), "second answer".into()],
     )
     .await;
-    let session_id = first.session_id().await;
+    let session_id = first.ensure_session_id().await.unwrap();
     let mut out: Vec<u8> = Vec::new();
     handle_repl_line(&first, "start work", &mut out)
         .await
@@ -130,7 +128,7 @@ async fn end_to_end_run_resume_via_cli_surface() {
     // History replayed: 2 prior messages + new user + reply.
     assert_eq!(result.transcript.len(), 4);
 
-    // Each boot creates its own session; the resumed one must be present.
+    // The resumed session must be present in the listing.
     let sessions = second.list_sessions().await.unwrap();
     assert!(sessions.iter().any(|s| s.id == session_id));
 }

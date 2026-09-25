@@ -497,7 +497,7 @@ async fn run_team_session_returns_outcome_directly() {
     .await
     .unwrap();
 
-    let session_id = state.kernel.session_id().await;
+    let session_id = state.kernel.ensure_session_id().await.unwrap();
     let outcome =
         commands::impl_run_team_session(&state, session_id.clone(), team.id, "say hello".into())
             .await
@@ -536,7 +536,7 @@ async fn run_team_session_returns_outcome_directly() {
 async fn whiteboard_notes_list_in_seq_order() {
     let (state, _dir) = boot_with_memory_secrets().await;
 
-    let session_id = state.kernel.session_id().await;
+    let session_id = state.kernel.ensure_session_id().await.unwrap();
     let wb = nuomi_core::orchestrator::WhiteBoardService::new(state.db_path.clone());
     for body in ["third", "first", "second"] {
         wb.post(&session_id, None, "finding", body.into(), json!({}))
@@ -685,7 +685,7 @@ async fn form_team_creates_team_then_runs_it_end_to_end() {
     std::env::set_var(provider_env_key(planner_id), "dummy");
     std::env::set_var(provider_env_key(spec_id), "dummy");
 
-    let session_id = state.kernel.session_id().await;
+    let session_id = state.kernel.ensure_session_id().await.unwrap();
     let dto = commands::impl_form_team(&state, "produce the spec".into(), Some(session_id.clone()))
         .await
         .unwrap();
