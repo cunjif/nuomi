@@ -831,7 +831,6 @@
     "pathLabel": "工作区目录",
     "confirm": "确认",
     "switchWorkspace": "切换工作区",
-    "backToList": "返回工作区列表",
     "current": "工作区",
     "setupFailed": "设置工作区失败",
     "currentDir": "当前工作目录",
@@ -857,11 +856,6 @@
     "loading": "加载中…",
     "orphanSessions": "孤儿会话",
     "reclaimInto": "归入此工作区"
-  },
-  "workbench": {
-    "subTabLabel": "工作台子页签",
-    "workspaceList": "工作区列表",
-    "editor": "文件编辑"
   },
   "capability": {
     "reasoning": "推理",

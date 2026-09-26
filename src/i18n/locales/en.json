@@ -825,7 +825,6 @@
     "pathLabel": "Workspace directory",
     "confirm": "Confirm",
     "switchWorkspace": "Switch workspace",
-    "backToList": "Back to workspace list",
     "current": "Workspace",
     "setupFailed": "Failed to set workspace",
     "currentDir": "Current directory",
@@ -851,11 +850,6 @@
     "loading": "Loading…",
     "orphanSessions": "Orphan sessions",
     "reclaimInto": "Reclaim into this workspace"
-  },
-  "workbench": {
-    "subTabLabel": "Workbench sub-tab",
-    "workspaceList": "Workspaces",
-    "editor": "Editor"
   },
   "capability": {
     "reasoning": "Reasoning",
