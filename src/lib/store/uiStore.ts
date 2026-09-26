@@ -78,7 +78,11 @@ interface UiState {
   activeArea: ActiveArea;
   theme: Theme;
   selectedSessionId: string | null;
-  /** Open chat session ids ordered by most-recently-activated (ephemeral UI state, not persisted). */
+  /**
+   * Open chat session ids in strip order: index 0 is the longest-opened tab,
+   * the tail is the most recently opened one. Append-only — activating a tab
+   * never reorders (ephemeral UI state, not persisted).
+   */
   openSessionIds: string[];
   openFiles: string[];
   activeFile: string | null;
@@ -103,11 +107,17 @@ interface UiState {
   setActiveArea: (area: ActiveArea) => void;
   setTheme: (theme: Theme) => void;
   selectSession: (sessionId: string | null) => void;
-  /** Opens a chat tab: if id exists, activate (move to front); else append + activate. */
+  /**
+   * Opens a chat tab: if id exists, activate in place (no reorder); else append
+   * to the tail of the strip (oldest-opened leftmost) + activate.
+   */
   openChatTab: (sessionId: string) => void;
   /** Closes a chat tab: remove from openSessionIds (does not delete backend data). Activates neighbor if closing active. */
   closeChatTab: (sessionId: string) => void;
-  /** Activates a chat tab: sets selectedSessionId + moves id to front of openSessionIds. */
+  /**
+   * Activates a chat tab: sets selectedSessionId only. The tab keeps its slot
+   * in openSessionIds, so clicking a chip never shuffles the strip.
+   */
   activateChatTab: (sessionId: string) => void;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
@@ -171,16 +181,20 @@ export const useUiStore = create<UiState>((set) => ({
   selectSession: (sessionId) =>
     set((s) => {
       if (sessionId === null) return { selectedSessionId: null, activeArea: "chat" };
+      // Already-open session: activate in place, no reorder. Otherwise open a
+      // new tab at the tail (see openChatTab for the strip ordering contract).
       const openSessionIds = s.openSessionIds.includes(sessionId)
-        ? [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)]
-        : [sessionId, ...s.openSessionIds];
+        ? s.openSessionIds
+        : [...s.openSessionIds, sessionId];
       return { selectedSessionId: sessionId, activeArea: "chat", openSessionIds };
     }),
   openChatTab: (sessionId) =>
     set((s) => {
+      // Already-open session: activate in place, no reorder. Otherwise open a
+      // new tab at the tail.
       const openSessionIds = s.openSessionIds.includes(sessionId)
-        ? [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)]
-        : [sessionId, ...s.openSessionIds];
+        ? s.openSessionIds
+        : [...s.openSessionIds, sessionId];
       return { openSessionIds, selectedSessionId: sessionId };
     }),
   closeChatTab: (sessionId) =>
@@ -195,8 +209,8 @@ export const useUiStore = create<UiState>((set) => ({
   activateChatTab: (sessionId) =>
     set((s) => {
       if (!s.openSessionIds.includes(sessionId)) return s;
-      const openSessionIds = [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)];
-      return { selectedSessionId: sessionId, openSessionIds };
+      // Activation never reorders: the chip keeps the slot it was opened in.
+      return { selectedSessionId: sessionId };
     }),
   openFile: (path) =>
     set((s) => ({
