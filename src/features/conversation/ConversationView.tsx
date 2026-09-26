@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "../../lib/ipc/client";
@@ -11,6 +11,7 @@ import { GroupConversationView } from "./group/GroupConversationView";
 import { BackgroundConversationView } from "./background/BackgroundConversationView";
 import { ScheduledConversationView } from "./scheduled/ScheduledConversationView";
 import { isRoleReady } from "../../lib/conversation/roleReady";
+import { WorkspaceListDialog } from "../shell/WorkspaceListDialog";
 
 /**
  * Top-level conversation surface. Fetches the current conversation and
@@ -20,7 +21,9 @@ export function ConversationView(): ReactNode {
   const { t } = useTranslation();
   const sessionId = useUiStore((s) => s.selectedSessionId);
   const setView = useUiStore((s) => s.setView);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [wsListOpen, setWsListOpen] = useState(false);
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],
@@ -34,6 +37,18 @@ export function ConversationView(): ReactNode {
     enabled: sessionId !== null,
     staleTime: 10_000,
   });
+
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => ipc.listWorkspaces(),
+    staleTime: 10_000,
+  });
+  const workspaceName = useMemo(() => {
+    if (!activeWorkspaceId) return null;
+    const ws = workspacesQuery.data?.find((w) => w.id === activeWorkspaceId);
+    if (!ws) return null;
+    return ws.rootPath.split(/[/\\]/).pop() ?? null;
+  }, [activeWorkspaceId, workspacesQuery.data]);
 
   // No Role Agent configured → conversation panel is unavailable.
   const roleAgents = (rolesQuery.data ?? []).filter(isRoleReady);
@@ -68,6 +83,8 @@ export function ConversationView(): ReactNode {
       <ConversationHeader
         conversation={convQuery.data ?? null}
         onAgentSidebarOpen={() => setSidebarOpen(true)}
+        workspaceName={workspaceName}
+        onOpenWorkspaceList={() => setWsListOpen(true)}
       />
       <div className="relative min-h-0 flex-1">
         {renderKindView(kind)}
@@ -80,6 +97,7 @@ export function ConversationView(): ReactNode {
           />
         )}
       </div>
+      <WorkspaceListDialog open={wsListOpen} onClose={() => setWsListOpen(false)} />
     </div>
   );
 }

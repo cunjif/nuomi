@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ConversationDto } from "../../lib/ipc/client";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { RoleAvatar } from "./composer/RoleAvatar";
+import { WorkspaceSubscript } from "./WorkspaceSubscript";
 
 export interface ConversationHeaderProps {
   conversation: ConversationDto | null;
@@ -10,6 +11,10 @@ export interface ConversationHeaderProps {
   statusSlot?: ReactNode;
   /** Called when the user clicks the Agent sidebar entry button. */
   onAgentSidebarOpen?: () => void;
+  /** Active workspace name for the subscript; null/empty omits the subscript. */
+  workspaceName?: string | null;
+  /** Called when the user clicks the workspace subscript. */
+  onOpenWorkspaceList?: () => void;
 }
 
 /** Kind icon + label mapping. */
@@ -32,7 +37,7 @@ function kindIcon(kind: string): { icon: string; label: string } {
  * Unified header for all conversation kinds. Shows the kind icon, title,
  * agent/team badge, and an optional type-specific status slot.
  */
-export function ConversationHeader({ conversation, statusSlot, onAgentSidebarOpen }: ConversationHeaderProps): ReactNode {
+export function ConversationHeader({ conversation, statusSlot, onAgentSidebarOpen, workspaceName, onOpenWorkspaceList }: ConversationHeaderProps): ReactNode {
   const { t } = useTranslation();
 
   if (!conversation) {
@@ -48,7 +53,10 @@ export function ConversationHeader({ conversation, statusSlot, onAgentSidebarOpe
   return (
     <header className="flex shrink-0 items-center gap-2 border-b border-ink-muted/30 px-3 py-2">
       <span aria-hidden="true" title={label}>{icon}</span>
-      <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{conversation.title}</h1>
+      {workspaceName !== undefined && onOpenWorkspaceList && (
+        <WorkspaceSubscript workspaceName={workspaceName} onOpenWorkspaceList={onOpenWorkspaceList} />
+      )}
+      <span className="flex-1" />
       {conversation.teamId && (
         <span className="rounded bg-ink-muted/20 px-1.5 py-0.5 text-xs text-ink-muted">
           {t("conversation.teamBadge")}
