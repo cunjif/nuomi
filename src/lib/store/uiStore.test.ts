@@ -63,28 +63,27 @@ describe("uiStore theme state", () => {
 
 describe("uiStore activeArea navigation state (需求 5)", () => {
   it("defaults to the chat area", () => {
-    useUiStore.setState({ activeArea: "chat", workbenchSubTab: "workspaceList" });
+    useUiStore.setState({ activeArea: "chat" });
     expect(useUiStore.getState().activeArea).toBe("chat");
   });
 
   it("setActiveArea flips between chat and workbench", () => {
-    useUiStore.setState({ activeArea: "chat", workbenchSubTab: "workspaceList" });
+    useUiStore.setState({ activeArea: "chat" });
     useUiStore.getState().setActiveArea("workbench");
     expect(useUiStore.getState().activeArea).toBe("workbench");
     useUiStore.getState().setActiveArea("chat");
     expect(useUiStore.getState().activeArea).toBe("chat");
   });
 
-  it("openFile switches to workbench area with editor sub-tab", () => {
-    useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", workbenchSubTab: "workspaceList" });
+  it("openFile switches to workbench area", () => {
+    useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat" });
     useUiStore.getState().openFile("src/main.rs");
     expect(useUiStore.getState().activeArea).toBe("workbench");
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
     expect(useUiStore.getState().activeFile).toBe("src/main.rs");
   });
 
   it("selecting a session returns to the chat area", () => {
-    useUiStore.setState({ activeArea: "workbench", workbenchSubTab: "editor", selectedSessionId: null });
+    useUiStore.setState({ activeArea: "workbench", selectedSessionId: null });
     useUiStore.getState().selectSession("s1");
     expect(useUiStore.getState().activeArea).toBe("chat");
     expect(useUiStore.getState().selectedSessionId).toBe("s1");
@@ -95,18 +94,10 @@ describe("uiStore activeArea navigation state (需求 5)", () => {
     // renderView(view)`, so switching only `view` while a file was open left
     // the workbench on screen — e.g. the editor toolbar's Extensions Center
     // button appeared to do nothing.
-    useUiStore.setState({ view: "chat", activeArea: "workbench", workbenchSubTab: "editor" });
+    useUiStore.setState({ view: "chat", activeArea: "workbench" });
     useUiStore.getState().setView("plugins");
     expect(useUiStore.getState().view).toBe("plugins");
     expect(useUiStore.getState().activeArea).toBe("chat");
-  });
-
-  it("setWorkbenchSubTab switches the workbench sub-tab", () => {
-    useUiStore.setState({ activeArea: "workbench", workbenchSubTab: "workspaceList" });
-    useUiStore.getState().setWorkbenchSubTab("editor");
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
-    useUiStore.getState().setWorkbenchSubTab("workspaceList");
-    expect(useUiStore.getState().workbenchSubTab).toBe("workspaceList");
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * uiStore workbench-specific tests: activeArea semantics, openFile triggers
- * workbench+editor, setView releases workbench, and setWorkbenchSubTab
- * round-trips (spec 5.3 — workbench navigation state).
+ * workbench, setView releases workbench (spec 5.3 — workbench navigation
+ * state).
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubLocalStorage } from "../../test/stubStorage";
@@ -12,7 +12,6 @@ beforeEach(() => {
   useUiStore.setState({
     view: "chat",
     activeArea: "chat",
-    workbenchSubTab: "workspaceList",
     theme: "chalkboard-dark",
     selectedSessionId: null,
     openFiles: [],
@@ -36,11 +35,10 @@ describe("uiStore workbench — activeArea semantics", () => {
   });
 });
 
-describe("uiStore workbench — openFile triggers workbench+editor", () => {
-  it("openFile sets activeArea=workbench and workbenchSubTab=editor", () => {
+describe("uiStore workbench — openFile triggers workbench", () => {
+  it("openFile sets activeArea=workbench", () => {
     useUiStore.getState().openFile("src/main.rs");
     expect(useUiStore.getState().activeArea).toBe("workbench");
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
     expect(useUiStore.getState().activeFile).toBe("src/main.rs");
   });
 
@@ -60,31 +58,16 @@ describe("uiStore workbench — openFile triggers workbench+editor", () => {
 
 describe("uiStore workbench — setView releases workbench", () => {
   it("setView flips activeArea back to chat so the view renders", () => {
-    useUiStore.setState({ activeArea: "workbench", workbenchSubTab: "editor" });
+    useUiStore.setState({ activeArea: "workbench" });
     useUiStore.getState().setView("plugins");
     expect(useUiStore.getState().view).toBe("plugins");
     expect(useUiStore.getState().activeArea).toBe("chat");
   });
 });
 
-describe("uiStore workbench — setWorkbenchSubTab", () => {
-  it("switches between workspaceList and editor", () => {
-    useUiStore.getState().setWorkbenchSubTab("editor");
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
-    useUiStore.getState().setWorkbenchSubTab("workspaceList");
-    expect(useUiStore.getState().workbenchSubTab).toBe("workspaceList");
-  });
-
-  it("does not affect activeArea", () => {
-    useUiStore.setState({ activeArea: "workbench" });
-    useUiStore.getState().setWorkbenchSubTab("editor");
-    expect(useUiStore.getState().activeArea).toBe("workbench");
-  });
-});
-
 describe("uiStore workbench — selectSession returns to chat", () => {
   it("selectSession sets activeArea=chat and stores the session id", () => {
-    useUiStore.setState({ activeArea: "workbench", workbenchSubTab: "editor", selectedSessionId: null });
+    useUiStore.setState({ activeArea: "workbench", selectedSessionId: null });
     useUiStore.getState().selectSession("sess-42");
     expect(useUiStore.getState().activeArea).toBe("chat");
     expect(useUiStore.getState().selectedSessionId).toBe("sess-42");
@@ -97,7 +80,6 @@ describe("uiStore workbench — switchWorkspace tab save/restore", () => {
       activeWorkspaceId: "ws-a",
       openFiles: ["src/a.ts", "src/b.ts"],
       activeFile: "src/b.ts",
-      workbenchSubTab: "editor",
       workspaceTabs: {
         "ws-b": { openFiles: ["lib/c.ts"], activeFile: "lib/c.ts" },
       },
@@ -114,16 +96,13 @@ describe("uiStore workbench — switchWorkspace tab save/restore", () => {
     expect(useUiStore.getState().openFiles).toEqual(["lib/c.ts"]);
     expect(useUiStore.getState().activeFile).toBe("lib/c.ts");
     expect(useUiStore.getState().activeWorkspaceId).toBe("ws-b");
-    // Editor sub-tab because tabs were restored.
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
   });
 
-  it("always switches to editor sub-tab even without saved tabs", () => {
+  it("starts fresh when the target has no saved tabs", () => {
     useUiStore.setState({
       activeWorkspaceId: "ws-a",
       openFiles: ["src/a.ts"],
       activeFile: "src/a.ts",
-      workbenchSubTab: "editor",
       workspaceTabs: {},
     });
 
@@ -131,7 +110,6 @@ describe("uiStore workbench — switchWorkspace tab save/restore", () => {
 
     expect(useUiStore.getState().openFiles).toEqual([]);
     expect(useUiStore.getState().activeFile).toBeNull();
-    expect(useUiStore.getState().workbenchSubTab).toBe("editor");
   });
 
   it("does not save tabs when no workspace was active", () => {
