@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore, type ActiveArea } from "../../lib/store/uiStore";
 import { Icon } from "../../components/ui/Icon/Icon";
@@ -81,11 +79,6 @@ export function AreaNav(): ReactNode {
   const { t } = useTranslation();
   const activeArea = useUiStore((s) => s.activeArea);
   const setActiveArea = useUiStore((s) => s.setActiveArea);
-  // Connection probe doubles as the sessions poll seed (shared query key).
-  const probe = useQuery({ queryKey: ["sessions"], queryFn: ipc.listSessions, staleTime: 10_000 });
-  const status = probe.isPending ? "checking" : probe.isError ? "disconnected" : "connected";
-  const color =
-    status === "connected" ? "bg-state-ok" : status === "disconnected" ? "bg-state-danger" : "bg-state-warn";
   const tauriReady = hasTauriRuntime();
 
   return (
@@ -132,13 +125,6 @@ export function AreaNav(): ReactNode {
         ) : (
           <span className="ml-auto h-full w-8" aria-hidden="true" />
         )}
-      </div>
-      {/* Row 2: IPC connection health, right-aligned (用户 ASCII). */}
-      <div className="flex justify-end px-3 pb-1">
-        <span className="flex items-center gap-2 text-xs text-ink-muted" role="status">
-          <span aria-hidden="true" className={`inline-block size-2 rounded-full ${color}`} />
-          {t(`shell.${status}`)}
-        </span>
       </div>
     </header>
   );

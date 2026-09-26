@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "../../components/ui/Spinner";
 import { ipc } from "../../lib/ipc/client";
+import { invoke } from "@tauri-apps/api/core";
 import { ErrorBoundary } from "../../components/ui/ErrorBoundary";
 import { useUiStore, type View, type LayoutMode } from "../../lib/store/uiStore";
 import { ApprovalsView } from "../approvals/ApprovalsView";
@@ -15,13 +16,13 @@ import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
 import { AreaNav } from "./AreaNav";
+import { ChatTabBar } from "./ChatTabBar";
 import { BackgroundTray } from "./BackgroundTray";
 import { WorkbenchArea } from "./WorkbenchArea";
 import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge";
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
-import { WorkspaceBar } from "./WorkspaceBar";
 import { SplitView } from "./SplitView";
 import { OverviewGrid } from "./OverviewGrid";
 import { EmptyStateGuide } from "./EmptyStateGuide";
@@ -91,8 +92,23 @@ function BootScreen({ error }: { error?: string }): ReactNode {
 function useGlobalNavShortcuts(): void {
   const handler = useRef<(e: KeyboardEvent) => void>(() => {});
   handler.current = (e: KeyboardEvent): void => {
-    // Ctrl+Tab / Ctrl+Shift+Tab: cycle focused workspace (task 8.1).
+    // Ctrl+Tab / Ctrl+Shift+Tab: cycle chat tabs (multi_chat_tabs).
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === "Tab") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const { openSessionIds, activateChatTab } = useUiStore.getState();
+      if (openSessionIds.length < 2) return;
+      const selected = useUiStore.getState().selectedSessionId;
+      const idx = selected ? openSessionIds.indexOf(selected) : -1;
+      const next = e.shiftKey
+        ? (idx <= 0 ? openSessionIds.length - 1 : idx - 1)
+        : (idx < 0 || idx >= openSessionIds.length - 1 ? 0 : idx + 1);
+      const target = openSessionIds[next];
+      if (target) activateChatTab(target);
+      return;
+    }
+    // Ctrl+Alt+Tab / Ctrl+Alt+Shift+Tab: cycle focused workspace (migrated from Ctrl+Tab).
+    if (e.ctrlKey && e.altKey && !e.metaKey && e.code === "Tab") {
       e.preventDefault();
       e.stopImmediatePropagation();
       const { openWorkspaceIds, focusWorkspace } = useUiStore.getState();
@@ -128,9 +144,7 @@ function useGlobalNavShortcuts(): void {
       } else if (e.code === "KeyE") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        const { setActiveArea, setWorkbenchSubTab } = useUiStore.getState();
-        setActiveArea("workbench");
-        setWorkbenchSubTab("editor");
+        useUiStore.getState().setActiveArea("workbench");
       }
     }
   };
@@ -193,6 +207,31 @@ export function Shell(): ReactNode {
     void hydratePluginEditorExtensions();
   }, []);
 
+  // Drag-drop workspace registration (migrated from WorkspaceBar): accept
+  // directory drops to register + open a workspace. The backend WorkspaceGuard
+  // validates blacklists — rejected paths surface as IPC errors (silently ignored).
+  const dropRef = useRef(false);
+  useEffect(() => {
+    if (dropRef.current) return;
+    if (!hasTauriRuntime()) return;
+    dropRef.current = true;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type !== "drop") return;
+          for (const path of event.payload.paths) {
+            void invoke<{ id: string }>("add_workspace", { path })
+              .then((entry) => void useUiStore.getState().openWorkspace(entry.id))
+              .catch(() => { /* blacklisted or invalid — silently ignore */ });
+          }
+        }),
+      )
+      .then((fn) => { unlisten = fn; })
+      .catch(() => { /* Tauri runtime unavailable — skip drag-drop */ });
+    return () => { unlisten?.(); };
+  }, []);
+
   const workspaceQuery = useQuery({
     queryKey: ["workspace"],
     queryFn: async () => {
@@ -240,9 +279,9 @@ export function Shell(): ReactNode {
       <div className="flex min-h-0 flex-1">
         <LeftRail />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {/* WorkspaceBar is always rendered at the top of the main area,
-          regardless of layoutMode (task 6.7.2). */}
-          <WorkspaceBar />
+          <div className="flex shrink-0 items-center border-b border-ink-muted/30 px-3 py-1">
+            <ChatTabBar />
+          </div>
           <div className="min-h-0 flex-1 overflow-hidden">
             <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
               {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode })}
