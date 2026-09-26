@@ -165,10 +165,17 @@ export function useSessionStream(sessionId: string | null): {
   );
   batchDelegateRef.current = handleBatch;
   useEffect(() => {
-    // Kernel keeps its live delta ordinal per session; switching sessions
-    // means the counter restarts at 1 — forget our tracking.
+    // Every live buffer below belongs to ONE session: the kernel keeps its
+    // delta ordinal per session (switching sessions means the counter
+    // restarts at 1 — forget our tracking), and the buffers themselves are
+    // scoped to the session that produced them. Carrying them over would
+    // splice the previously-viewed conversation's messages onto the newly
+    // selected one — the panel would look like it re-opened the old session.
     flow.resetDeltaTracking();
     lastMessageSeqRef.current = 0;
+    liveActivityRef.current = false;
+    setStreamText("");
+    setLiveEntries([]);
     setOptimisticText(null);
   }, [flow, sessionId]);
 

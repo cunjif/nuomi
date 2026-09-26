@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
@@ -24,6 +24,14 @@ export function ChatView(): ReactNode {
   const { cycleTheme } = useTheme();
   const stream = useSessionStream(sessionId);
   const [finalText, setFinalText] = useState<string | null>(null);
+
+  // `finalText` is the non-streaming fallback bubble for the turn that just
+  // completed. It belongs to one session: ChatView stays mounted across
+  // session switches, so without this reset the previous conversation's
+  // answer would be appended to the newly selected transcript.
+  useEffect(() => {
+    setFinalText(null);
+  }, [sessionId]);
 
   const commandContext = useMemo<CommandContext>(
     () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),

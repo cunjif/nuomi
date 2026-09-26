@@ -197,6 +197,70 @@ describe("ChatView — live token stream (AC10)", () => {
     expect(screen.getByText("回复二")).toBeInTheDocument();
   });
 
+  it("switches the whole transcript when the selected session changes", async () => {
+    seedConversation({ id: "s9", title: "first", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s10", title: "second", createdAt: 1, updatedAt: 1 });
+    tdState.events.set("s9", [
+      { seq: 1, kind: "message", payload: { role: "user", content: "第一个会话的问题" }, createdAt: 1 },
+      { seq: 2, kind: "message", payload: { role: "assistant", content: "第一个会话的回答" }, createdAt: 2 },
+    ]);
+    tdState.events.set("s10", [
+      { seq: 1, kind: "message", payload: { role: "user", content: "第二个会话的问题" }, createdAt: 1 },
+    ]);
+    useUiStore.getState().selectSession("s9");
+
+    renderWithProviders(<ChatView />);
+    expect(await screen.findByText("第一个会话的问题")).toBeInTheDocument();
+    expect(screen.getByText("第一个会话的回答")).toBeInTheDocument();
+
+    // Clicking a history row in the left rail only changes the selection.
+    await act(async () => {
+      useUiStore.getState().selectSession("s10");
+    });
+
+    await waitFor(() => expect(screen.getByText("第二个会话的问题")).toBeInTheDocument());
+    expect(screen.queryByText("第一个会话的问题")).not.toBeInTheDocument();
+    expect(screen.queryByText("第一个会话的回答")).not.toBeInTheDocument();
+  });
+
+  it("drops the previous session's live buffer when the selection changes", async () => {
+    seedConversation({ id: "s11", title: "live-a", createdAt: 1, updatedAt: 1 });
+    seedConversation({ id: "s12", title: "live-b", createdAt: 1, updatedAt: 1 });
+    tdState.events.set("s12", [
+      { seq: 1, kind: "message", payload: { role: "user", content: "另一个会话的问题" }, createdAt: 1 },
+    ]);
+    useUiStore.getState().selectSession("s11");
+
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+
+    // Live traffic for the session we are about to leave. seq 7 is deliberately
+    // outside the next session's history seqs so the history-overlap filter
+    // cannot mask a leak.
+    act(() => {
+      emitTestEvent(sessionChannel("s11"), {
+        type: "session.delta",
+        sessionId: "s11",
+        payload: { sessionId: "s11", text: "旧会话的流式回答" },
+      });
+      emitTestEvent(sessionChannel("s11"), {
+        type: "session.message",
+        sessionId: "s11",
+        seq: 7,
+        payload: { sessionId: "s11", role: "assistant", content: "旧会话的落库回答", seq: 7, deltaTo: 1 },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("旧会话的落库回答")).toBeInTheDocument());
+
+    await act(async () => {
+      useUiStore.getState().selectSession("s12");
+    });
+
+    await waitFor(() => expect(screen.getByText("另一个会话的问题")).toBeInTheDocument());
+    expect(screen.queryByText("旧会话的流式回答")).not.toBeInTheDocument();
+    expect(screen.queryByText("旧会话的落库回答")).not.toBeInTheDocument();
+  });
+
   it("drops a live message once history refetch covers the same seq", async () => {
     seedConversation({ id: "s8", title: "dedupe", createdAt: 1, updatedAt: 1 });
     useUiStore.getState().selectSession("s8");
