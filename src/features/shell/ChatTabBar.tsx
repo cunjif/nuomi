@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, type ReactNode } from "react";
+import { Fragment, useState, useRef, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "../../lib/ipc/client";
@@ -14,9 +14,11 @@ const TAB_VIRTUALIZE_THRESHOLD = 30;
 const ASSUMED_TAB_WIDTH = 120;
 
 /**
- * Multi-chat tab bar rendered in AreaNav row 2. Three-segment layout:
- * leading indent + horizontal-scroll tab list + fixed-right connection badge.
- * Compact: 12px icon + xs title + px-2 py-0.5 + gap-1.
+ * Multi-chat tab bar rendered in the strip row above the tab panel.
+ * Three-segment layout: horizontal-scroll tab list (bottom-aligned 40px
+ * chips, hairline-divided) + fixed-right connection badge. Neither the strip
+ * row nor the panel draws a line between them; the "+" button matches the
+ * chip height.
  */
 export function ChatTabBar(): ReactNode {
   const { t } = useTranslation();
@@ -55,33 +57,47 @@ export function ChatTabBar(): ReactNode {
 
   return (
     <div className="flex w-full items-center gap-1">
-      {/* Tab scroll region (leading indent via pl-2 above). */}
+      {/* Tab scroll region. items-end keeps the 40px chips flush against the
+          panel's top border while the "+" button shares the same height. */}
       <div
         ref={scrollRef}
         onScroll={(e) => setScrollLeft((e.target as HTMLDivElement).scrollLeft)}
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+        className="flex min-w-0 flex-1 items-end gap-1.5 overflow-x-auto"
         role="tablist"
         aria-label={t("nav.chatTabsLabel")}
       >
-        {visibleIds.map((id) => {
+        {visibleIds.map((id, i) => {
           const conv = convMap.get(id);
           return (
-            <ChatTab
-              key={id}
-              sessionId={id}
-              kind={conv?.kind ?? "chat"}
-              title={conv?.title ?? id}
-              active={selectedSessionId === id}
-              onActivate={activateChatTab}
-              onClose={closeChatTab}
-            />
+            <Fragment key={id}>
+              {/* Hairline between neighbouring tabs — never before the first
+                  one, and never around the "+" button. `bg-divider` carries the
+                  per-theme tint (see --nuomi-divider); `self-center` centres the
+                  16px rule in the 40px chip's row despite items-end. */}
+              {i > 0 && (
+                <span
+                  aria-hidden="true"
+                  data-testid="chat-tab-divider"
+                  className="h-4 w-px shrink-0 self-center bg-divider"
+                />
+              )}
+              <ChatTab
+                sessionId={id}
+                kind={conv?.kind ?? "chat"}
+                title={conv?.title ?? id}
+                active={selectedSessionId === id}
+                onActivate={activateChatTab}
+                onClose={closeChatTab}
+              />
+            </Fragment>
           );
         })}
-        {/* "+" new conversation button. */}
+        {/* "+" new conversation button — matches the 40px chip height so the
+            strip row keeps a single baseline. */}
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
-          className="flex shrink-0 items-center justify-center rounded px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink-accent"
+          className="flex h-10 w-9 shrink-0 items-center justify-center rounded-md border border-transparent text-base leading-none text-ink-muted transition-colors hover:bg-surface-overlay hover:text-ink-accent focus-visible:ring-2 focus-visible:ring-ink-accent"
           aria-label={t("conversation.new")}
           title={t("conversation.new")}
         >
@@ -89,7 +105,7 @@ export function ChatTabBar(): ReactNode {
         </button>
       </div>
       {/* Connection status fixed right (does not scroll). */}
-      <div className="flex shrink-0 items-center">
+      <div className="flex shrink-0 items-center pb-0.5">
         <ConnectionStatusBadge />
       </div>
       {dialogOpen && (

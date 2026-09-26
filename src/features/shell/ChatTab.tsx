@@ -9,7 +9,7 @@ export interface ChatTabProps {
   onClose: (sessionId: string) => void;
 }
 
-/** Kind icon mapping (mirrors ConversationHeader.kindIcon). */
+/** Kind icon mapping for chat tabs (chat / group / background / scheduled). */
 function kindIcon(kind: string): string {
   switch (kind) {
     case "chat": return "💬";
@@ -27,9 +27,9 @@ function truncateTitle(title: string, max = 20): string {
 
 /**
  * Single chat tab. Title is shown inline (max 20 chars, full title on hover
- * via title attribute). Active tab uses bg-surface + a surface-colored bottom
- * border to visually merge with the conversation header below (no separating
- * line under the active tab); inactive tabs keep the container's border-b.
+ * via title attribute). The tab is a 40px-tall rounded chip bottom-aligned in
+ * the strip row. Active tab = highlighted chip (lighter background, no
+ * border); inactive tabs stay transparent and only reveal a hover background.
  */
 export function ChatTab({ sessionId, kind, title, active, onActivate, onClose }: ChatTabProps): ReactNode {
   const displayTitle = truncateTitle(title, 20);
@@ -38,15 +38,15 @@ export function ChatTab({ sessionId, kind, title, active, onActivate, onClose }:
       type="button"
       onClick={() => onActivate(sessionId)}
       title={title}
-      className={`group flex shrink-0 items-center gap-1 px-2 py-1 text-xs transition-colors ${
+      className={`group flex h-10 shrink-0 items-center gap-2 rounded-md px-2.5 text-xs transition-colors ${
         active
-          ? "bg-surface text-ink-accent border-b-2 border-b-surface -mb-px"
-          : "text-ink-muted hover:bg-surface-overlay hover:text-ink"
+          ? "bg-surface-overlay text-ink-accent"
+          : "bg-transparent text-ink-muted hover:bg-surface-overlay hover:text-ink"
       }`}
       aria-selected={active}
       role="tab"
     >
-      <span aria-hidden="true" className="text-xs">{kindIcon(kind)}</span>
+      <span aria-hidden="true" className="text-sm leading-none">{kindIcon(kind)}</span>
       <span className="truncate">{displayTitle}</span>
       <span
         role="button"
@@ -55,7 +55,7 @@ export function ChatTab({ sessionId, kind, title, active, onActivate, onClose }:
           e.stopPropagation();
           onClose(sessionId);
         }}
-        className="ml-0.5 text-xs text-ink-muted opacity-0 transition-opacity hover:text-state-danger group-hover:opacity-100"
+        className="-mr-1 ml-0.5 flex size-5 items-center justify-center text-xs leading-none text-ink-muted opacity-0 transition-opacity hover:text-state-danger group-hover:opacity-100 focus-visible:opacity-100"
       >
         ×
       </span>

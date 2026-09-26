@@ -278,11 +278,16 @@ export function Shell(): ReactNode {
       <BackgroundTray />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 items-center border-b border-ink-muted/30 px-3 py-1">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-raised">
+          {/* Strip row: no border of its own — the panel below is borderless
+              on top, so the chips and the panel header form one surface. */}
+          <div className="flex shrink-0 items-end border-r border-ink-muted/30 px-3 pt-1.5">
             <ChatTabBar />
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
+          {/* Tab panel: raised card with a small bottom inset. No top border
+              — the tab chips and the panel's header (workspace path row) read
+              as one continuous surface, so nothing separates them. */}
+          <div className="mb-2 min-h-0 flex-1 overflow-hidden rounded-b-lg border-r border-b border-ink-muted/30 bg-surface-raised">
             <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
               {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode })}
             </ErrorBoundary>

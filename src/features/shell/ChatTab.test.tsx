@@ -25,20 +25,29 @@ describe("ChatTab", () => {
     expect(tab.textContent).not.toContain(longTitle);
   });
 
-  it("active tab uses bg-surface (merges with header below), inactive uses muted", () => {
+  it("active tab uses lighter background (no border); inactive is transparent", () => {
     const { rerender } = renderWithProviders(
       <ChatTab sessionId="s1" kind="chat" title="A" active={false} onActivate={() => {}} onClose={() => {}} />,
     );
     const inactive = screen.getByRole("tab");
-    expect(inactive.className.split(" ")).not.toContain("bg-surface");
+    expect(inactive.className.split(" ")).toContain("bg-transparent");
     expect(inactive.className.split(" ")).toContain("text-ink-muted");
+    expect(inactive.className.split(" ")).not.toContain("bg-surface-overlay");
 
     rerender(
       <ChatTab sessionId="s1" kind="chat" title="A" active={true} onActivate={() => {}} onClose={() => {}} />,
     );
     const active = screen.getByRole("tab");
-    expect(active.className.split(" ")).toContain("bg-surface");
+    expect(active.className.split(" ")).toContain("bg-surface-overlay");
     expect(active.className.split(" ")).toContain("text-ink-accent");
+    expect(active.className.split(" ")).not.toContain("border-ink-muted/40");
+  });
+
+  it("chip is 40px tall so the tab strip stays a uniform row", () => {
+    renderWithProviders(
+      <ChatTab sessionId="s1" kind="chat" title="A" active={false} onActivate={() => {}} onClose={() => {}} />,
+    );
+    expect(screen.getByRole("tab").className.split(" ")).toContain("h-10");
   });
 
   it("close button has opacity-0 by default (hover-revealed)", () => {
