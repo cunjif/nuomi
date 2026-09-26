@@ -10,18 +10,10 @@ export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler
 
 /**
  * Which surface owns the main content area: the conversation view (whatever
- * `view` selects) or the workbench (workspace list + file editor). Mutually
- * exclusive — opening a workspace file flips to "workbench" with sub-tab
- * "editor", Alt+H toggles back to "chat".
+ * `view` selects) or the workbench (file editor). Mutually exclusive —
+ * opening a workspace file flips to "workbench", Alt+H toggles back to "chat".
  */
 export type ActiveArea = "chat" | "workbench";
-
-/**
- * Second-level tab within the workbench area: the workspace list panel or
- * the single-workspace file editor. Persisted alongside `activeArea` so
- * Alt+H round-trips restore the last workbench sub-tab.
- */
-export type WorkbenchSubTab = "workspaceList" | "editor";
 
 /**
  * The four hand-drawn themes (review §9.2). `paper-light`/`grid-notebook` are
@@ -84,9 +76,10 @@ export type LayoutMode = "single" | "split" | "overview";
 interface UiState {
   view: View;
   activeArea: ActiveArea;
-  workbenchSubTab: WorkbenchSubTab;
   theme: Theme;
   selectedSessionId: string | null;
+  /** Open chat session ids ordered by most-recently-activated (ephemeral UI state, not persisted). */
+  openSessionIds: string[];
   openFiles: string[];
   activeFile: string | null;
   runDrawerTaskId: string | null;
@@ -108,9 +101,14 @@ interface UiState {
   splitWorkspaceIds: [string, string] | null;
   setView: (view: View) => void;
   setActiveArea: (area: ActiveArea) => void;
-  setWorkbenchSubTab: (sub: WorkbenchSubTab) => void;
   setTheme: (theme: Theme) => void;
   selectSession: (sessionId: string | null) => void;
+  /** Opens a chat tab: if id exists, activate (move to front); else append + activate. */
+  openChatTab: (sessionId: string) => void;
+  /** Closes a chat tab: remove from openSessionIds (does not delete backend data). Activates neighbor if closing active. */
+  closeChatTab: (sessionId: string) => void;
+  /** Activates a chat tab: sets selectedSessionId + moves id to front of openSessionIds. */
+  activateChatTab: (sessionId: string) => void;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
@@ -120,9 +118,8 @@ interface UiState {
   setActiveWorkspaceId: (id: string | null) => void;
   /**
    * Saves the current workspace's editor tabs, clears the tab bar, then
-   * restores the target workspace's previously saved tabs. If the target
-   * has saved tabs the workbench switches to the editor sub-tab; otherwise
-   * it stays on (or falls back to) the workspace list.
+   * restores the target workspace's previously saved tabs (or starts fresh
+   * if none were saved).
    */
   switchWorkspace: (workspaceId: string) => void;
   /** Opens a workspace (adds to open set + focuses). Calls IPC openWorkspace. */
@@ -146,9 +143,9 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   view: "chat",
   activeArea: "chat",
-  workbenchSubTab: "workspaceList",
   theme: resolveInitialTheme(),
   selectedSessionId: null,
+  openSessionIds: [],
   openFiles: [],
   activeFile: null,
   runDrawerTaskId: null,
@@ -169,18 +166,45 @@ export const useUiStore = create<UiState>((set) => ({
    */
   setView: (view) => set({ view, activeArea: "chat" }),
   setActiveArea: (activeArea) => set({ activeArea }),
-  setWorkbenchSubTab: (workbenchSubTab) => set({ workbenchSubTab }),
   // Pure state flip only — DOM class + persistence side effects live in useTheme.
   setTheme: (theme) => set({ theme }),
-  selectSession: (sessionId) => set({ selectedSessionId: sessionId, activeArea: "chat" }),
+  selectSession: (sessionId) =>
+    set((s) => {
+      if (sessionId === null) return { selectedSessionId: null, activeArea: "chat" };
+      const openSessionIds = s.openSessionIds.includes(sessionId)
+        ? [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)]
+        : [sessionId, ...s.openSessionIds];
+      return { selectedSessionId: sessionId, activeArea: "chat", openSessionIds };
+    }),
+  openChatTab: (sessionId) =>
+    set((s) => {
+      const openSessionIds = s.openSessionIds.includes(sessionId)
+        ? [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)]
+        : [sessionId, ...s.openSessionIds];
+      return { openSessionIds, selectedSessionId: sessionId };
+    }),
+  closeChatTab: (sessionId) =>
+    set((s) => {
+      const openSessionIds = s.openSessionIds.filter((id) => id !== sessionId);
+      if (s.selectedSessionId !== sessionId) return { openSessionIds };
+      // Closing active tab: prefer right neighbor, else left, else null.
+      const closedIdx = s.openSessionIds.indexOf(sessionId);
+      const nextActive = openSessionIds[closedIdx] ?? openSessionIds[closedIdx - 1] ?? null;
+      return { openSessionIds, selectedSessionId: nextActive };
+    }),
+  activateChatTab: (sessionId) =>
+    set((s) => {
+      if (!s.openSessionIds.includes(sessionId)) return s;
+      const openSessionIds = [sessionId, ...s.openSessionIds.filter((id) => id !== sessionId)];
+      return { selectedSessionId: sessionId, openSessionIds };
+    }),
   openFile: (path) =>
     set((s) => ({
       openFiles: s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path],
       activeFile: path,
-      // Opening a workspace file reveals the workbench area with the editor
-      // sub-tab (nav rework: the editor is a sub-surface of the workbench).
+      // Opening a workspace file reveals the workbench area (nav rework:
+      // the editor is the workbench surface).
       activeArea: "workbench",
-      workbenchSubTab: "editor",
     })),
   closeFile: (path) =>
     set((s) => {
@@ -225,9 +249,6 @@ export const useUiStore = create<UiState>((set) => ({
         activeWorkspaceId: workspaceId,
         openFiles,
         activeFile,
-        // Always switch to the editor sub-tab so the user sees the file tree
-        // after clicking a workspace item, regardless of saved tabs.
-        workbenchSubTab: "editor",
         workspaceTabs,
       };
     }),
