@@ -226,7 +226,6 @@
     "filterGroup": "群聊",
     "filterBackground": "后台",
     "filterScheduled": "定时",
-    "teamBadge": "团队",
     "noProviderTitle": "尚未配置 Role Agent",
     "noProviderConfirm": "未检测到已配置的 Role Agent，该会话暂时无法调用模型。请先前往「设置」将 Role 绑定 Provider 或 CLI Agent。",
     "kindPlaceholder": "{{kind}} 会话 — 即将推出",

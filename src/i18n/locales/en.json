@@ -226,7 +226,6 @@
     "filterGroup": "Group",
     "filterBackground": "Background",
     "filterScheduled": "Scheduled",
-    "teamBadge": "Team",
     "noProviderTitle": "No Role Agent configured",
     "noProviderConfirm": "No Role Agent is configured yet, so this conversation cannot call a model. Please go to Settings and bind a Role to a Provider or CLI Agent first.",
     "kindPlaceholder": "{{kind}} conversations — coming soon",
