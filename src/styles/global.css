@@ -35,6 +35,10 @@
   /* Minimal rail (screenshot ref): near-invisible track, gray rounded thumb. */
   --nuomi-scrollbar: #cfc7b6;
   --nuomi-scrollbar-hover: #a89f8d;
+  /* Hairline separators (tab strip, list rows). Muted ink at low alpha: on the
+     kraft raised surface (#fffdf5) this lands near #d3cfc6 — visible as a
+     hairline, never competing with the tab title. */
+  --nuomi-divider: rgba(107, 99, 88, 0.28);
   /* Kraft-paper grain (turbulence noise, ~5% opacity) tiled over the light
      surface — keeps text readable while giving the "paper" feel (review §4.2.1). */
   --nuomi-paper-texture:
@@ -66,6 +70,9 @@
   --nuomi-diff-add: #7dd3fc;
   --nuomi-scrollbar: #3a3d42;
   --nuomi-scrollbar-hover: #565b63;
+  /* Hairline separators — chalk dust on the blackboard: muted chalk (#9aa3ad)
+     at low alpha over #0d0d0d lands near #33363a, a faint grey rule. */
+  --nuomi-divider: rgba(154, 163, 173, 0.26);
   /* Chalk-dust grain (faint white noise) over the blackboard (review §4.2.3). */
   --nuomi-chalk-texture:
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='c'><feTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/></filter><rect width='100%' height='100%' filter='url(%23c)'/></svg>");
@@ -101,6 +108,8 @@
   --nuomi-diff-add: #0369a1;
   --nuomi-scrollbar: #c3c7cf;
   --nuomi-scrollbar-hover: #9aa1ad;
+  /* Hairline separators — pencil-grey on white, same recipe as paper-light. */
+  --nuomi-divider: rgba(91, 101, 114, 0.28);
   /* 24px blue ruling (review §4.2.2). */
   --nuomi-grid-texture:
     linear-gradient(rgba(49, 80, 203, 0.08) 1px, transparent 1px),
@@ -133,6 +142,9 @@
   --nuomi-diff-add: #66d9ff;
   --nuomi-scrollbar: #565b63;
   --nuomi-scrollbar-hover: #9aa1ad;
+  /* Hairline separators — this theme trades subtlety for visibility, so the
+     rule is roughly twice as opaque as the other three (near #666 on black). */
+  --nuomi-divider: rgba(204, 204, 204, 0.5);
 }
 [data-theme="high-contrast"] body {
   background-image: none;

@@ -12,6 +12,11 @@ module.exports = {
           overlay: "var(--nuomi-surface-overlay, #1b1d21)",
           scrim: "var(--nuomi-scrim, rgba(0, 0, 0, 0.55))",
         },
+        // Hairline separators. The alpha is baked into the per-theme CSS var on
+        // purpose: this project maps colors to `var(...)` strings, and Tailwind
+        // v3 cannot inject an alpha into a `var()` color — `bg-ink-muted/30`
+        // silently emits nothing. So the tint lives in the token, not the class.
+        divider: "var(--nuomi-divider, rgba(154, 163, 173, 0.26))",
         ink: {
           DEFAULT: "var(--nuomi-ink, #e6e6e6)",
           muted: "var(--nuomi-ink-muted, #9aa3ad)",
