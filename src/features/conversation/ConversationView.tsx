@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "../../lib/ipc/client";
 import { useUiStore } from "../../lib/store/uiStore";
-import { ConversationHeader } from "./ConversationHeader";
+import { WorkspacePathBar } from "./WorkspacePathBar";
 import { AgentSidebar } from "./sidebar/AgentSidebar";
 import { ChatView } from "../chat/ChatView";
 import { GroupConversationView } from "./group/GroupConversationView";
@@ -43,11 +43,10 @@ export function ConversationView(): ReactNode {
     queryFn: () => ipc.listWorkspaces(),
     staleTime: 10_000,
   });
-  const workspaceName = useMemo(() => {
+  const workspaceRootPath = useMemo(() => {
     if (!activeWorkspaceId) return null;
     const ws = workspacesQuery.data?.find((w) => w.id === activeWorkspaceId);
-    if (!ws) return null;
-    return ws.rootPath.split(/[/\\]/).pop() ?? null;
+    return ws?.rootPath ?? null;
   }, [activeWorkspaceId, workspacesQuery.data]);
 
   // No Role Agent configured → conversation panel is unavailable.
@@ -80,11 +79,11 @@ export function ConversationView(): ReactNode {
 
   return (
     <div className="flex h-full flex-col">
-      <ConversationHeader
+      <WorkspacePathBar
+        rootPath={workspaceRootPath}
         conversation={convQuery.data ?? null}
-        onAgentSidebarOpen={() => setSidebarOpen(true)}
-        workspaceName={workspaceName}
         onOpenWorkspaceList={() => setWsListOpen(true)}
+        onAgentSidebarOpen={() => setSidebarOpen(true)}
       />
       <div className="relative min-h-0 flex-1">
         {renderKindView(kind)}
