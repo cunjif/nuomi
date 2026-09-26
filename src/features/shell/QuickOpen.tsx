@@ -71,9 +71,7 @@ function registerBuiltinCommands(): void {
     id: "shell.gotoEditor",
     titleKey: "palette.cmd.gotoEditor",
     run: () => {
-      const store = ui();
-      store.setActiveArea("workbench");
-      store.setWorkbenchSubTab("editor");
+      ui().setActiveArea("workbench");
     },
   });
   registerPaletteCommand({

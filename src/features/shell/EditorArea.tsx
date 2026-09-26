@@ -10,7 +10,6 @@ import {
   useEditorExtVersion,
 } from "../../lib/editor-ext";
 import { ExtensionsPanel } from "../../lib/editor-ext/ExtensionsPanel";
-import { Icon } from "../../components/ui/Icon/Icon";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { MonacoTab } from "./MonacoTab";
@@ -40,14 +39,6 @@ export function EditorToolbar(): ReactNode {
   return (
     <div className="shrink-0 border-b border-ink-muted/30 bg-surface">
       <div className="flex items-center gap-1 p-1.5">
-        <button
-          type="button"
-          aria-label={t("workspace.backToList")}
-          onClick={() => useUiStore.getState().setWorkbenchSubTab("workspaceList")}
-          className="rounded p-1 text-ink-muted hover:bg-surface-overlay hover:text-ink-accent focus-visible:ring-2 focus-visible:ring-ink-accent"
-        >
-          <Icon name="home" size={14} />
-        </button>
         <button
           type="button"
           onClick={() => setSwitchOpen(true)}

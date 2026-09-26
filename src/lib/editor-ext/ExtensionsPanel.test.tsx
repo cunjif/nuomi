@@ -21,7 +21,7 @@ const TRIGGER_NAME = "🧩 Extensions";
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   resetEditorExtensionsForTest();
-  useUiStore.setState({ view: "chat", activeArea: "workbench", workbenchSubTab: "editor" });
+  useUiStore.setState({ view: "chat", activeArea: "workbench" });
 });
 
 describe("ExtensionsPanel", () => {

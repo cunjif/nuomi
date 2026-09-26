@@ -31,7 +31,7 @@ beforeEach(() => {
   // leak a registration into the next one.
   registerActiveEditor(null, () => {});
   usePaletteStore.setState({ mode: null });
-  useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", workbenchSubTab: "workspaceList", theme: "chalkboard-dark", dirtyPaths: {}, activeWorkspaceId: null, workspaceTabs: {} });
+  useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", theme: "chalkboard-dark", dirtyPaths: {}, activeWorkspaceId: null, workspaceTabs: {} });
   localStorage.removeItem(THEME_STORAGE_KEY);
 });
 
