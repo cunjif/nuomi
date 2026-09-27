@@ -129,6 +129,19 @@ export function ChatView(): ReactNode {
             // feedback and the composer clears right away; the turn keeps
             // running in the background (failure surfaces via toast).
             submitMut.mutate(input);
+            // The backend derives the session title from the user input
+            // BEFORE running the Loop Engine (try_derive_title_early), so
+            // the new title is in the DB almost immediately. But
+            // submitTask only resolves after the whole turn completes,
+            // which would delay the tab/list title refresh until the
+            // assistant replies. Invalidate now (and again shortly to
+            // cover the IPC ordering race) so the tab title refreshes
+            // instantly without waiting for the RoleAgent response.
+            void qc.invalidateQueries({ queryKey: ["conversations"] });
+            window.setTimeout(
+              () => void qc.invalidateQueries({ queryKey: ["conversations"] }),
+              200,
+            );
           }
         }}
       />

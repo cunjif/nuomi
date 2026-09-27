@@ -264,11 +264,6 @@ export function ConversationsList(): ReactNode {
                 >
                   <span aria-hidden="true" className="shrink-0 text-xs">{kindIcon(conv.kind)}</span>
                   <span className="min-w-0 flex-1 truncate">{conv.title}</span>
-                  {conv.participantAgents[0] && (
-                    <span className="shrink-0 rounded bg-ink-muted/20 px-1 text-[10px] text-ink-muted">
-                      {conv.participantAgents[0].name}
-                    </span>
-                  )}
                   <span className="shrink-0 text-xs tabular-nums">
                     {formatRelativeTime(conv.createdAt, Date.now(), locale)}
                   </span>
