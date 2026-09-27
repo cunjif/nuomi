@@ -35,8 +35,27 @@ use crate::services::RoleOverlay;
 const DEFAULT_SYSTEM_PROMPT: &str = "You are nuomi, a helpful agent.";
 
 /// Title for brand-new sessions until the first user task derives a real
-/// one (shell and CLI share this via the sessions repo).
-const DEFAULT_SESSION_TITLE: &str = "nuomi session";
+/// one. Shared single source of truth by:
+/// - CLI path (`create_session_row`)
+/// - UI path (`impl_create_session` in `src-tauri::commands`)
+/// - Unnamed-state judgement (`is_unnamed_title`)
+///
+/// Per ADR 0013 / spec §4.4.2, callers must reference this constant instead
+/// of hardcoding the literal.
+pub const DEFAULT_SESSION_TITLE: &str = "nuomi session";
+
+/// Returns true when a session title is in the "unnamed" state and thus
+/// eligible for auto-derivation. Two representations are treated as unnamed
+/// (spec §5.1.1 rule 2):
+///   1. Exactly the [`DEFAULT_SESSION_TITLE`] placeholder (CLI path).
+///   2. Blank — empty string or whitespace-only (UI path stores `""` when
+///      the user omits a title; also covers legacy rows).
+///
+/// A user-named session (neither placeholder nor blank) returns `false` and
+/// is never overwritten by auto-derivation (spec §5.1.1 rule 3).
+pub fn is_unnamed_title(title: &str) -> bool {
+    title == DEFAULT_SESSION_TITLE || title.trim().is_empty()
+}
 
 /// Auto-derived titles never exceed this many characters.
 const TITLE_MAX_CHARS: usize = 40;
@@ -501,6 +520,14 @@ impl NuomiKernel {
             None => engine,
         };
 
+        // Derive the session title from the user's task text BEFORE running
+        // the Loop Engine, so the UI can show the new title immediately
+        // without waiting for the assistant reply. The title is derived from
+        // the user's input (not the assistant response), so there is no need
+        // to defer it. A fallback in `persist_transcript` retries if this
+        // early attempt fails (spec §5.1.3).
+        self.try_derive_title_early(session_id, task).await;
+
         let result = engine
             .run_with_history(
                 &self.ctx,
@@ -581,6 +608,44 @@ impl NuomiKernel {
         // Fresh session ⇒ the live delta ordinal starts at 1.
         state.delta_seq = self.delta_counter(&id).await;
         Ok(id)
+    }
+
+    /// Early title derivation: derive from the user's task text and write it
+    /// back to the session row **before** the Loop Engine runs, so the UI
+    /// can reflect the new title immediately without waiting for the
+    /// assistant reply. Tolerates errors (spec §5.1.3) — a failed early
+    /// derivation is retried by the fallback in `persist_transcript`.
+    async fn try_derive_title_early(&self, session_id: &str, task: &str) {
+        let auto_title = derive_title(task);
+        if auto_title.is_empty() {
+            return;
+        }
+        let path = self.db_path.clone();
+        let sid = session_id.to_string();
+        let title = auto_title.clone();
+        let result = tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
+            let db = Db::open(&path)?;
+            let conn = &db.0;
+            let current = repos::sessions::get(conn, &sid)?;
+            if is_unnamed_title(&current.title) {
+                repos::sessions::update_title(conn, &sid, &title)?;
+            }
+            Ok(())
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!(
+                session_id = %session_id,
+                error = %e,
+                "early title derivation skipped; will retry after turn"
+            ),
+            Err(e) => tracing::warn!(
+                session_id = %session_id,
+                error = %e,
+                "early title derivation task joined with error"
+            ),
+        }
     }
 
     pub async fn list_sessions(&self) -> CoreResult<Vec<Session>> {
@@ -666,10 +731,21 @@ impl NuomiKernel {
             }
             // Name a still-default session once from its first task
             // (check-then-update: later tasks must not overwrite).
-            if !auto_title.is_empty()
-                && repos::sessions::get(conn, &sid)?.title == DEFAULT_SESSION_TITLE
-            {
-                repos::sessions::update_title(conn, &sid, &auto_title)?;
+            // Tolerate derivation errors so message persistence is never
+            // blocked by a title-update failure (spec §5.1.3).
+            let title_result = (|| -> Result<(), CoreError> {
+                let current = repos::sessions::get(conn, &sid)?;
+                if !auto_title.is_empty() && is_unnamed_title(&current.title) {
+                    repos::sessions::update_title(conn, &sid, &auto_title)?;
+                }
+                Ok(())
+            })();
+            if let Err(e) = title_result {
+                tracing::warn!(
+                    session_id = %sid,
+                    error = %e,
+                    "session title derivation skipped; message persistence continues"
+                );
             }
             repos::sessions::touch(conn, &sid, now)?;
             Ok(appended)
@@ -958,6 +1034,24 @@ mod tests {
         // History was reset with the fresh session.
         let result = kernel.run_task("fresh start").await.unwrap();
         assert_eq!(result.transcript.len(), 2);
+    }
+
+    #[test]
+    fn is_unnamed_title_table() {
+        // Placeholder constant (CLI path) → unnamed.
+        assert!(is_unnamed_title(DEFAULT_SESSION_TITLE));
+        // Empty string (UI path stores "" when title omitted) → unnamed.
+        assert!(is_unnamed_title(""));
+        // Whitespace-only variants → unnamed.
+        assert!(is_unnamed_title("   "));
+        assert!(is_unnamed_title("\t\n"));
+        assert!(is_unnamed_title(" \t \n "));
+        // User-named sessions → not unnamed (protected from auto-derivation).
+        assert!(!is_unnamed_title("我的会话"));
+        assert!(!is_unnamed_title("my session"));
+        // Already-derived titles → not unnamed (second message must not rename).
+        assert!(!is_unnamed_title("首条消息"));
+        assert!(!is_unnamed_title("first message"));
     }
 
     #[test]

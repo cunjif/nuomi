@@ -61,7 +61,7 @@ pub async fn impl_create_session(state: &AppState) -> Result<SessionDto, IpcErro
     let now = now_ms();
     Ok(SessionDto {
         id,
-        title: "nuomi session".into(),
+        title: nuomi_core::facade::DEFAULT_SESSION_TITLE.into(),
         created_at: now,
         updated_at: now,
     })
