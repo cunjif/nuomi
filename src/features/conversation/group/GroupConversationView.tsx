@@ -54,7 +54,12 @@ export function GroupConversationView(): ReactNode {
       return ipc.submitMessage(sessionId, input, [], null, null);
     },
     onSuccess: () => {
-      if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId, "group"] });
+      if (sessionId !== null) {
+        void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId, "group"] });
+        // Refresh the conversations list so ChatTabBar picks up the
+        // auto-derived session title after the first message.
+        void qc.invalidateQueries({ queryKey: ["conversations"] });
+      }
     },
     onError: (e) => toast.error(`${t("chat.sendFailed")}: ${describeError(e)}`),
   });

@@ -55,7 +55,12 @@ export function ChatView(): ReactNode {
       // makes `showOptimistic` true again and re-renders the user bubble
       // as a ghost after the assistant reply.
       stream.clearOptimistic();
-      if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+      if (sessionId !== null) {
+        void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+        // Refresh the conversations list so ChatTabBar picks up the
+        // auto-derived session title after the first message.
+        void qc.invalidateQueries({ queryKey: ["conversations"] });
+      }
       if (!hadLive && result.finalText.length === 0) {
         toast.warn(t("chat.emptyResponse"));
       }
