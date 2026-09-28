@@ -614,9 +614,25 @@ async seedBuiltinRoles() : Promise<Result<SeedRolesDto, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async generateRole(description: string) : Promise<Result<RoleDto, IpcError>> {
+async generateRole(description: string, binding: RoleDirectorBindingDto) : Promise<Result<RoleDto, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("generate_role", { description }) };
+    return { status: "ok", data: await TAURI_INVOKE("generate_role", { description, binding }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getRoleDirectorBinding() : Promise<Result<RoleDirectorBindingDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_role_director_binding") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setRoleDirectorBinding(binding: RoleDirectorBindingDto) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_role_director_binding", { binding }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -814,9 +830,9 @@ async createConversation(input: ConversationInput) : Promise<Result<Conversation
     else return { status: "error", error: e  as any };
 }
 },
-async listConversations(kind: string | null) : Promise<Result<ConversationDto[], IpcError>> {
+async listConversations(kind: string | null, workspaceId: string | null) : Promise<Result<ConversationDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_conversations", { kind }) };
+    return { status: "ok", data: await TAURI_INVOKE("list_conversations", { kind, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1073,8 +1089,8 @@ export type CloseWorkspaceResult = { closedId: string; newFocusedId: string | nu
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
-export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[] }
-export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null }
+export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[]; workspaceId: string }
+export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null; workspaceId: string }
 export type ConversationUpdateInput = { title: string | null; goal: string | null }
 /**
  * A cross-workspace search result group.
@@ -1282,6 +1298,15 @@ export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_
  */
 export type RemoveWorkspaceResult = { removedId: string; newActiveId: string | null }
 export type RetrievalStrategyDto = "keyword" | "semantic" | "hybrid"
+/**
+ * Self-binding of the role director (the model it uses to orchestrate).
+ * NOT inherited by generated roles.
+ */
+export type RoleDirectorBindingDto = { bindingMode: RoleDirectorBindingModeDto; providerId: string | null; agentProfileId: string | null }
+/**
+ * Whether the role director binds to a Provider or a CLI Agent profile.
+ */
+export type RoleDirectorBindingModeDto = "provider" | "cli"
 export type RoleDto = { id: string; name: string; providerId: string | null; providerIds: string[]; systemPromptOverride: string | null; toolAllowlist: string[]; requiredCapabilities: CapabilityDto[]; temperature: number | null; maxTokens: number | null; params: JsonValue; builtin: boolean; generated: boolean; ephemeral: boolean; source: JsonValue; createdAt: number; updatedAt: number }
 export type RoleInput = { name: string; providerId: string | null; 
 /**
@@ -1348,7 +1373,9 @@ providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKe
  */
 proxy: string | null; 
 /**
- * Model for the minimal chat probe; protocol defaults apply when empty.
+ * Unused since the probe switched to a `GET /models` connectivity check.
+ * Retained to keep the IPC contract stable; callers may still send a
+ * model id but it is ignored by `impl_test_provider_connection`.
  */
 model: string | null }
 export type TodoItemDto = { id: string; description: string; completed: boolean }

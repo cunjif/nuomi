@@ -45,6 +45,8 @@ interface DoubleState {
   evolutionSettings: EvolutionSettingsDto | null;
   /** Persisted capability-routing rules (get/setRoutingRules round-trip). */
   routingRules: { preferLocal: boolean; capabilityOverrides: Record<string, string> };
+  /** Persisted role director self-binding (get/setRoleDirectorBinding round-trip). */
+  roleDirectorBinding: import("./bindings.gen").RoleDirectorBindingDto | null;
   /** App KV settings backing store (get/setAppSetting round-trip). */
   appSettings: Map<string, string>;
   /** Active workspace root returned by get/setWorkspace (files stay flat paths). */
@@ -75,6 +77,7 @@ export const tdState: DoubleState = {
   onlineAuthorized: false,
   evolutionSettings: null,
   routingRules: { preferLocal: false, capabilityOverrides: {} },
+  roleDirectorBinding: null,
   appSettings: new Map(),
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
@@ -121,6 +124,7 @@ export function seedConversation(row: Partial<ConversationDto> & { id: string })
     whiteboardRouteMode: null,
     participantAgents: [],
     todoList: [],
+    workspaceId: "__migrated__",
     ...row,
   });
 }
@@ -182,6 +186,7 @@ export function tdReset(): void {
   tdState.onlineAuthorized = false;
   tdState.evolutionSettings = null;
   tdState.routingRules = { preferLocal: false, capabilityOverrides: {} };
+  tdState.roleDirectorBinding = null;
   tdState.appSettings.clear();
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;

@@ -151,7 +151,14 @@ export const ipc = {
   deleteRole: (roleId: string, force: boolean = false) =>
     unwrap(current.deleteRole(roleId, force)),
   seedBuiltinRoles: () => unwrap(current.seedBuiltinRoles()),
-  generateRole: (description: string) => unwrap(current.generateRole(description)),
+  generateRole: (
+    description: string,
+    binding: Parameters<Commands["generateRole"]>[1],
+  ) => unwrap(current.generateRole(description, binding)),
+  getRoleDirectorBinding: () => unwrap(current.getRoleDirectorBinding()),
+  setRoleDirectorBinding: (
+    binding: Parameters<Commands["setRoleDirectorBinding"]>[0],
+  ) => unwrap(current.setRoleDirectorBinding(binding)),
   getRoutingRules: () => unwrap(current.getRoutingRules()),
   setRoutingRules: (rules: Parameters<Commands["setRoutingRules"]>[0]) =>
     unwrap(current.setRoutingRules(rules)),
@@ -182,7 +189,8 @@ export const ipc = {
   appSettingGet: (key: string) => unwrap(current.appSettingGet(key)),
   appSettingSet: (key: string, value: string) => unwrap(current.appSettingSet(key, value)),
   createConversation: (input: ConversationInput) => unwrap(current.createConversation(input)),
-  listConversations: (kind: string | null) => unwrap(current.listConversations(kind)),
+  listConversations: (kind: string | null, workspaceId: string | null) =>
+    unwrap(current.listConversations(kind, workspaceId)),
   getConversation: (sessionId: string) => unwrap(current.getConversation(sessionId)),
   setConversationAgent: (sessionId: string, agent: AgentRefInput | null) =>
     unwrap(current.setConversationAgent(sessionId, agent)),

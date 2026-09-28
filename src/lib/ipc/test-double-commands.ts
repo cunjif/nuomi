@@ -125,6 +125,7 @@ export function testDoubleCommands(): CommandSet {
         whiteboardRouteMode: null,
         participantAgents: [],
         todoList: [],
+        workspaceId: "__migrated__",
       };
       tdState.sessions.unshift(s);
       return ok(s);
@@ -639,10 +640,15 @@ export function testDoubleCommands(): CommandSet {
       }
       return ok({ inserted: names.length, updated: 0, skipped: PRESET_ROLE_NAMES.length - names.length });
     },
-    async generateRole(description) {
+    async generateRole(description, binding) {
       const trimmed = description.trim();
       if (trimmed.length === 0) {
         return err("role.director_invalid", "description must not be empty");
+      }
+      const targetId =
+        binding.bindingMode === "provider" ? binding.providerId : binding.agentProfileId;
+      if (!targetId) {
+        return err("role.no_binding", "role director has no self-binding configured");
       }
       const now = Date.now();
       const created: RoleDto = {
@@ -665,6 +671,13 @@ export function testDoubleCommands(): CommandSet {
       };
       tdState.roles.push(created);
       return ok({ ...created });
+    },
+    async getRoleDirectorBinding() {
+      return ok(tdState.roleDirectorBinding ? { ...tdState.roleDirectorBinding } : null);
+    },
+    async setRoleDirectorBinding(binding) {
+      tdState.roleDirectorBinding = { ...binding };
+      return ok(null);
     },
     async getRoutingRules() {
       return ok({ ...tdState.routingRules });
@@ -941,13 +954,15 @@ export function testDoubleCommands(): CommandSet {
         whiteboardRouteMode: null,
         participantAgents: input.agent ? [{ kind: input.agent.kind, id: input.agent.id, name: input.agent.id }] : [],
         todoList: [],
+        workspaceId: input.workspaceId,
       };
       tdState.sessions.unshift(s);
       return ok(s);
     },
-    async listConversations(kind) {
+    async listConversations(kind, workspaceId) {
       const all = tdState.sessions;
-      return ok(kind === null ? [...all] : all.filter((s) => s.kind === kind));
+      const byKind = kind === null ? [...all] : all.filter((s) => s.kind === kind);
+      return ok(workspaceId === null ? byKind : byKind.filter((s) => s.workspaceId === workspaceId));
     },
     async getConversation(sessionId) {
       const s = tdState.sessions.find((s) => s.id === sessionId);
