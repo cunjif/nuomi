@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use super::client::LlmProvider;
 use super::sse;
 use super::types::{ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, ToolDef, Usage};
-use super::ProviderError;
+use super::{ensure_status, ProviderError};
 
 pub struct OpenAiCompatibleClient {
     http: reqwest::Client,
@@ -36,7 +36,9 @@ impl OpenAiCompatibleClient {
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+        // Tolerate both bare origins (`https://host`) and `/v1`-suffixed
+        // base URLs — see `super::join_api_path`.
+        super::join_api_path(&self.base_url, "/chat/completions")
     }
 }
 
@@ -250,8 +252,8 @@ impl LlmProvider for OpenAiCompatibleClient {
             .bearer_auth(&self.api_key)
             .json(&build_body(request, false))
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let response = ensure_status(response, self.endpoint()).await?;
         let body: Value = response.json().await?;
         parse_response(&body)
     }
@@ -276,12 +278,12 @@ impl LlmProvider for OpenAiCompatibleClient {
                 tx: &mut futures::channel::mpsc::Sender<Result<StreamEvent, ProviderError>>,
             ) -> Result<(), ProviderError> {
                 let response = http
-                    .post(url)
+                    .post(url.clone())
                     .bearer_auth(api_key)
                     .json(&body)
                     .send()
-                    .await?
-                    .error_for_status()?;
+                    .await?;
+                let response = ensure_status(response, url).await?;
                 let mut state = ChatResponse::default();
                 let mut emitted = 0usize;
                 let mut data = sse::data_payloads(Box::pin(response.bytes_stream()));

@@ -24,7 +24,7 @@ use crate::orchestrator::{
     RoundRobinSelector, RouterExecutor, SpeakerSelector, TeamRunInput, WhiteBoardService,
 };
 use crate::providers::{
-    AnthropicCompatibleClient, LlmProvider, OpenAiCompatibleClient, SecretStore,
+    sensenova_base_url, AnthropicCompatibleClient, LlmProvider, OpenAiCompatibleClient, SecretStore,
 };
 use crate::store::{migrations, repos, Db, StoreError};
 use crate::{CoreError, CoreResult};
@@ -104,6 +104,10 @@ pub async fn materialize(
             ),
             ProviderProtocol::AnthropicCompatible => Arc::new(
                 AnthropicCompatibleClient::new(config.base_url.clone(), api_key)
+                    .with_http_client(http),
+            ),
+            ProviderProtocol::SenseNova => Arc::new(
+                OpenAiCompatibleClient::new(sensenova_base_url(&config.base_url), api_key)
                     .with_http_client(http),
             ),
         };

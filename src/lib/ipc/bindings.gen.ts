@@ -1270,7 +1270,7 @@ apiKey: string | null;
  * Model/routing settings (persisted inside `params_json`).
  */
 settings: ProviderSettingsDto }
-export type ProviderProtocolDto = "open_ai_compatible" | "anthropic_compatible"
+export type ProviderProtocolDto = "open_ai_compatible" | "anthropic_compatible" | "sense_nova"
 /**
  * Provider-level settings mirrored from
  * `nuomi_core::domain::entities::ProviderSettings` (stored inside the

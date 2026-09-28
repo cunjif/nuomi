@@ -24,8 +24,8 @@ use crate::plugins::{
     TurnOverride,
 };
 use crate::providers::{
-    AnthropicCompatibleClient, ChatMessage, ChatResponse, FakeLlm, LlmProvider, MessageRole,
-    OpenAiCompatibleClient,
+    sensenova_base_url, AnthropicCompatibleClient, ChatMessage, ChatResponse, FakeLlm, LlmProvider,
+    MessageRole, OpenAiCompatibleClient,
 };
 use crate::store::{migrations, repos, Db};
 use crate::{CoreError, CoreResult};
@@ -196,6 +196,10 @@ impl NuomiKernel {
                 ProviderProtocol::AnthropicCompatible => {
                     Arc::new(AnthropicCompatibleClient::new(ep.base_url, ep.api_key))
                 }
+                ProviderProtocol::SenseNova => Arc::new(OpenAiCompatibleClient::new(
+                    sensenova_base_url(&ep.base_url),
+                    ep.api_key,
+                )),
             },
             ProviderSource::Fake(script) => Arc::new(FakeLlm::new("fake", script)),
         };
@@ -347,8 +351,9 @@ impl NuomiKernel {
         tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
-            let active_ws =
-                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
+            let active_ws = repos::workspace_open_state::find_focused(&db.0)?
+                .map(|r| r.workspace_id)
+                .unwrap_or_default();
             repos::sessions::insert(&db.0, &session)?;
             if !active_ws.is_empty() {
                 repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
@@ -374,7 +379,17 @@ impl NuomiKernel {
 
         let history = std::mem::take(&mut state.history);
         let result = self
-            .run_turn(&session_id, history, task, delta_counter.clone(), None, None, None, None, None)
+            .run_turn(
+                &session_id,
+                history,
+                task,
+                delta_counter.clone(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
         state.history = result.transcript.clone();
         Ok(result)
@@ -653,8 +668,9 @@ impl NuomiKernel {
         tokio::task::spawn_blocking(move || -> Result<Vec<Session>, CoreError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
-            let active_ws =
-                repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
+            let active_ws = repos::workspace_open_state::find_focused(&db.0)?
+                .map(|r| r.workspace_id)
+                .unwrap_or_default();
             let filter_ws = if active_ws.is_empty() {
                 "__migrated__"
             } else {
@@ -839,9 +855,35 @@ fn tokenize(text: &str) -> Vec<&str> {
         c.is_whitespace()
             || matches!(
                 c,
-                '，' | ',' | '。' | '.' | '！' | '!' | '？' | '?' | '；' | ';' | '：' | ':'
-                    | '、' | '/' | '|' | '-' | '_' | '"' | '\'' | '`' | '(' | ')' | '（' | '）'
-                    | '【' | '】' | '[' | ']' | '{' | '}'
+                '，' | ','
+                    | '。'
+                    | '.'
+                    | '！'
+                    | '!'
+                    | '？'
+                    | '?'
+                    | '；'
+                    | ';'
+                    | '：'
+                    | ':'
+                    | '、'
+                    | '/'
+                    | '|'
+                    | '-'
+                    | '_'
+                    | '"'
+                    | '\''
+                    | '`'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '【'
+                    | '】'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
             )
     })
     .filter(|s| !s.is_empty())
@@ -852,20 +894,19 @@ fn tokenize(text: &str) -> Vec<&str> {
 /// signal for keyword extraction.
 fn is_stopword(word: &str) -> bool {
     const STOPWORDS: &[&str] = &[
-        "the", "a", "an", "and", "or", "but", "if", "then", "else", "for", "of", "to", "in",
-        "on", "at", "by", "with", "from", "as", "is", "it", "this", "that", "these", "those",
-        "i", "you", "he", "she", "we", "they", "me", "him", "her", "us", "them", "my", "your",
-        "his", "its", "our", "their", "what", "which", "who", "when", "where", "why", "how",
-        "do", "does", "did", "can", "could", "should", "would", "will", "shall", "may", "might",
-        "must", "have", "has", "had", "be", "been", "being", "am", "are", "was", "were", "not",
-        "no", "yes", "so", "too", "very", "just", "also", "only", "up", "down", "out", "about",
-        "into", "over", "under", "again", "here", "there", "all", "any", "both", "each", "few",
-        "more", "most", "other", "some", "such",
-        "的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "这", "那", "有", "和", "与",
-        "或", "但", "如", "果", "一", "个", "上", "下", "中", "为", "以", "及", "等", "都", "也",
-        "就", "还", "不", "没", "要", "会", "能", "可", "对", "让", "把", "被", "给", "向", "从",
-        "到", "于", "之", "其", "而", "且", "并", "则", "若", "虽", "然", "因", "所", "吗", "呢",
-        "吧", "啊", "呀", "哦", "嗯",
+        "the", "a", "an", "and", "or", "but", "if", "then", "else", "for", "of", "to", "in", "on",
+        "at", "by", "with", "from", "as", "is", "it", "this", "that", "these", "those", "i", "you",
+        "he", "she", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its",
+        "our", "their", "what", "which", "who", "when", "where", "why", "how", "do", "does", "did",
+        "can", "could", "should", "would", "will", "shall", "may", "might", "must", "have", "has",
+        "had", "be", "been", "being", "am", "are", "was", "were", "not", "no", "yes", "so", "too",
+        "very", "just", "also", "only", "up", "down", "out", "about", "into", "over", "under",
+        "again", "here", "there", "all", "any", "both", "each", "few", "more", "most", "other",
+        "some", "such", "的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "这", "那",
+        "有", "和", "与", "或", "但", "如", "果", "一", "个", "上", "下", "中", "为", "以", "及",
+        "等", "都", "也", "就", "还", "不", "没", "要", "会", "能", "可", "对", "让", "把", "被",
+        "给", "向", "从", "到", "于", "之", "其", "而", "且", "并", "则", "若", "虽", "然", "因",
+        "所", "吗", "呢", "吧", "啊", "呀", "哦", "嗯",
     ];
     STOPWORDS.contains(&word)
 }
@@ -962,9 +1003,13 @@ mod tests {
         // Events were appended under aggregate_type="session".
         let path = dir.path().join("k.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let events =
-            repos::events::list_by_aggregate(&conn, "session", &kernel.session_id().await.unwrap(), None)
-                .unwrap();
+        let events = repos::events::list_by_aggregate(
+            &conn,
+            "session",
+            &kernel.session_id().await.unwrap(),
+            None,
+        )
+        .unwrap();
         let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
         assert!(kinds.contains(&"message"));
         let user_msg = events
@@ -1104,7 +1149,10 @@ mod tests {
             "title must fit within max chars (plus ellipsis): got {title:?}"
         );
         // alpha (5x) should surface before beta (3x) / gamma (2x).
-        assert!(title.contains("alpha"), "top keyword alpha should appear: {title:?}");
+        assert!(
+            title.contains("alpha"),
+            "top keyword alpha should appear: {title:?}"
+        );
 
         let long_cjk = "错误 ".repeat(60);
         let title_cjk = derive_title(&long_cjk);
@@ -1117,10 +1165,7 @@ mod tests {
 
     #[test]
     fn truncate_history_chars_returns_unchanged_when_within_budget() {
-        let history = vec![
-            ChatMessage::user("hello"),
-            ChatMessage::assistant("world"),
-        ];
+        let history = vec![ChatMessage::user("hello"), ChatMessage::assistant("world")];
         let truncated = truncate_history_chars(history.clone(), 100);
         assert_eq!(truncated, history);
     }
@@ -1128,9 +1173,9 @@ mod tests {
     #[test]
     fn truncate_history_chars_drops_oldest_messages() {
         let history = vec![
-            ChatMessage::user("aaaa"),   // 4
+            ChatMessage::user("aaaa"),      // 4
             ChatMessage::assistant("bbbb"), // 4
-            ChatMessage::user("cccc"),   // 4
+            ChatMessage::user("cccc"),      // 4
             ChatMessage::assistant("dddd"), // 4
         ];
         // Budget 10 → keep last 2 messages (8 chars), 3rd would exceed (12).

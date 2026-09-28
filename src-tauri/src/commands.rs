@@ -24,8 +24,8 @@ use nuomi_core::evolution::research::{
 };
 use nuomi_core::integrations::OutboundSink;
 use nuomi_core::orchestrator::OrchestratorError;
-use nuomi_core::plugins::LoopRunResult;
 use nuomi_core::plugins::approval_gate;
+use nuomi_core::plugins::LoopRunResult;
 use nuomi_core::services::capability_router::RouteOutcome;
 use nuomi_core::services::parse_schedule;
 use nuomi_core::services::SeedReport;
@@ -112,6 +112,7 @@ pub async fn impl_list_events(
 /// Persists the CLI Agent's own session id back to `session_cli_handles`
 /// (ADR 0012 D8). Called after each conversation turn; no-op when the
 /// provider was not a CLI agent or did not report a session id.
+#[allow(clippy::type_complexity)]
 async fn upsert_cli_handle(
     db_path: &str,
     session_id: &str,
@@ -156,6 +157,7 @@ async fn upsert_cli_handle(
 /// The run registers a cooperative cancellation token under its session id
 /// so `/stop` and the background tray can abort it; the loop returns at the
 /// next step boundary and whatever it produced is persisted.
+#[allow(clippy::type_complexity)]
 pub async fn run_conversation_turn(
     state: &AppState,
     session_id: &str,
@@ -289,9 +291,18 @@ pub async fn run_conversation_turn(
             let cwd = Some(state.current_workspace());
             let bus = state.kernel.context().bus();
             let ws_id = focused_workspace_id(&db_path);
-            let outcome = core_run_team(db_path, Some(bus), team_id, session_id, text, secrets, cwd, ws_id)
-                .await
-                .map_err(|e| IpcError::new("team.run_failed", &e.to_string()))?;
+            let outcome = core_run_team(
+                db_path,
+                Some(bus),
+                team_id,
+                session_id,
+                text,
+                secrets,
+                cwd,
+                ws_id,
+            )
+            .await
+            .map_err(|e| IpcError::new("team.run_failed", e.to_string()))?;
             LoopRunResult {
                 final_text: outcome.final_output,
                 steps: outcome.rounds,
@@ -311,10 +322,8 @@ pub async fn run_conversation_turn(
             let secrets = state.secrets.clone();
             let cwd = Some(state.current_workspace());
             let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref()).await?;
-            let external_session_id =
-                cli_handle.as_ref().and_then(|(_, _, sid, _)| sid.clone());
-            let max_history_chars =
-                cli_handle.as_ref().and_then(|(_, _, _, m)| *m);
+            let external_session_id = cli_handle.as_ref().and_then(|(_, _, sid, _)| sid.clone());
+            let max_history_chars = cli_handle.as_ref().and_then(|(_, _, _, m)| *m);
 
             match ctx {
                 SingleRoleContext::Materialized {
@@ -362,7 +371,10 @@ pub async fn run_conversation_turn(
                     // here (e.g. DB write error) should not surface as an
                     // IPC error — that would make the frontend retry and
                     // duplicate the message.
-                    if let Err(e) = upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result).await {
+                    if let Err(e) =
+                        upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result)
+                            .await
+                    {
                         tracing::warn!(error = %e, session_id, "failed to persist cli handle; reply is already saved");
                     }
                     result
@@ -370,9 +382,7 @@ pub async fn run_conversation_turn(
                 SingleRoleContext::EnvFallback => {
                     let bus = state.kernel.context().bus();
                     let db_path = state.db_path.clone();
-                    emit_env_fallback(&bus, &db_path, session_id)
-                        .await
-                        .ok();
+                    emit_env_fallback(&bus, &db_path, session_id).await.ok();
                     let result = state
                         .kernel
                         .run_task_in_session(
@@ -387,7 +397,10 @@ pub async fn run_conversation_turn(
                         )
                         .await?;
                     // P1-6: same best-effort CLI handle persistence.
-                    if let Err(e) = upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result).await {
+                    if let Err(e) =
+                        upsert_cli_handle(state.db_path.as_ref(), session_id, &cli_handle, &result)
+                            .await
+                    {
                         tracing::warn!(error = %e, session_id, "failed to persist cli handle; reply is already saved");
                     }
                     result
@@ -436,7 +449,7 @@ async fn run_selector_turn(
     let cwd = Some(state.current_workspace());
     let selector_ctx = materialize_single_role(db_path, secrets, cwd, Some(selector))
         .await
-        .map_err(|e| IpcError::new("selector.materialize_failed", &e.to_string()))?;
+        .map_err(|e| IpcError::new("selector.materialize_failed", e.to_string()))?;
 
     // 2. Build selector prompt with candidate list.
     let candidate_list = candidates
@@ -482,7 +495,7 @@ async fn run_selector_turn(
     let cwd = Some(state.current_workspace());
     let selected_ctx = materialize_single_role(db_path, secrets, cwd, selected.as_ref())
         .await
-        .map_err(|e| IpcError::new("selected.materialize_failed", &e.to_string()))?;
+        .map_err(|e| IpcError::new("selected.materialize_failed", e.to_string()))?;
 
     run_single_role_context(state, session_id, text, token, selected_ctx).await
 }
@@ -528,7 +541,7 @@ async fn run_single_role_context(
                     None,
                 )
                 .await
-                .map_err(|e| IpcError::new("agent.run_failed", &e.to_string()))
+                .map_err(|e| IpcError::new("agent.run_failed", e.to_string()))
         }
         SingleRoleContext::EnvFallback => {
             let bus = state.kernel.context().bus();
@@ -547,7 +560,7 @@ async fn run_single_role_context(
                     None,
                 )
                 .await
-                .map_err(|e| IpcError::new("agent.run_failed", &e.to_string()))
+                .map_err(|e| IpcError::new("agent.run_failed", e.to_string()))
         }
     }
 }
@@ -613,10 +626,13 @@ async fn emit_turn_end(state: &AppState, session_id: &str) {
     .ok()
     .and_then(|r| r.ok())
     .unwrap_or(0);
-    state.kernel.context().publish(nuomi_core::harness::Event::new(
-        "session.turn_end",
-        serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
-    ));
+    state
+        .kernel
+        .context()
+        .publish(nuomi_core::harness::Event::new(
+            "session.turn_end",
+            serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
+        ));
 }
 
 /// ADR 0015: Releases the busy lock (sets `agent_busy = 0`) and emits
@@ -634,10 +650,13 @@ async fn release_busy_and_emit(state: &AppState, session_id: &str) {
     .ok()
     .and_then(|r| r.ok())
     .unwrap_or(0);
-    state.kernel.context().publish(nuomi_core::harness::Event::new(
-        "session.turn_end",
-        serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
-    ));
+    state
+        .kernel
+        .context()
+        .publish(nuomi_core::harness::Event::new(
+            "session.turn_end",
+            serde_json::json!({ "sessionId": session_id, "queueRemaining": remaining }),
+        ));
 }
 
 /// P0-5: Lost-wakeup recovery for direct turns. A producer may have enqueued
@@ -645,11 +664,7 @@ async fn release_busy_and_emit(state: &AppState, session_id: &str) {
 /// in that window the producer's `try_set_busy` fails and no drainer is
 /// spawned. After the direct turn releases the lock, atomically re-check the
 /// queue and re-acquire the lock; if both succeed, start the drainer.
-async fn maybe_start_drainer(
-    app_handle: tauri::AppHandle,
-    state: &AppState,
-    session_id: &str,
-) {
+async fn maybe_start_drainer(app_handle: tauri::AppHandle, state: &AppState, session_id: &str) {
     let db_path = state.db_path.clone();
     let sid = session_id.to_string();
     let reacquired = tokio::task::spawn_blocking(move || -> Result<bool, StoreError> {
@@ -695,10 +710,12 @@ pub async fn impl_enqueue_message(
     let db_path = state.db_path.clone();
     let sid = session_id.clone();
     let text = input.clone();
-    let entry = tokio::task::spawn_blocking(move || -> Result<nuomi_core::domain::MessageQueueEntry, StoreError> {
-        let db = Db::open(&db_path)?;
-        repos::message_queue::enqueue(&db.0, &sid, &text)
-    })
+    let entry = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::domain::MessageQueueEntry, StoreError> {
+            let db = Db::open(&db_path)?;
+            repos::message_queue::enqueue(&db.0, &sid, &text)
+        },
+    )
     .await
     .map_err(join_err)??;
 
@@ -748,10 +765,12 @@ async fn process_queue(app_handle: tauri::AppHandle, session_id: String) {
         let entry = {
             let db_path = state.db_path.clone();
             let sid = session_id.clone();
-            tokio::task::spawn_blocking(move || -> Result<Option<nuomi_core::domain::MessageQueueEntry>, StoreError> {
-                let db = Db::open(&db_path)?;
-                repos::message_queue::dequeue(&db.0, &sid)
-            })
+            tokio::task::spawn_blocking(
+                move || -> Result<Option<nuomi_core::domain::MessageQueueEntry>, StoreError> {
+                    let db = Db::open(&db_path)?;
+                    repos::message_queue::dequeue(&db.0, &sid)
+                },
+            )
             .await
             .ok()
             .and_then(|r| r.ok())
@@ -785,15 +804,18 @@ async fn process_queue(app_handle: tauri::AppHandle, session_id: String) {
                         let err_msg = match &err {
                             crate::ipc_error::IpcError::Generic { message, .. } => message.clone(),
                         };
-                        state.kernel.context().publish(nuomi_core::harness::Event::new(
-                            "session.queue_error",
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "queueId": e.id,
-                                "text": e.text,
-                                "error": err_msg,
-                            }),
-                        ));
+                        state
+                            .kernel
+                            .context()
+                            .publish(nuomi_core::harness::Event::new(
+                                "session.queue_error",
+                                serde_json::json!({
+                                    "sessionId": session_id,
+                                    "queueId": e.id,
+                                    "text": e.text,
+                                    "error": err_msg,
+                                }),
+                            ));
                     }
                 }
                 // P0-2: emit turn_end so the frontend refreshes the queue
@@ -863,10 +885,12 @@ pub async fn impl_list_message_queue(
 ) -> Result<Vec<MessageQueueItemDto>, IpcError> {
     let db_path = state.db_path.clone();
     let sid = session_id.clone();
-    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<nuomi_core::domain::MessageQueueEntry>, StoreError> {
-        let db = Db::open(&db_path)?;
-        repos::message_queue::list_queued(&db.0, &sid)
-    })
+    let entries = tokio::task::spawn_blocking(
+        move || -> Result<Vec<nuomi_core::domain::MessageQueueEntry>, StoreError> {
+            let db = Db::open(&db_path)?;
+            repos::message_queue::list_queued(&db.0, &sid)
+        },
+    )
     .await
     .map_err(join_err)??;
     Ok(entries
@@ -880,10 +904,7 @@ pub async fn impl_list_message_queue(
         .collect())
 }
 
-pub async fn impl_cancel_message_queue_item(
-    state: &AppState,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn impl_cancel_message_queue_item(state: &AppState, id: String) -> Result<(), IpcError> {
     let db_path = state.db_path.clone();
     let qid = id.clone();
     tokio::task::spawn_blocking(move || -> Result<(), StoreError> {
@@ -1399,7 +1420,10 @@ pub(crate) fn transition_run_and_notify(
         if let Some(msg) = error_message {
             payload["error"] = serde_json::Value::String(msg.to_string());
         }
-        bus.publish(nuomi_core::harness::Event::new("run.state_changed", payload));
+        bus.publish(nuomi_core::harness::Event::new(
+            "run.state_changed",
+            payload,
+        ));
     }
     Ok(next)
 }
@@ -1621,18 +1645,15 @@ fn map_ai_commit_error(e: nuomi_core::services::AiCommitError) -> IpcError {
         AiCommitError::NoStagedChanges => {
             IpcError::new("ai_commit.no_staged_changes", "no staged changes to commit")
         }
-        AiCommitError::AgentUnavailable(msg) => {
-            IpcError::new("ai_commit.agent_unavailable", msg)
-        }
-        AiCommitError::GenerationFailed(msg) => {
-            IpcError::new("ai_commit.generation_failed", msg)
-        }
+        AiCommitError::AgentUnavailable(msg) => IpcError::new("ai_commit.agent_unavailable", msg),
+        AiCommitError::GenerationFailed(msg) => IpcError::new("ai_commit.generation_failed", msg),
         AiCommitError::EmptyResult => {
             IpcError::new("ai_commit.empty_result", "AI returned empty content")
         }
-        AiCommitError::Timeout(ms) => {
-            IpcError::new("ai_commit.timeout", format!("generation timed out after {ms}ms"))
-        }
+        AiCommitError::Timeout(ms) => IpcError::new(
+            "ai_commit.timeout",
+            format!("generation timed out after {ms}ms"),
+        ),
         AiCommitError::Join(e) => IpcError::from(e),
         AiCommitError::Core(e) => IpcError::from(e),
     }
@@ -1941,6 +1962,7 @@ fn protocol_from_dto(p: ProviderProtocolDto) -> ProviderProtocol {
     match p {
         ProviderProtocolDto::OpenAiCompatible => ProviderProtocol::OpenAiCompatible,
         ProviderProtocolDto::AnthropicCompatible => ProviderProtocol::AnthropicCompatible,
+        ProviderProtocolDto::SenseNova => ProviderProtocol::SenseNova,
     }
 }
 
@@ -1948,6 +1970,7 @@ fn protocol_to_dto(p: ProviderProtocol) -> ProviderProtocolDto {
     match p {
         ProviderProtocol::OpenAiCompatible => ProviderProtocolDto::OpenAiCompatible,
         ProviderProtocol::AnthropicCompatible => ProviderProtocolDto::AnthropicCompatible,
+        ProviderProtocol::SenseNova => ProviderProtocolDto::SenseNova,
     }
 }
 
@@ -2207,19 +2230,15 @@ async fn resolve_probe_secrets(
     let api_key = match typed_key {
         Some(k) => k,
         None => match stored_key {
-            Some(reference) => state
-                .secrets
-                .get(&reference)
-                .await
-                .map_err(|e| {
-                    IpcError::new(
-                        "provider.keyring_read_failed",
-                        format!(
-                            "存储的 API key 读取失败（引用 {reference}）：{e}。\
+            Some(reference) => state.secrets.get(&reference).await.map_err(|e| {
+                IpcError::new(
+                    "provider.keyring_read_failed",
+                    format!(
+                        "存储的 API key 读取失败（引用 {reference}）：{e}。\
                              请在表单中重新录入 API Key 后重试。"
-                        ),
-                    )
-                })?,
+                    ),
+                )
+            })?,
             None => String::new(),
         },
     };
@@ -2485,7 +2504,10 @@ impl EvolutionSettingsDto {
             nuomi_core::domain::RetrievalStrategy::Semantic => RetrievalStrategyDto::Semantic,
             nuomi_core::domain::RetrievalStrategy::Hybrid => RetrievalStrategyDto::Hybrid,
         };
-        let OnlineLearningConfig { authorized, allowlist } = e.online_learning;
+        let OnlineLearningConfig {
+            authorized,
+            allowlist,
+        } = e.online_learning;
         let RefineConfig {
             trigger_failures,
             min_edit_strategy,
@@ -2493,9 +2515,15 @@ impl EvolutionSettingsDto {
             rollback_enabled,
         } = e.refine;
         let SkillCreationConfig { enabled, format } = e.skill_creation;
-        let MemoryPolicy { retention_days, retrieval } = e.memory_policy;
+        let MemoryPolicy {
+            retention_days,
+            retrieval,
+        } = e.memory_policy;
         Self {
-            online_learning: OnlineLearningConfigDto { authorized, allowlist },
+            online_learning: OnlineLearningConfigDto {
+                authorized,
+                allowlist,
+            },
             refine: RefineConfigDto {
                 trigger_failures,
                 min_edit_strategy: map_refine(min_edit_strategy),
@@ -2569,9 +2597,8 @@ pub async fn impl_get_evolution_settings(
     .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))??;
 
     if let Some(raw) = json {
-        let mut settings: nuomi_core::domain::EvolutionSettings =
-            serde_json::from_str(&raw)
-                .map_err(|e| IpcError::new("evolution.parse_failed", e.to_string()))?;
+        let mut settings: nuomi_core::domain::EvolutionSettings = serde_json::from_str(&raw)
+            .map_err(|e| IpcError::new("evolution.parse_failed", e.to_string()))?;
         let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
         let legacy_auth = core_online_authorized(&mem).await;
         if !settings.online_learning.authorized && legacy_auth {
@@ -3349,13 +3376,15 @@ pub async fn impl_get_role_director_binding(
     state: &AppState,
 ) -> Result<Option<RoleDirectorBindingDto>, IpcError> {
     let path = state.db_path.clone();
-    let binding = tokio::task::spawn_blocking(move || -> Result<Option<RoleDirectorBindingDto>, IpcError> {
-        let db = Db::open(&path)?;
-        migrations::run(&db.0)?;
-        nuomi_core::services::role_director::get_role_director_binding(&db.0)
-            .map(|opt| opt.map(RoleDirectorBindingDto::from))
-            .map_err(|e| IpcError::new("role.director_binding_failed", e.to_string()))
-    })
+    let binding = tokio::task::spawn_blocking(
+        move || -> Result<Option<RoleDirectorBindingDto>, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            nuomi_core::services::role_director::get_role_director_binding(&db.0)
+                .map(|opt| opt.map(RoleDirectorBindingDto::from))
+                .map_err(|e| IpcError::new("role.director_binding_failed", e.to_string()))
+        },
+    )
     .await??;
     Ok(binding)
 }
@@ -4429,7 +4458,10 @@ pub async fn impl_create_conversation(
     input: ConversationInput,
 ) -> Result<ConversationDto, IpcError> {
     let kind = ConversationKind::parse(&input.kind).ok_or_else(|| {
-        IpcError::new("conversation.invalid_kind", format!("unknown kind: {}", input.kind))
+        IpcError::new(
+            "conversation.invalid_kind",
+            format!("unknown kind: {}", input.kind),
+        )
     })?;
     let agent = input
         .agent
@@ -4481,7 +4513,7 @@ pub async fn impl_list_conversations(
         for session in &sessions {
             if filter
                 .as_ref()
-                .map_or(false, |k| session.kind.as_str() != k.as_str())
+                .is_some_and(|k| session.kind.as_str() != k.as_str())
             {
                 continue;
             }
@@ -4490,12 +4522,9 @@ pub async fn impl_list_conversations(
             let participants = repos::sessions::list_participants(&db.0, &session.id)?;
             let mut agent_refs = Vec::with_capacity(participants.len());
             for (kind, id) in &participants {
-                let name = nuomi_core::services::name_agent_ref(
-                    &db.0,
-                    Some(&(kind.clone(), id.clone())),
-                )?
-                .map(|r| r.name)
-                .unwrap_or_default();
+                let name = nuomi_core::services::name_agent_ref(&db.0, Some(&(*kind, id.clone())))?
+                    .map(|r| r.name)
+                    .unwrap_or_default();
                 agent_refs.push(AgentRefDto {
                     kind: kind.as_str().to_string(),
                     id: id.clone(),
@@ -4530,7 +4559,7 @@ pub async fn impl_get_conversation(
                 .map(|(k, id)| {
                     let name = nuomi_core::services::name_agent_ref(
                         &db.0,
-                        Some(&(k.clone(), id.clone())),
+                        Some(&(k, id.clone())),
                     )
                     .ok()
                     .flatten()
@@ -4642,8 +4671,9 @@ pub async fn impl_add_conversation_agent(
     session_id: String,
     agent: AgentRefInput,
 ) -> Result<ConversationDto, IpcError> {
-    let agent_kind = AgentRefKind::parse(&agent.kind)
-        .ok_or_else(|| IpcError::new("validation", format!("unknown agent kind: {}", agent.kind)))?;
+    let agent_kind = AgentRefKind::parse(&agent.kind).ok_or_else(|| {
+        IpcError::new("validation", format!("unknown agent kind: {}", agent.kind))
+    })?;
     let path = state.db_path.clone();
     let sid = session_id.clone();
     let agent_id = agent.id.clone();
@@ -4661,11 +4691,7 @@ pub async fn impl_add_conversation_agent(
         repos::sessions::add_participant(&db.0, &sid, agent_kind, &agent_id, now)?;
         // Single chat → group chat upgrade.
         if session.kind == nuomi_core::domain::ConversationKind::Chat {
-            repos::sessions::update_kind(
-                &db.0,
-                &sid,
-                nuomi_core::domain::ConversationKind::Group,
-            )?;
+            repos::sessions::update_kind(&db.0, &sid, nuomi_core::domain::ConversationKind::Group)?;
         }
         Ok(())
     })
@@ -4682,8 +4708,9 @@ pub async fn impl_remove_conversation_agent(
     session_id: String,
     agent: AgentRefInput,
 ) -> Result<ConversationDto, IpcError> {
-    let agent_kind = AgentRefKind::parse(&agent.kind)
-        .ok_or_else(|| IpcError::new("validation", format!("unknown agent kind: {}", agent.kind)))?;
+    let agent_kind = AgentRefKind::parse(&agent.kind).ok_or_else(|| {
+        IpcError::new("validation", format!("unknown agent kind: {}", agent.kind))
+    })?;
     let path = state.db_path.clone();
     let sid = session_id.clone();
     let agent_id = agent.id.clone();
@@ -4745,9 +4772,14 @@ pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcErro
     let sids = tokio::task::spawn_blocking(move || -> Result<(usize, Vec<String>), IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws =
-            repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-        let ws_id = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
+        let active_ws = repos::workspace_open_state::find_focused(&db.0)?
+            .map(|r| r.workspace_id)
+            .unwrap_or_default();
+        let ws_id = if active_ws.is_empty() {
+            "__migrated__"
+        } else {
+            &active_ws
+        };
         // List the sessions about to be soft-deleted so we can cascade
         // queue cleanup + turn cancellation outside the blocking closure.
         let to_delete = repos::sessions::list(&db.0, ws_id, 100_000)?
@@ -4805,131 +4837,133 @@ pub async fn impl_get_agent_detail(
     agent_id: String,
 ) -> Result<AgentDetailDto, IpcError> {
     let path = state.db_path.clone();
-    let result =
-        tokio::task::spawn_blocking(move || -> Result<AgentDetailDto, IpcError> {
-            let db = Db::open(&path)?;
-            migrations::run(&db.0)?;
-            match agent_kind.as_str() {
-                "cli" => {
-                    let p = repos::agent_profiles::get(&db.0, &agent_id)?;
+    let result = tokio::task::spawn_blocking(move || -> Result<AgentDetailDto, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        match agent_kind.as_str() {
+            "cli" => {
+                let p = repos::agent_profiles::get(&db.0, &agent_id)?;
+                Ok(AgentDetailDto {
+                    kind: "cli".to_string(),
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    avatar_url: None,
+                    role: Some(p.adapter.clone()),
+                    responsibility: None,
+                    bound_model: p.model_id.clone(),
+                    provider: None,
+                    binding_kind: Some("cli".to_string()),
+                    cli_agent_name: Some(p.name.clone()),
+                    cli_agent_flavor: Some(flavor_to_string(p.flavor)),
+                    cli_agent_model: p.model_id.clone(),
+                    enabled: p.enabled,
+                })
+            }
+            "role" => {
+                let r = repos::roles::get(&db.0, &agent_id)?;
+                let agent_profile_id = read_role_agent_profile_id(&r.params);
+
+                // Resolve the bound CLI agent profile. If it has been
+                // deleted (NotFound) or any store error occurs, fall back
+                // to the provider-binding branch so the detail page still
+                // opens with the Role's basic info.
+                let cli_profile = agent_profile_id
+                    .as_deref()
+                    .and_then(|pid| repos::agent_profiles::get(&db.0, pid).ok());
+
+                let responsibility = r
+                    .system_prompt_override
+                    .as_deref()
+                    .map(|s| truncate_chars(s, 200));
+
+                if let Some(p) = cli_profile {
                     Ok(AgentDetailDto {
-                        kind: "cli".to_string(),
-                        id: p.id.clone(),
-                        name: p.name.clone(),
+                        kind: "role".to_string(),
+                        id: r.id.clone(),
+                        name: r.name.clone(),
                         avatar_url: None,
-                        role: Some(p.adapter.clone()),
-                        responsibility: None,
+                        role: Some("role".to_string()),
+                        responsibility,
                         bound_model: p.model_id.clone(),
                         provider: None,
                         binding_kind: Some("cli".to_string()),
                         cli_agent_name: Some(p.name.clone()),
                         cli_agent_flavor: Some(flavor_to_string(p.flavor)),
                         cli_agent_model: p.model_id.clone(),
-                        enabled: p.enabled,
+                        enabled: true,
+                    })
+                } else {
+                    Ok(AgentDetailDto {
+                        kind: "role".to_string(),
+                        id: r.id.clone(),
+                        name: r.name.clone(),
+                        avatar_url: None,
+                        role: Some("role".to_string()),
+                        responsibility,
+                        // Role 未指定具体 model；model 由 Provider 配置决定。
+                        bound_model: None,
+                        provider: r.provider_ids.first().cloned(),
+                        binding_kind: r.provider_ids.first().map(|_| "provider".to_string()),
+                        cli_agent_name: None,
+                        cli_agent_flavor: None,
+                        cli_agent_model: None,
+                        enabled: true,
                     })
                 }
-                "role" => {
-                    let r = repos::roles::get(&db.0, &agent_id)?;
-                    let agent_profile_id = read_role_agent_profile_id(&r.params);
-
-                    // Resolve the bound CLI agent profile. If it has been
-                    // deleted (NotFound) or any store error occurs, fall back
-                    // to the provider-binding branch so the detail page still
-                    // opens with the Role's basic info.
-                    let cli_profile = agent_profile_id
-                        .as_deref()
-                        .and_then(|pid| repos::agent_profiles::get(&db.0, pid).ok());
-
-                    let responsibility = r
-                        .system_prompt_override
-                        .as_deref()
-                        .map(|s| truncate_chars(s, 200));
-
-                    if let Some(p) = cli_profile {
-                        Ok(AgentDetailDto {
-                            kind: "role".to_string(),
-                            id: r.id.clone(),
-                            name: r.name.clone(),
-                            avatar_url: None,
-                            role: Some("role".to_string()),
-                            responsibility,
-                            bound_model: p.model_id.clone(),
-                            provider: None,
-                            binding_kind: Some("cli".to_string()),
-                            cli_agent_name: Some(p.name.clone()),
-                            cli_agent_flavor: Some(flavor_to_string(p.flavor)),
-                            cli_agent_model: p.model_id.clone(),
-                            enabled: true,
-                        })
-                    } else {
-                        Ok(AgentDetailDto {
-                            kind: "role".to_string(),
-                            id: r.id.clone(),
-                            name: r.name.clone(),
-                            avatar_url: None,
-                            role: Some("role".to_string()),
-                            responsibility,
-                            // Role 未指定具体 model；model 由 Provider 配置决定。
-                            bound_model: None,
-                            provider: r.provider_ids.first().cloned(),
-                            binding_kind: r.provider_ids.first().map(|_| "provider".to_string()),
-                            cli_agent_name: None,
-                            cli_agent_flavor: None,
-                            cli_agent_model: None,
-                            enabled: true,
-                        })
-                    }
-                }
-                _ => Err(IpcError::new(
-                    "validation",
-                    format!("unknown agent kind: {agent_kind}"),
-                )),
             }
-        })
-        .await
-        .map_err(join_err)??;
+            _ => Err(IpcError::new(
+                "validation",
+                format!("unknown agent kind: {agent_kind}"),
+            )),
+        }
+    })
+    .await
+    .map_err(join_err)??;
     Ok(result)
 }
 
 pub async fn impl_list_agent_options(state: &AppState) -> Result<Vec<AgentOptionDto>, IpcError> {
     let path = state.db_path.clone();
-    let result =
-        tokio::task::spawn_blocking(move || -> Result<Vec<AgentOptionDto>, IpcError> {
-            let db = Db::open(&path)?;
-            migrations::run(&db.0)?;
-            let mut options = Vec::new();
-            for p in repos::agent_profiles::list(&db.0)? {
-                options.push(AgentOptionDto {
-                    kind: "cli".to_string(),
-                    id: p.id.clone(),
-                    name: p.name.clone(),
-                    enabled: p.enabled,
-                    builtin: false,
-                    role: Some(p.adapter.clone()),
-                    responsibility: None,
-                    bound_model: None,
-                    provider: None,
-                });
-            }
-            for r in repos::roles::list(&db.0)? {
-                options.push(AgentOptionDto {
-                    kind: "role".to_string(),
-                    id: r.id.clone(),
-                    name: r.name.clone(),
-                    enabled: true,
-                    builtin: r.builtin,
-                    role: Some("role".to_string()),
-                    responsibility: r.system_prompt_override.as_deref().map(|s| {
-                        if s.len() > 200 { s[..200].to_string() } else { s.to_string() }
-                    }),
-                    bound_model: r.provider_id.clone(),
-                    provider: r.provider_ids.first().cloned(),
-                });
-            }
-            Ok(options)
-        })
-        .await
-        .map_err(join_err)??;
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<AgentOptionDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let mut options = Vec::new();
+        for p in repos::agent_profiles::list(&db.0)? {
+            options.push(AgentOptionDto {
+                kind: "cli".to_string(),
+                id: p.id.clone(),
+                name: p.name.clone(),
+                enabled: p.enabled,
+                builtin: false,
+                role: Some(p.adapter.clone()),
+                responsibility: None,
+                bound_model: None,
+                provider: None,
+            });
+        }
+        for r in repos::roles::list(&db.0)? {
+            options.push(AgentOptionDto {
+                kind: "role".to_string(),
+                id: r.id.clone(),
+                name: r.name.clone(),
+                enabled: true,
+                builtin: r.builtin,
+                role: Some("role".to_string()),
+                responsibility: r.system_prompt_override.as_deref().map(|s| {
+                    if s.len() > 200 {
+                        s[..200].to_string()
+                    } else {
+                        s.to_string()
+                    }
+                }),
+                bound_model: r.provider_id.clone(),
+                provider: r.provider_ids.first().cloned(),
+            });
+        }
+        Ok(options)
+    })
+    .await
+    .map_err(join_err)??;
     Ok(result)
 }
 
@@ -5220,8 +5254,14 @@ pub async fn impl_list_injectable_sessions(
     tokio::task::spawn_blocking(move || -> Result<Vec<InjectableSessionDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws = repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-        let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
+        let active_ws = repos::workspace_open_state::find_focused(&db.0)?
+            .map(|r| r.workspace_id)
+            .unwrap_or_default();
+        let filter_ws = if active_ws.is_empty() {
+            "__migrated__"
+        } else {
+            &active_ws
+        };
         let sessions = repos::sessions::list(&db.0, filter_ws, 50)?;
         Ok(sessions
             .into_iter()
@@ -5263,7 +5303,7 @@ pub async fn impl_list_injectable_rules(
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceAsrConfigDto {
-    pub model_source: String,  // "builtin" | "custom"
+    pub model_source: String, // "builtin" | "custom"
     pub custom_model_id: Option<String>,
 }
 
@@ -5301,10 +5341,7 @@ pub async fn impl_list_asr_models(_state: &AppState) -> Result<Vec<AsrModelDto>,
 
 // ---------------------------------------------------------------- stop / cancel
 
-pub async fn impl_stop_conversation(
-    state: &AppState,
-    session_id: String,
-) -> Result<(), IpcError> {
+pub async fn impl_stop_conversation(state: &AppState, session_id: String) -> Result<(), IpcError> {
     // Chat runs have no `runs` row — they are supervised under the session
     // id, so this is the only handle that can actually stop the loop.
     state.session_cancels.cancel(&session_id);
@@ -5320,8 +5357,15 @@ pub async fn impl_stop_conversation(
             // Team/background runs of this session are supervised by run id.
             run_cancels.cancel_by_run(&run.id);
             let current = run.status;
-            if transition_run_and_notify(&db.0, Some(&bus), &run.id, current, RunEvent::Cancel, None)
-                .is_ok()
+            if transition_run_and_notify(
+                &db.0,
+                Some(&bus),
+                &run.id,
+                current,
+                RunEvent::Cancel,
+                None,
+            )
+            .is_ok()
             {
                 let _ = append_domain_event(
                     &db.0,
@@ -5344,7 +5388,11 @@ pub async fn impl_list_active_runs(state: &AppState) -> Result<Vec<RunDto>, IpcE
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
         let mut all = Vec::new();
-        for s in [RunState::Running, RunState::Queued, RunState::AwaitingApproval] {
+        for s in [
+            RunState::Running,
+            RunState::Queued,
+            RunState::AwaitingApproval,
+        ] {
             for r in repos::tasks_runs::list_runs_by_status(&db.0, s)? {
                 all.push(RunDto::from(r));
             }
@@ -5652,6 +5700,7 @@ fn task_id_payload(id: &str) -> serde_json::Value {
 pub enum ProviderProtocolDto {
     OpenAiCompatible,
     AnthropicCompatible,
+    SenseNova,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -5994,41 +6043,42 @@ pub struct IsolationViolationDto {
     pub task_workspace_id: Option<String>,
 }
 
-pub async fn impl_list_workspaces(
-    state: &AppState,
-) -> Result<Vec<WorkspaceEntryDto>, IpcError> {
+pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntryDto>, IpcError> {
     let reg = state.workspace_registry.clone();
     let db_path = state.db_path.clone();
-    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<WorkspaceEntryDto>, IpcError> {
-        let list = reg.list()?;
-        let db = Db::open(&db_path)?;
-        let open_state: std::collections::HashMap<String, repos::workspace_open_state::WorkspaceOpenStateRow> =
-            repos::workspace_open_state::list(&db.0)?
+    let entries =
+        tokio::task::spawn_blocking(move || -> Result<Vec<WorkspaceEntryDto>, IpcError> {
+            let list = reg.list()?;
+            let db = Db::open(&db_path)?;
+            let open_state: std::collections::HashMap<
+                String,
+                repos::workspace_open_state::WorkspaceOpenStateRow,
+            > = repos::workspace_open_state::list(&db.0)?
                 .into_iter()
                 .map(|r| (r.workspace_id.clone(), r))
                 .collect();
-        Ok(list
-            .into_iter()
-            .map(|wp| {
-                let os = open_state.get(&wp.entry.id);
-                WorkspaceEntryDto {
-                    id: wp.entry.id.clone(),
-                    root_path: wp.entry.root_path,
-                    color_tag: wp.entry.color_tag,
-                    created_at: wp.entry.created_at,
-                    is_active: wp.entry.is_active,
-                    directory_present: wp.directory_present,
-                    is_pinned: Some(wp.entry.is_pinned),
-                    is_open: Some(os.is_some()),
-                    is_focused: Some(os.map(|r| r.is_focused).unwrap_or(false)),
-                    opened_at: os.map(|r| r.opened_at),
-                    last_focused_at: os.map(|r| r.last_focused_at),
-                }
-            })
-            .collect())
-    })
-    .await
-    .map_err(join_err)??;
+            Ok(list
+                .into_iter()
+                .map(|wp| {
+                    let os = open_state.get(&wp.entry.id);
+                    WorkspaceEntryDto {
+                        id: wp.entry.id.clone(),
+                        root_path: wp.entry.root_path,
+                        color_tag: wp.entry.color_tag,
+                        created_at: wp.entry.created_at,
+                        is_active: wp.entry.is_active,
+                        directory_present: wp.directory_present,
+                        is_pinned: Some(wp.entry.is_pinned),
+                        is_open: Some(os.is_some()),
+                        is_focused: Some(os.map(|r| r.is_focused).unwrap_or(false)),
+                        opened_at: os.map(|r| r.opened_at),
+                        last_focused_at: os.map(|r| r.last_focused_at),
+                    }
+                })
+                .collect())
+        })
+        .await
+        .map_err(join_err)??;
     Ok(entries)
 }
 
@@ -6055,8 +6105,16 @@ pub async fn impl_add_workspace(
         is_pinned: Some(entry.is_pinned),
         is_open: Some(entry.is_active),
         is_focused: Some(entry.is_active),
-        opened_at: if entry.is_active { Some(nuomi_core::domain::now_ms()) } else { None },
-        last_focused_at: if entry.is_active { Some(nuomi_core::domain::now_ms()) } else { None },
+        opened_at: if entry.is_active {
+            Some(nuomi_core::domain::now_ms())
+        } else {
+            None
+        },
+        last_focused_at: if entry.is_active {
+            Some(nuomi_core::domain::now_ms())
+        } else {
+            None
+        },
     })
 }
 
@@ -6162,9 +6220,12 @@ pub async fn impl_open_workspace(
     let db_path = state.db_path.clone();
     let id_for_open = id.clone();
     tokio::task::spawn_blocking(move || -> Result<OpenWorkspaceResult, IpcError> {
-        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        let svc =
+            nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
         svc.open(&id_for_open).map_err(map_open_set_error)?;
-        Ok(OpenWorkspaceResult { workspace_id: id_for_open })
+        Ok(OpenWorkspaceResult {
+            workspace_id: id_for_open,
+        })
     })
     .await
     .map_err(join_err)??;
@@ -6186,10 +6247,13 @@ pub async fn impl_close_workspace(
     force: bool,
 ) -> Result<CloseWorkspaceResult, IpcError> {
     let db_path = state.db_path.clone();
-    let result = tokio::task::spawn_blocking(move || -> Result<nuomi_core::services::workspace_open_set::CloseOutcome, IpcError> {
-        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-        svc.close(&id, force).map_err(map_open_set_error)
-    })
+    let result = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::workspace_open_set::CloseOutcome, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+            svc.close(&id, force).map_err(map_open_set_error)
+        },
+    )
     .await
     .map_err(join_err)??;
     // Sync in-memory root if focus transferred.
@@ -6216,7 +6280,8 @@ pub async fn impl_focus_workspace(
     let db_path = state.db_path.clone();
     let id_for_focus = id.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+        let svc =
+            nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
         svc.focus(&id_for_focus).map_err(map_open_set_error)
     })
     .await
@@ -6238,10 +6303,13 @@ pub async fn impl_close_all_workspaces(
     exclude_pinned: bool,
 ) -> Result<Vec<CloseWorkspaceResult>, IpcError> {
     let db_path = state.db_path.clone();
-    let outcomes = tokio::task::spawn_blocking(move || -> Result<Vec<nuomi_core::services::workspace_open_set::CloseOutcome>, IpcError> {
-        let svc = nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-        svc.close_all(exclude_pinned).map_err(map_open_set_error)
-    })
+    let outcomes = tokio::task::spawn_blocking(
+        move || -> Result<Vec<nuomi_core::services::workspace_open_set::CloseOutcome>, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
+            svc.close_all(exclude_pinned).map_err(map_open_set_error)
+        },
+    )
     .await
     .map_err(join_err)??;
     Ok(outcomes
@@ -6253,9 +6321,7 @@ pub async fn impl_close_all_workspaces(
         .collect())
 }
 
-pub async fn impl_get_open_set(
-    state: &AppState,
-) -> Result<OpenSetDto, IpcError> {
+pub async fn impl_get_open_set(state: &AppState) -> Result<OpenSetDto, IpcError> {
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<OpenSetDto, IpcError> {
         let db = Db::open(&db_path)?;
@@ -6270,9 +6336,12 @@ pub async fn impl_get_open_set(
         let unread_indicators = open_state
             .iter()
             .filter_map(|r| {
-                let count =
-                    repos::tasks_runs::count_unread_since(&db.0, &r.workspace_id, r.last_focused_at)
-                        .unwrap_or(0);
+                let count = repos::tasks_runs::count_unread_since(
+                    &db.0,
+                    &r.workspace_id,
+                    r.last_focused_at,
+                )
+                .unwrap_or(0);
                 if count > 0 {
                     Some(UnreadIndicatorDto {
                         workspace_id: r.workspace_id.clone(),
@@ -6304,10 +6373,7 @@ pub async fn impl_get_open_set(
 
 // ---- Pin/unpin commands ----
 
-pub async fn impl_pin_workspace(
-    state: &AppState,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn impl_pin_workspace(state: &AppState, id: String) -> Result<(), IpcError> {
     let reg = state.workspace_registry.clone();
     tokio::task::spawn_blocking(move || reg.pin(&id))
         .await
@@ -6315,10 +6381,7 @@ pub async fn impl_pin_workspace(
     Ok(())
 }
 
-pub async fn impl_unpin_workspace(
-    state: &AppState,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn impl_unpin_workspace(state: &AppState, id: String) -> Result<(), IpcError> {
     let reg = state.workspace_registry.clone();
     tokio::task::spawn_blocking(move || reg.unpin(&id))
         .await
@@ -6353,7 +6416,8 @@ pub async fn impl_set_layout_snapshot(
 ) -> Result<(), IpcError> {
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let svc = nuomi_core::services::WorkspaceLayoutService::new(PathBuf::from(db_path.as_ref()));
+        let svc =
+            nuomi_core::services::WorkspaceLayoutService::new(PathBuf::from(db_path.as_ref()));
         let layout_mode = match mode.as_str() {
             "split" => nuomi_core::services::LayoutMode::Split,
             "overview" => nuomi_core::services::LayoutMode::Overview,
@@ -6398,7 +6462,9 @@ pub async fn impl_cross_workspace_search(
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<CrossSearchOutcomeDto, IpcError> {
         let svc = nuomi_core::services::CrossWorkspaceService::new(PathBuf::from(db_path.as_ref()));
-        let outcome = svc.search_all_open(&query, match_content).map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        let outcome = svc
+            .search_all_open(&query, match_content)
+            .map_err(|e| IpcError::new("internal", format!("{e}")))?;
         Ok(CrossSearchOutcomeDto {
             groups: outcome
                 .groups
@@ -6413,7 +6479,9 @@ pub async fn impl_cross_workspace_search(
                             relative_path: m.relative_path,
                             match_type: match m.match_type {
                                 nuomi_core::services::MatchType::FileName => "fileName".into(),
-                                nuomi_core::services::MatchType::FileContent => "fileContent".into(),
+                                nuomi_core::services::MatchType::FileContent => {
+                                    "fileContent".into()
+                                }
                             },
                         })
                         .collect(),
@@ -6478,23 +6546,40 @@ pub async fn impl_cross_workspace_compare(
 fn map_open_set_error(e: nuomi_core::services::OpenSetError) -> IpcError {
     use nuomi_core::services::OpenSetError as E;
     match e {
-        E::NotFound(id) => IpcError::new("workspace.not_found", format!("workspace not found: {id}")),
-        E::AlreadyOpen(id) => IpcError::new("workspace.already_open", format!("workspace already open: {id}")),
-        E::OpenSetFull(n) => IpcError::new("workspace.open_set_full", format!("open set full (max {n})")),
-        E::DirectoryMissing(p) => IpcError::new("workspace.directory_missing", format!("directory missing: {p}")),
-        E::ProbeTimeout(ms) => IpcError::new("workspace.probe_timeout", format!("directory probe timed out: {ms}ms")),
-        E::Store(e) => IpcError::from(e),
-        E::NeedConfirm { workspace_id, reason, dirty_files, running_tasks } => {
-            IpcError::with_details(
-                "workspace.need_confirm",
-                format!("close needs confirmation for workspace {workspace_id}: {reason}"),
-                serde_json::json!({
-                    "workspaceId": workspace_id,
-                    "dirtyFiles": dirty_files,
-                    "runningTasks": running_tasks,
-                }),
-            )
+        E::NotFound(id) => {
+            IpcError::new("workspace.not_found", format!("workspace not found: {id}"))
         }
+        E::AlreadyOpen(id) => IpcError::new(
+            "workspace.already_open",
+            format!("workspace already open: {id}"),
+        ),
+        E::OpenSetFull(n) => IpcError::new(
+            "workspace.open_set_full",
+            format!("open set full (max {n})"),
+        ),
+        E::DirectoryMissing(p) => IpcError::new(
+            "workspace.directory_missing",
+            format!("directory missing: {p}"),
+        ),
+        E::ProbeTimeout(ms) => IpcError::new(
+            "workspace.probe_timeout",
+            format!("directory probe timed out: {ms}ms"),
+        ),
+        E::Store(e) => IpcError::from(e),
+        E::NeedConfirm {
+            workspace_id,
+            reason,
+            dirty_files,
+            running_tasks,
+        } => IpcError::with_details(
+            "workspace.need_confirm",
+            format!("close needs confirmation for workspace {workspace_id}: {reason}"),
+            serde_json::json!({
+                "workspaceId": workspace_id,
+                "dirtyFiles": dirty_files,
+                "runningTasks": running_tasks,
+            }),
+        ),
     }
 }
 
@@ -6502,28 +6587,29 @@ pub async fn impl_list_orphan_sessions(
     state: &AppState,
 ) -> Result<Vec<OrphanSessionDto>, IpcError> {
     let db_path = state.db_path.clone();
-    let orphans = tokio::task::spawn_blocking(move || -> Result<Vec<OrphanSessionDto>, IpcError> {
-        let db = Db::open(&db_path)?;
-        let mut stmt = db.0.prepare(
-            "SELECT s.id, s.workspace_id, s.title, s.updated_at
+    let orphans =
+        tokio::task::spawn_blocking(move || -> Result<Vec<OrphanSessionDto>, IpcError> {
+            let db = Db::open(&db_path)?;
+            let mut stmt = db.0.prepare(
+                "SELECT s.id, s.workspace_id, s.title, s.updated_at
              FROM sessions s
              WHERE s.workspace_id NOT IN (SELECT id FROM workspaces)
                AND s.deleted_at IS NULL
              ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(OrphanSessionDto {
-                session_id: row.get(0)?,
-                workspace_id: row.get(1)?,
-                title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                updated_at: row.get(3)?,
-            })
-        })?;
-        let collected: Result<Vec<_>, rusqlite::Error> = rows.collect();
-        Ok(collected.map_err(StoreError::Sqlite)?)
-    })
-    .await
-    .map_err(join_err)??;
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(OrphanSessionDto {
+                    session_id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    updated_at: row.get(3)?,
+                })
+            })?;
+            let collected: Result<Vec<_>, rusqlite::Error> = rows.collect();
+            Ok(collected.map_err(StoreError::Sqlite)?)
+        })
+        .await
+        .map_err(join_err)??;
     Ok(orphans)
 }
 
@@ -6595,7 +6681,8 @@ pub async fn impl_get_workspace(state: &AppState) -> Result<WorkspaceInfo, IpcEr
         .as_ref()
         .map(|ws| ws.root_path.clone())
         .unwrap_or_else(|| state.current_workspace().to_string_lossy().to_string());
-    let configured = active.is_some() || state.workspace_env_configured || workspace_persisted(state)?;
+    let configured =
+        active.is_some() || state.workspace_env_configured || workspace_persisted(state)?;
     Ok(WorkspaceInfo { root, configured })
 }
 

@@ -734,6 +734,7 @@
     "providerType": "服务商类型",
     "typeOpenAi": "OpenAI 兼容",
     "typeAnthropic": "Anthropic 兼容",
+    "typeSenseNova": "SenseNova",
     "typeDeepSeek": "DeepSeek",
     "typeOllama": "Ollama",
     "typeCustom": "自定义",

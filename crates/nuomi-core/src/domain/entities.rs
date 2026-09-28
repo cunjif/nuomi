@@ -199,6 +199,9 @@ pub struct EventRecord {
 pub enum ProviderProtocol {
     OpenAiCompatible,
     AnthropicCompatible,
+    /// SenseNova gateway — OpenAI-compatible protocol but with `/api/v1`
+    /// path prefix instead of the canonical `/v1`.
+    SenseNova,
 }
 
 /// Provider-level model/routing settings, persisted under the `"settings"`
@@ -1118,15 +1121,24 @@ mod tests {
         let s = EvolutionSettings::default();
         assert!(!s.online_learning.authorized);
         assert_eq!(s.online_learning.allowlist.len(), 9);
-        assert!(s.online_learning.allowlist.contains(&"github.com".to_string()));
+        assert!(s
+            .online_learning
+            .allowlist
+            .contains(&"github.com".to_string()));
         assert_eq!(s.refine.trigger_failures, 3);
         assert_eq!(s.refine.evidence_threshold, 0.8);
         assert!(s.refine.rollback_enabled);
-        assert!(matches!(s.refine.min_edit_strategy, RefineStrategy::PromptNote));
+        assert!(matches!(
+            s.refine.min_edit_strategy,
+            RefineStrategy::PromptNote
+        ));
         assert!(!s.skill_creation.enabled);
         assert!(matches!(s.skill_creation.format, SkillFormat::SkillMd));
         assert_eq!(s.memory_policy.retention_days, 90);
-        assert!(matches!(s.memory_policy.retrieval, RetrievalStrategy::Keyword));
+        assert!(matches!(
+            s.memory_policy.retrieval,
+            RetrievalStrategy::Keyword
+        ));
     }
 
     #[test]
@@ -1156,12 +1168,18 @@ mod tests {
         assert!(decoded.online_learning.authorized);
         assert_eq!(decoded.online_learning.allowlist, vec!["custom.dev"]);
         assert_eq!(decoded.refine.trigger_failures, 5);
-        assert!(matches!(decoded.refine.min_edit_strategy, RefineStrategy::Skill));
+        assert!(matches!(
+            decoded.refine.min_edit_strategy,
+            RefineStrategy::Skill
+        ));
         assert_eq!(decoded.refine.evidence_threshold, 0.9);
         assert!(!decoded.refine.rollback_enabled);
         assert!(decoded.skill_creation.enabled);
         assert_eq!(decoded.memory_policy.retention_days, 180);
-        assert!(matches!(decoded.memory_policy.retrieval, RetrievalStrategy::Hybrid));
+        assert!(matches!(
+            decoded.memory_policy.retrieval,
+            RetrievalStrategy::Hybrid
+        ));
     }
 
     #[test]
@@ -1174,8 +1192,14 @@ mod tests {
         }"#;
         let decoded: EvolutionSettings = serde_json::from_str(json).unwrap();
         assert!(decoded.online_learning.authorized);
-        assert!(matches!(decoded.refine.min_edit_strategy, RefineStrategy::Memory));
-        assert!(matches!(decoded.memory_policy.retrieval, RetrievalStrategy::Semantic));
+        assert!(matches!(
+            decoded.refine.min_edit_strategy,
+            RefineStrategy::Memory
+        ));
+        assert!(matches!(
+            decoded.memory_policy.retrieval,
+            RetrievalStrategy::Semantic
+        ));
     }
 
     #[test]
@@ -1183,9 +1207,21 @@ mod tests {
         let defaults = EvolutionSettings::default();
         let json = serde_json::to_string(&defaults).unwrap();
         let decoded: EvolutionSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded.refine.trigger_failures, defaults.refine.trigger_failures);
-        assert_eq!(decoded.refine.evidence_threshold, defaults.refine.evidence_threshold);
-        assert_eq!(decoded.memory_policy.retention_days, defaults.memory_policy.retention_days);
-        assert_eq!(decoded.online_learning.allowlist, defaults.online_learning.allowlist);
+        assert_eq!(
+            decoded.refine.trigger_failures,
+            defaults.refine.trigger_failures
+        );
+        assert_eq!(
+            decoded.refine.evidence_threshold,
+            defaults.refine.evidence_threshold
+        );
+        assert_eq!(
+            decoded.memory_policy.retention_days,
+            defaults.memory_policy.retention_days
+        );
+        assert_eq!(
+            decoded.online_learning.allowlist,
+            defaults.online_learning.allowlist
+        );
     }
 }

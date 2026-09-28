@@ -734,6 +734,7 @@
     "providerType": "Provider type",
     "typeOpenAi": "OpenAI compatible",
     "typeAnthropic": "Anthropic compatible",
+    "typeSenseNova": "SenseNova",
     "typeDeepSeek": "DeepSeek",
     "typeOllama": "Ollama",
     "typeCustom": "Custom",

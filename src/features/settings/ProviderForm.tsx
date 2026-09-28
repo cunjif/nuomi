@@ -33,25 +33,30 @@ export function providerAvatarStyle(name: string): { backgroundColor: string } {
   return { backgroundColor: `hsl(${220 + (hash % 80)} 55% 45% / 0.35)` };
 }
 
-type TypeKey = "openai" | "anthropic" | "deepseek" | "ollama" | "custom";
+type TypeKey = "openai" | "anthropic" | "sensenova" | "deepseek" | "ollama" | "custom";
 const TYPE_OPTIONS: ReadonlyArray<{ key: TypeKey; labelKey: string }> = [
   { key: "openai", labelKey: "provider.typeOpenAi" },
   { key: "anthropic", labelKey: "provider.typeAnthropic" },
+  { key: "sensenova", labelKey: "provider.typeSenseNova" },
   { key: "deepseek", labelKey: "provider.typeDeepSeek" },
   { key: "ollama", labelKey: "provider.typeOllama" },
   { key: "custom", labelKey: "provider.typeCustom" },
 ];
 const PRESET_URLS: Partial<Record<TypeKey, string>> = {
+  sensenova: "https://token.sensenova.cn",
   deepseek: "https://api.deepseek.com",
   ollama: "http://localhost:11434/v1",
 };
 
 function protocolOf(key: TypeKey): ProviderProtocolDto {
-  return key === "anthropic" ? "anthropic_compatible" : "open_ai_compatible";
+  if (key === "anthropic") return "anthropic_compatible";
+  if (key === "sensenova") return "sense_nova";
+  return "open_ai_compatible";
 }
 
 function typeKeyOf(protocol: ProviderProtocolDto): TypeKey {
   if (protocol === "anthropic_compatible") return "anthropic";
+  if (protocol === "sense_nova") return "sensenova";
   return "openai";
 }
 

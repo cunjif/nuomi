@@ -10,7 +10,7 @@ use super::sse;
 use super::types::{
     CacheRetention, ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, Usage,
 };
-use super::ProviderError;
+use super::{ensure_status, ProviderError};
 
 pub struct AnthropicCompatibleClient {
     http: reqwest::Client,
@@ -37,7 +37,10 @@ impl AnthropicCompatibleClient {
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+        // Tolerate both bare origins (`https://host`) and `/v1`-suffixed
+        // base URLs — see `super::join_api_path`. The `/v1` segment is
+        // prepended only for bare origins, so it is never doubled.
+        super::join_api_path(&self.base_url, "/messages")
     }
 }
 
@@ -243,8 +246,8 @@ impl LlmProvider for AnthropicCompatibleClient {
             .header("anthropic-version", "2023-06-01")
             .json(&build_body(request, false))
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let response = ensure_status(response, self.endpoint()).await?;
         let body: Value = response.json().await?;
         parse_response(&body)
     }
@@ -269,13 +272,13 @@ impl LlmProvider for AnthropicCompatibleClient {
                 tx: &mut futures::channel::mpsc::Sender<Result<StreamEvent, ProviderError>>,
             ) -> Result<(), ProviderError> {
                 let response = http
-                    .post(url)
+                    .post(url.clone())
                     .header("x-api-key", api_key)
                     .header("anthropic-version", "2023-06-01")
                     .json(&body)
                     .send()
-                    .await?
-                    .error_for_status()?;
+                    .await?;
+                let response = ensure_status(response, url).await?;
                 let mut state = ChatResponse::default();
                 let mut emitted = 0usize;
                 let mut data = sse::data_payloads(Box::pin(response.bytes_stream()));

@@ -93,6 +93,7 @@ fn protocol_to_str(p: ProviderProtocol) -> &'static str {
     match p {
         ProviderProtocol::OpenAiCompatible => "openai_compatible",
         ProviderProtocol::AnthropicCompatible => "anthropic_compatible",
+        ProviderProtocol::SenseNova => "sense_nova",
     }
 }
 
@@ -100,6 +101,7 @@ fn protocol_from_str(s: &str) -> Option<ProviderProtocol> {
     match s {
         "openai_compatible" => Some(ProviderProtocol::OpenAiCompatible),
         "anthropic_compatible" => Some(ProviderProtocol::AnthropicCompatible),
+        "sense_nova" => Some(ProviderProtocol::SenseNova),
         _ => None,
     }
 }

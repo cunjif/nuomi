@@ -61,11 +61,15 @@ pub async fn list_model_ids(
             message: "base url is empty".to_string(),
         });
     }
-    let url = format!("{base}/models");
+    let base = match protocol {
+        ProviderProtocol::SenseNova => super::sensenova_base_url(base),
+        _ => base.to_string(),
+    };
+    let url = super::join_api_path(&base, "/models");
     let http = super::pool::client_for_endpoint(proxy)?;
     let mut request = http.get(&url).timeout(FETCH_TIMEOUT);
     request = match protocol {
-        ProviderProtocol::OpenAiCompatible => {
+        ProviderProtocol::OpenAiCompatible | ProviderProtocol::SenseNova => {
             if !api_key.is_empty() {
                 request = request.bearer_auth(api_key);
             }
@@ -124,7 +128,7 @@ mod tests {
     async fn parses_sorted_unique_ids_and_sends_the_bearer_key() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/models"))
+            .and(path("/v1/models"))
             .and(header("authorization", "Bearer secret"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(PAYLOAD, "application/json"))
             .mount(&server)
@@ -145,7 +149,7 @@ mod tests {
     async fn anthropic_uses_its_own_auth_headers() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/models"))
+            .and(path("/v1/models"))
             .and(header("x-api-key", "sk-ant"))
             .and(header("anthropic-version", "2023-06-01"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(PAYLOAD, "application/json"))
@@ -167,7 +171,7 @@ mod tests {
     async fn http_failure_surfaces_the_status() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/models"))
+            .and(path("/v1/models"))
             .respond_with(ResponseTemplate::new(401).set_body_string("invalid api key"))
             .mount(&server)
             .await;
