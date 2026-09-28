@@ -145,7 +145,7 @@ export function ConversationsList(): ReactNode {
     : "";
 
   return (
-    <section aria-label={t("sessions.heading")} className="flex h-full flex-col p-2">
+    <section aria-label={t("sessions.heading")} className="flex h-full min-w-0 flex-col overflow-hidden p-2">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{t("sessions.heading")}</h2>
         <div className="flex gap-1">
@@ -214,7 +214,7 @@ export function ConversationsList(): ReactNode {
       )}
 
       {!batchMode && (
-        <div className="mb-1 flex gap-0.5" role="tablist">
+        <div className="mb-1 flex flex-wrap gap-0.5" role="tablist">
           {FILTER_TABS.map((tab) => (
             <button
               key={tab.key}
@@ -234,7 +234,7 @@ export function ConversationsList(): ReactNode {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
       <AsyncBoundary
         isLoading={conversationsQuery.isLoading}
         error={conversationsQuery.error}
@@ -301,7 +301,7 @@ export function ConversationsList(): ReactNode {
       </AsyncBoundary>
       </div>
 
-      {!batchMode && <div className="shrink-0 border-t border-ink-muted/30 pt-1 mt-1"><WorkspaceFilter /></div>}
+      {!batchMode && <div className="min-w-0 shrink-0 border-t border-ink-muted/30 pt-1 mt-1"><WorkspaceFilter /></div>}
 
       {dialogKind && (
         <NewConversationDialog
