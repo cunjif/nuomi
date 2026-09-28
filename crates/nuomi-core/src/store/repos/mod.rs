@@ -17,9 +17,9 @@ pub mod settings;
 pub mod tasks_runs;
 pub mod teams;
 pub mod whiteboard;
-pub mod workspaces;
-pub mod workspace_open_state;
 pub mod workspace_layout_snapshot;
+pub mod workspace_open_state;
 pub mod workspace_recent;
+pub mod workspaces;
 
 pub use agent_profiles::{count, delete, get, insert, list, update};

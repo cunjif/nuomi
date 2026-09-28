@@ -381,17 +381,16 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 1, "placeholder row must be inserted from legacy root");
+        assert_eq!(
+            count, 1,
+            "placeholder row must be inserted from legacy root"
+        );
         let (root, active): (String, i64) = conn
-            .query_row(
-                "SELECT root_path, is_active FROM workspaces",
-                [],
-                |r| {
-                    let root: String = r.get(0)?;
-                    let active: i64 = r.get(1)?;
-                    Ok((root, active))
-                },
-            )
+            .query_row("SELECT root_path, is_active FROM workspaces", [], |r| {
+                let root: String = r.get(0)?;
+                let active: i64 = r.get(1)?;
+                Ok((root, active))
+            })
             .unwrap();
         assert_eq!(root, "D:\\projects\\demo");
         assert_eq!(active, 1);
@@ -409,7 +408,9 @@ mod tests {
         .unwrap();
         // 默认值为 '__migrated__'。
         let wid: String = conn
-            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| r.get(0))
+            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(wid, "__migrated__", "default must be '__migrated__'");
         // NOT NULL 约束：显式插入 NULL 必须失败。

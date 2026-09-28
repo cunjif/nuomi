@@ -31,16 +31,18 @@ pub fn upsert(conn: &Connection, h: &SessionCliHandle) -> Result<(), StoreError>
            agent_profile_id = excluded.agent_profile_id,
            cli_session_id = excluded.cli_session_id,
            updated_at = excluded.updated_at",
-        params![h.session_id, h.role_agent_id, h.agent_profile_id, h.cli_session_id, h.updated_at],
+        params![
+            h.session_id,
+            h.role_agent_id,
+            h.agent_profile_id,
+            h.cli_session_id,
+            h.updated_at
+        ],
     )?;
     Ok(())
 }
 
-pub fn clear(
-    conn: &Connection,
-    session_id: &str,
-    role_agent_id: &str,
-) -> Result<bool, StoreError> {
+pub fn clear(conn: &Connection, session_id: &str, role_agent_id: &str) -> Result<bool, StoreError> {
     let n = conn.execute(
         "DELETE FROM session_cli_handles WHERE session_id = ?1 AND role_agent_id = ?2",
         params![session_id, role_agent_id],

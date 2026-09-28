@@ -218,8 +218,16 @@ mod tests {
     #[test]
     fn create_chat_conversation_defaults() {
         let conn = db();
-        let session =
-            create_conversation(&conn, ConversationKind::Chat, "hello", &[], None, None, "__migrated__").unwrap();
+        let session = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "hello",
+            &[],
+            None,
+            None,
+            "__migrated__",
+        )
+        .unwrap();
         assert_eq!(session.kind, ConversationKind::Chat);
         assert!(session.team_id.is_none());
         let loaded = sessions::get(&conn, &session.id).unwrap();
@@ -264,8 +272,16 @@ mod tests {
     #[test]
     fn resolve_participants_falls_through_to_none_when_empty() {
         let conn = db();
-        let session =
-            create_conversation(&conn, ConversationKind::Chat, "s", &[], None, None, "__migrated__").unwrap();
+        let session = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "s",
+            &[],
+            None,
+            None,
+            "__migrated__",
+        )
+        .unwrap();
         let resolved = resolve_participants(&conn, &session.id).unwrap();
         assert!(resolved.is_empty());
     }

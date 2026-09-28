@@ -59,7 +59,10 @@ pub fn list(conn: &Connection) -> Result<Vec<WorkspaceEntry>, StoreError> {
 }
 
 /// Finds a workspace by its (normalized) root path.
-pub fn find_by_path(conn: &Connection, root_path: &str) -> Result<Option<WorkspaceEntry>, StoreError> {
+pub fn find_by_path(
+    conn: &Connection,
+    root_path: &str,
+) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
         "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
          FROM workspaces WHERE root_path = ?1",
@@ -109,7 +112,10 @@ pub fn set_active(conn: &Connection, id: &str) -> Result<(), StoreError> {
             id: id.to_string(),
         });
     }
-    conn.execute("UPDATE workspaces SET is_active = 0 WHERE is_active = 1", [])?;
+    conn.execute(
+        "UPDATE workspaces SET is_active = 0 WHERE is_active = 1",
+        [],
+    )?;
     conn.execute(
         "UPDATE workspaces SET is_active = 1 WHERE id = ?1",
         params![id],
@@ -253,7 +259,11 @@ mod tests {
         assert_eq!(active.id, "w2");
         // 至多一条 is_active=1
         let count: i64 = conn
-            .query_row("SELECT count(*) FROM workspaces WHERE is_active=1", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM workspaces WHERE is_active=1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }

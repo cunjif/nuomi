@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::store::repos::workspaces;
 use crate::store::repos::workspace_open_state;
+use crate::store::repos::workspaces;
 use crate::store::{migrations, Db, StoreError};
 
 #[derive(Debug, Error)]
@@ -220,7 +220,15 @@ fn search_in_workspace(
 ) -> Result<Vec<FileMatch>, CrossWorkspaceError> {
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
-    search_recursive(root, root, &query_lower, match_content, &mut results, 0, 100)?;
+    search_recursive(
+        root,
+        root,
+        &query_lower,
+        match_content,
+        &mut results,
+        0,
+        100,
+    )?;
     Ok(results)
 }
 
@@ -253,7 +261,8 @@ fn search_recursive(
 
         if path.is_file() {
             if name_str.to_lowercase().contains(query_lower) {
-                let rel = path.strip_prefix(root)
+                let rel = path
+                    .strip_prefix(root)
                     .ok()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| name_str.to_string());
@@ -264,7 +273,8 @@ fn search_recursive(
             } else if match_content && is_text_file(&path) {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if content.to_lowercase().contains(query_lower) {
-                        let rel = path.strip_prefix(root)
+                        let rel = path
+                            .strip_prefix(root)
                             .ok()
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_else(|| name_str.to_string());
@@ -276,7 +286,15 @@ fn search_recursive(
                 }
             }
         } else if path.is_dir() {
-            search_recursive(root, &path, query_lower, match_content, results, depth + 1, max_results)?;
+            search_recursive(
+                root,
+                &path,
+                query_lower,
+                match_content,
+                results,
+                depth + 1,
+                max_results,
+            )?;
         }
     }
     Ok(())
@@ -285,7 +303,19 @@ fn search_recursive(
 fn is_text_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("rs" | "ts" | "tsx" | "js" | "jsx" | "json" | "md" | "txt" | "toml" | "yaml" | "yml" | "sql")
+        Some(
+            "rs" | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "json"
+                | "md"
+                | "txt"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "sql"
+        )
     )
 }
 

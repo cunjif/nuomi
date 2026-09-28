@@ -26,7 +26,7 @@ fn openai_request() -> ChatRequest {
 async fn openai_compatible_complete_roundtrip() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/chat/completions"))
+        .and(path("/v1/chat/completions"))
         .and(body_partial_json(
             json!({ "model": "test-model", "stream": false }),
         ))
@@ -51,7 +51,7 @@ async fn openai_compatible_complete_roundtrip() {
 async fn openai_compatible_stream_emits_text_and_completed() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/chat/completions"))
+        .and(path("/v1/chat/completions"))
         .and(body_partial_json(json!({ "stream": true })))
         .respond_with(
             ResponseTemplate::new(200)
@@ -143,4 +143,199 @@ async fn anthropic_compatible_complete_and_error_path() {
         Err(ProviderError::Protocol { .. }) => {}
         other => panic!("expected protocol error, got {other:?}"),
     }
+}
+
+// --- Regression for issue provider-test-conn-404 ---------------------------
+// A bare-origin base URL (no `/v1`) must still reach the canonical versioned
+// endpoint. Before the fix OpenAiCompatibleClient appended only
+// `/chat/completions`, so a bare origin produced a URL missing `/v1` and the
+// real provider answered 404.
+
+#[tokio::test]
+async fn bare_origin_openai_base_url_reaches_v1_chat_completions() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "pong" },
+                "finish_reason": "stop"
+            }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1 }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = OpenAiCompatibleClient::new(server.uri(), "sk-test");
+    let resp = client
+        .complete(&openai_request())
+        .await
+        .expect("bare-origin base_url must reach /v1/chat/completions");
+    assert_eq!(resp.content, "pong");
+}
+
+#[tokio::test]
+async fn v1_suffixed_openai_base_url_does_not_double_v1() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "ok" },
+                "finish_reason": "stop"
+            }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1 }
+        })))
+        .mount(&server)
+        .await;
+
+    // base_url already carries /v1 — must not become /v1/v1/chat/completions.
+    let base = format!("{}/v1", server.uri());
+    let client = OpenAiCompatibleClient::new(base, "sk-test");
+    let resp = client
+        .complete(&openai_request())
+        .await
+        .expect("/v1-suffixed base_url must not double the /v1 segment");
+    assert_eq!(resp.content, "ok");
+}
+
+#[tokio::test]
+async fn bare_origin_anthropic_base_url_reaches_v1_messages() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{ "type": "text", "text": "hi" }],
+            "usage": { "input_tokens": 1, "output_tokens": 1 },
+            "stop_reason": "end_turn"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = AnthropicCompatibleClient::new(server.uri(), "k");
+    let resp = client
+        .complete(&openai_request())
+        .await
+        .expect("bare-origin anthropic base_url must reach /v1/messages");
+    assert_eq!(resp.content, "hi");
+}
+
+#[tokio::test]
+async fn v1_suffixed_anthropic_base_url_does_not_double_v1() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{ "type": "text", "text": "hi" }],
+            "usage": { "input_tokens": 1, "output_tokens": 1 },
+            "stop_reason": "end_turn"
+        })))
+        .mount(&server)
+        .await;
+
+    let base = format!("{}/v1", server.uri());
+    let client = AnthropicCompatibleClient::new(base, "k");
+    let resp = client
+        .complete(&openai_request())
+        .await
+        .expect("/v1-suffixed anthropic base_url must not double the /v1 segment");
+    assert_eq!(resp.content, "hi");
+}
+
+// --- Probe-strategy regression for issue provider-test-conn-probe-strategy ---
+// Some OpenAI-compatible gateways (e.g. sensenova token endpoints) expose
+// `/v1/models` but answer 404 on `/v1/chat/completions` — for tokens scoped
+// to listing only, or when chat is routed under a different path. The
+// "test connection" button must therefore probe with a models GET (which
+// `list_model_ids` does), not a chat-completion POST. This test pins that
+// contract: against a server that 404s chat but 200s models, the chat probe
+// fails and the models probe succeeds — proving the models GET is the
+// correct connectivity strategy.
+
+#[tokio::test]
+async fn chat_completion_probe_fails_when_chat_endpoint_is_404() {
+    let server = MockServer::start().await;
+    // The chat endpoint does not exist on this gateway → 404.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let client = OpenAiCompatibleClient::new(server.uri(), "sk-test");
+    let err = client
+        .complete(&openai_request())
+        .await
+        .expect_err("chat probe must fail when /v1/chat/completions is 404");
+    assert!(
+        err.to_string().contains("404"),
+        "error should mention 404, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn models_get_probe_succeeds_when_models_endpoint_is_200() {
+    use nuomi_core::domain::ProviderProtocol;
+    use nuomi_core::providers::list_model_ids;
+
+    let server = MockServer::start().await;
+    // The models endpoint is reachable → 200 with a model list.
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{ "id": "sense-1" }, { "id": "sense-2" }]
+        })))
+        .mount(&server)
+        .await;
+
+    let ids = list_model_ids(
+        ProviderProtocol::OpenAiCompatible,
+        &server.uri(),
+        "sk-test",
+        None,
+    )
+    .await
+    .expect("models GET probe must succeed when /v1/models is 200");
+    assert_eq!(ids, vec!["sense-1".to_string(), "sense-2".to_string()]);
+}
+
+#[tokio::test]
+async fn models_get_probe_is_the_correct_strategy_for_404_chat_gateways() {
+    // Combined scenario: chat endpoint 404, models endpoint 200 — exactly
+    // the sensenova case. The models probe (used by impl_test_provider_connection
+    // after the fix) succeeds where a chat probe would have failed.
+    use nuomi_core::domain::ProviderProtocol;
+    use nuomi_core::providers::list_model_ids;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{ "id": "sense-1" }]
+        })))
+        .mount(&server)
+        .await;
+
+    // Chat probe (the old strategy) — fails.
+    let chat_err = OpenAiCompatibleClient::new(server.uri(), "sk-test")
+        .complete(&openai_request())
+        .await
+        .expect_err("chat probe must fail");
+    assert!(chat_err.to_string().contains("404"), "{chat_err}");
+
+    // Models probe (the new strategy) — succeeds.
+    let ids = list_model_ids(
+        ProviderProtocol::OpenAiCompatible,
+        &server.uri(),
+        "sk-test",
+        None,
+    )
+    .await
+    .expect("models probe must succeed where chat probe failed");
+    assert_eq!(ids, vec!["sense-1".to_string()]);
 }

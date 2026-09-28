@@ -330,7 +330,11 @@ pub fn list(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Ses
 }
 
 /// Semantic alias for [`list`] — lists sessions belonging to a single workspace.
-pub fn list_by_workspace(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Session>, StoreError> {
+pub fn list_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+    limit: u32,
+) -> Result<Vec<Session>, StoreError> {
     list(conn, workspace_id, limit)
 }
 

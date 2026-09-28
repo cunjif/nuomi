@@ -5,8 +5,8 @@ pub mod run_state;
 pub mod status;
 
 pub use entities::{
-    AgentProfile, AgentRefKind, Approval, ApprovalDecision, Attachment, AttachmentKind,
-    Capability, CliFlavor, ConversationKind, ConversationParticipant, EventRecord, EvolutionSettings,
+    AgentProfile, AgentRefKind, Approval, ApprovalDecision, Attachment, AttachmentKind, Capability,
+    CliFlavor, ConversationKind, ConversationParticipant, EventRecord, EvolutionSettings,
     Integration, IntegrationKind, MemoryEntry, MemoryPolicy, MessageQueueEntry, ModelEntry,
     OnlineLearningConfig, PromptStatus, PromptVersion, ProviderConfig, ProviderProtocol,
     QueueStatus, RefineConfig, RefineStrategy, RetrievalStrategy, Role, RouteMode, Run, Schedule,

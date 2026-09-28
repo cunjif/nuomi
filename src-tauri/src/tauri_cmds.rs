@@ -309,9 +309,7 @@ pub async fn git_diff(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn git_staged_diff(
-    state: tauri::State<'_, AppState>,
-) -> Result<String, IpcError> {
+pub async fn git_staged_diff(state: tauri::State<'_, AppState>) -> Result<String, IpcError> {
     commands::impl_git_staged_diff(&state).await
 }
 
@@ -574,10 +572,7 @@ pub async fn get_open_set(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn pin_workspace(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn pin_workspace(state: tauri::State<'_, AppState>, id: String) -> Result<(), IpcError> {
     commands::impl_pin_workspace(&state, id).await
 }
 
@@ -1004,9 +999,7 @@ pub async fn delete_conversation(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn clear_conversations(
-    state: tauri::State<'_, AppState>,
-) -> Result<usize, IpcError> {
+pub async fn clear_conversations(state: tauri::State<'_, AppState>) -> Result<usize, IpcError> {
     commands::impl_clear_conversations(&state).await
 }
 
@@ -1060,10 +1053,7 @@ pub async fn list_active_runs(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn cancel_run(
-    state: tauri::State<'_, AppState>,
-    run_id: String,
-) -> Result<(), IpcError> {
+pub async fn cancel_run(state: tauri::State<'_, AppState>, run_id: String) -> Result<(), IpcError> {
     commands::impl_cancel_run(&state, run_id).await
 }
 

@@ -259,13 +259,12 @@ impl AppState {
             let _ = tokio::task::spawn_blocking(move || -> Result<(), CoreError> {
                 let db = nuomi_core::store::Db::open(&path)?;
                 nuomi_core::store::migrations::run(&db.0)?;
-                let restore_non_pinned =
-                    nuomi_core::store::repos::settings::get(
-                        &db.0,
-                        nuomi_core::store::repos::settings::RESTORE_NON_PINNED_ON_STARTUP,
-                    )?
-                    .map(|v| v != "false")
-                    .unwrap_or(true);
+                let restore_non_pinned = nuomi_core::store::repos::settings::get(
+                    &db.0,
+                    nuomi_core::store::repos::settings::RESTORE_NON_PINNED_ON_STARTUP,
+                )?
+                .map(|v| v != "false")
+                .unwrap_or(true);
                 let svc = WorkspaceLayoutService::new(PathBuf::from(path.to_string()));
                 let _ = svc.restore_snapshot(restore_non_pinned);
                 Ok(())

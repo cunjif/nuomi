@@ -137,7 +137,9 @@ fn install_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn install_global_shortcut(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
 
     let reload = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
     let reload_for_handler = reload;
@@ -171,7 +173,10 @@ fn spawn_watchdog(app: AppHandle) {
             let _ = app.emit("shell-load-failed", ());
             return;
         }
-        tracing::warn!(attempt, "webview not ready after grace period; auto-reloading");
+        tracing::warn!(
+            attempt,
+            "webview not ready after grace period; auto-reloading"
+        );
         reload_main_window(&app);
         // Re-arm for the next attempt.
         spawn_watchdog(app_for_recurse);

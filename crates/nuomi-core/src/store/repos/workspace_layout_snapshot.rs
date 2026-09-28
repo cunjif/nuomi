@@ -59,13 +59,13 @@ pub fn get(conn: &Connection) -> Result<Option<LayoutSnapshotRow>, StoreError> {
 
 /// Upserts the layout snapshot (single-row table, `INSERT OR REPLACE`).
 pub fn upsert(conn: &Connection, row: &LayoutSnapshotRow) -> Result<(), StoreError> {
-    let split_ids_json: Option<String> = match &row.split_workspace_ids {
-        Some([a, b]) => Some(
-            serde_json::to_string(&[a, b])
-                .map_err(|e| StoreError::Sqlite(rusqlite::Error::ToSqlConversionFailure(e.into())))?,
-        ),
-        None => None,
-    };
+    let split_ids_json: Option<String> =
+        match &row.split_workspace_ids {
+            Some([a, b]) => Some(serde_json::to_string(&[a, b]).map_err(|e| {
+                StoreError::Sqlite(rusqlite::Error::ToSqlConversionFailure(e.into()))
+            })?),
+            None => None,
+        };
     conn.execute(
         "INSERT OR REPLACE INTO workspace_layout_snapshot
             (id, mode, split_workspace_ids, focused_workspace_id, captured_at)
@@ -86,16 +86,14 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<LayoutSnapshotRo
     let focused_workspace_id: Option<String> = row.get(2)?;
     let captured_at: i64 = row.get(3)?;
 
-    let split_workspace_ids = split_ids_json
-        .as_deref()
-        .and_then(|json| {
-            let arr: Vec<String> = serde_json::from_str(json).ok()?;
-            if arr.len() == 2 {
-                Some([arr[0].clone(), arr[1].clone()])
-            } else {
-                None
-            }
-        });
+    let split_workspace_ids = split_ids_json.as_deref().and_then(|json| {
+        let arr: Vec<String> = serde_json::from_str(json).ok()?;
+        if arr.len() == 2 {
+            Some([arr[0].clone(), arr[1].clone()])
+        } else {
+            None
+        }
+    });
 
     let mode = LayoutMode::parse_str(&mode_str).unwrap_or(LayoutMode::Single);
 

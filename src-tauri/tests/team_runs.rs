@@ -171,7 +171,9 @@ async fn roles_and_teams_crud_roundtrip_with_member_validation() {
         "team.not_found"
     );
     commands::impl_delete_team(&state, t1.id).await.unwrap();
-    commands::impl_delete_role(&state, r1.id, false).await.unwrap();
+    commands::impl_delete_role(&state, r1.id, false)
+        .await
+        .unwrap();
 }
 
 // ------------------------------------------------- run_team_on_task E2E
@@ -279,7 +281,9 @@ async fn run_team_on_task_reports_failure_into_terminal_event() {
     )
     .await
     .unwrap();
-    commands::impl_delete_role(&state, role.id, true).await.unwrap();
+    commands::impl_delete_role(&state, role.id, true)
+        .await
+        .unwrap();
 
     let task = commands::impl_create_task(&state, "impossible".into(), String::new())
         .await
@@ -310,7 +314,9 @@ async fn run_team_on_task_reports_failure_into_terminal_event() {
     assert!(
         failed.payload["error"]
             .as_str()
-            .is_some_and(|m| m.contains("not found") || m.contains("no provider config") || m.contains("invalid team config")),
+            .is_some_and(|m| m.contains("not found")
+                || m.contains("no provider config")
+                || m.contains("invalid team config")),
         "error message missing from payload: {}",
         failed.payload
     );

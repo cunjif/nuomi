@@ -562,7 +562,9 @@ pub struct IsolationViolation {
 /// Detects workspace isolation violations: runs whose `workspace_id` differs
 /// from their parent task's `workspace_id`. Returns an empty vec when all
 /// runs are properly isolated. Used for audit logging and alerting (task 10.2.3).
-pub fn detect_isolation_violations(conn: &Connection) -> Result<Vec<IsolationViolation>, StoreError> {
+pub fn detect_isolation_violations(
+    conn: &Connection,
+) -> Result<Vec<IsolationViolation>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT r.id, r.task_id, r.workspace_id, t.workspace_id
          FROM runs r

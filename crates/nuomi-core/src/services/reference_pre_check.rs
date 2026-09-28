@@ -111,7 +111,8 @@ pub fn delete_and_nullify_provider_refs(
 
     let pattern = format!("%\"{}\"%", provider_id);
     let role_rows: Vec<(String, String)> = {
-        let mut stmt = tx.prepare("SELECT id, provider_ids FROM roles WHERE provider_ids LIKE ?1")?;
+        let mut stmt =
+            tx.prepare("SELECT id, provider_ids FROM roles WHERE provider_ids LIKE ?1")?;
         let rows = stmt.query_map(params![pattern], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -128,20 +129,27 @@ pub fn delete_and_nullify_provider_refs(
         }
     }
 
-    tx.execute("DELETE FROM provider_configs WHERE id = ?1", params![provider_id])?;
+    tx.execute(
+        "DELETE FROM provider_configs WHERE id = ?1",
+        params![provider_id],
+    )?;
 
     tx.commit()?;
     Ok(())
 }
 
 /// Deletes a role and nullifies all references in a single transaction.
-pub fn delete_and_nullify_role_refs(conn: &mut Connection, role_id: &str) -> Result<(), StoreError> {
+pub fn delete_and_nullify_role_refs(
+    conn: &mut Connection,
+    role_id: &str,
+) -> Result<(), StoreError> {
     let tx = conn.transaction()?;
 
     // Nullify references BEFORE deleting the role (FK constraint).
     let pattern = format!("%\"{}\"%", role_id);
     let team_rows: Vec<(String, String)> = {
-        let mut stmt = tx.prepare("SELECT id, member_role_ids FROM teams WHERE member_role_ids LIKE ?1")?;
+        let mut stmt =
+            tx.prepare("SELECT id, member_role_ids FROM teams WHERE member_role_ids LIKE ?1")?;
         let rows = stmt.query_map(params![pattern], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;

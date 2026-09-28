@@ -690,7 +690,13 @@ mod tests {
         // The recall keyword is the first word of the task, so it must appear
         // in the stored entry for the digest to be injected at all.
         memory
-            .remember("follow up: user prefers rust".into(), None, vec![], "note", false)
+            .remember(
+                "follow up: user prefers rust".into(),
+                None,
+                vec![],
+                "note",
+                false,
+            )
             .await
             .unwrap();
 

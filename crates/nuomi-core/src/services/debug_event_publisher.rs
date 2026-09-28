@@ -85,7 +85,14 @@ pub async fn emit_materialize_warnings(
 ) -> CoreResult<()> {
     for warning in warnings {
         let payload = json!({ "warning": warning, "level": "WARNING" });
-        emit(bus, db_path, session_id, "provider.materialize_warning", payload).await?;
+        emit(
+            bus,
+            db_path,
+            session_id,
+            "provider.materialize_warning",
+            payload,
+        )
+        .await?;
     }
     Ok(())
 }

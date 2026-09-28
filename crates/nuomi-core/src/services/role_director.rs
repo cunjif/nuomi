@@ -66,7 +66,9 @@ impl RoleDirectorBinding {
 const ROLE_DIRECTOR_BINDING_KEY: &str = "role_director_binding";
 
 /// Reads the persisted director self-binding, or `None` when unset.
-pub fn get_role_director_binding(conn: &rusqlite::Connection) -> Result<Option<RoleDirectorBinding>, RoleDirectorError> {
+pub fn get_role_director_binding(
+    conn: &rusqlite::Connection,
+) -> Result<Option<RoleDirectorBinding>, RoleDirectorError> {
     let raw = repos::settings::get(conn, ROLE_DIRECTOR_BINDING_KEY)
         .map_err(|e| RoleDirectorError::Store(e.to_string()))?;
     match raw {
@@ -78,7 +80,10 @@ pub fn get_role_director_binding(conn: &rusqlite::Connection) -> Result<Option<R
 }
 
 /// Persists the director self-binding as JSON under `role_director_binding`.
-pub fn set_role_director_binding(conn: &rusqlite::Connection, binding: &RoleDirectorBinding) -> Result<(), RoleDirectorError> {
+pub fn set_role_director_binding(
+    conn: &rusqlite::Connection,
+    binding: &RoleDirectorBinding,
+) -> Result<(), RoleDirectorError> {
     let json = serde_json::to_string(binding)
         .map_err(|e| RoleDirectorError::Store(format!("binding serialize: {e}")))?;
     repos::settings::set(conn, ROLE_DIRECTOR_BINDING_KEY, &json)

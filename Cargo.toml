@@ -43,7 +43,14 @@ sha2 = "0.10"
 base64 = "0.22"
 
 # misc
-keyring = "3"
+# keyring v3 requires explicit native backend features; without them it
+# silently falls back to an in-memory mock (EntryOnly persistence) where
+# every Entry::new yields a fresh empty credential — set succeeds but get
+# on a new entry returns NoEntry, so API keys never persist. The three
+# native features are target-gated inside keyring (windows-sys/security-framework/
+# linux-keyutils are cfg(target_os) deps), so enabling all three is safe:
+# only the matching one activates on each platform.
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 
 # dev-dependencies
 tempfile = "3"

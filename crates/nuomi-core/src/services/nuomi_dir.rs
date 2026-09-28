@@ -25,9 +25,7 @@ pub enum NuomiDirError {
 pub fn ensure_nuomi_dir(root: &Path) -> Result<PathBuf, NuomiDirError> {
     let nuomi = root.join(NUOMI_DIR_NAME);
     if nuomi.exists() && !nuomi.is_dir() {
-        return Err(NuomiDirError::Conflict(
-            nuomi.to_string_lossy().to_string(),
-        ));
+        return Err(NuomiDirError::Conflict(nuomi.to_string_lossy().to_string()));
     }
     std::fs::create_dir_all(&nuomi)?;
     Ok(nuomi)

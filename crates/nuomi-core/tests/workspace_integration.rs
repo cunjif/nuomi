@@ -7,9 +7,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use nuomi_core::services::{
-    workspace_migration, workspace_registry::WorkspaceRegistry,
-};
+use nuomi_core::services::{workspace_migration, workspace_registry::WorkspaceRegistry};
 use nuomi_core::store::{migrations, repos, Db};
 
 fn tempdb() -> (PathBuf, tempfile::TempDir) {
@@ -39,18 +37,27 @@ fn legacy_single_workspace_migration_end_to_end() {
     // Seed: legacy workspace_root setting + a session with __migrated__ workspace_id.
     {
         let db = open_db(&db_path);
-        repos::settings::set(&db.0, repos::settings::WORKSPACE_ROOT, &ws_root.to_string_lossy()).unwrap();
+        repos::settings::set(
+            &db.0,
+            repos::settings::WORKSPACE_ROOT,
+            &ws_root.to_string_lossy(),
+        )
+        .unwrap();
         db.0.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1','old','1','1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Run migration.
     {
         let db = open_db(&db_path);
         let outcome = workspace_migration::run_if_needed(&db.0).unwrap();
-        assert!(matches!(outcome, workspace_migration::MigrationOutcome::Migrated { .. }));
+        assert!(matches!(
+            outcome,
+            workspace_migration::MigrationOutcome::Migrated { .. }
+        ));
     }
 
     // Verify: workspaces table has a real uuid entry, session reparented.
@@ -58,10 +65,15 @@ fn legacy_single_workspace_migration_end_to_end() {
         let db = open_db(&db_path);
         let entries = repos::workspaces::list(&db.0).unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(uuid::Uuid::parse_str(&entries[0].id).is_ok(), "id should be uuid-v7");
+        assert!(
+            uuid::Uuid::parse_str(&entries[0].id).is_ok(),
+            "id should be uuid-v7"
+        );
         assert!(entries[0].is_active);
-        let wid: String = db.0
-            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| r.get(0))
+        let wid: String =
+            db.0.query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(wid, entries[0].id);
     }
@@ -83,7 +95,8 @@ fn multi_workspace_session_isolation() {
         db.0.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s-a','A','1','1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         repos::sessions::set_workspace_id(&db.0, "s-a", &ea.id).unwrap();
     }
 
@@ -92,9 +105,15 @@ fn multi_workspace_session_isolation() {
     {
         let db = open_db(&db_path);
         let sessions_b = repos::sessions::list(&db.0, &eb.id, 100).unwrap();
-        assert!(sessions_b.iter().all(|s| s.id != "s-a"), "session A must not appear in B");
+        assert!(
+            sessions_b.iter().all(|s| s.id != "s-a"),
+            "session A must not appear in B"
+        );
         let sessions_a = repos::sessions::list(&db.0, &ea.id, 100).unwrap();
-        assert!(sessions_a.iter().any(|s| s.id == "s-a"), "session A must appear in A");
+        assert!(
+            sessions_a.iter().any(|s| s.id == "s-a"),
+            "session A must appear in A"
+        );
     }
 }
 
@@ -111,7 +130,8 @@ fn remove_workspace_preserves_nuomi_dir_and_orphan_sessions() {
         db.0.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1','test','1','1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         repos::sessions::set_workspace_id(&db.0, "s1", &entry.id).unwrap();
     }
 
@@ -133,7 +153,9 @@ fn remove_workspace_preserves_nuomi_dir_and_orphan_sessions() {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert!(orphans.iter().any(|(id, wid)| id == "s1" && wid == &entry.id));
+        assert!(orphans
+            .iter()
+            .any(|(id, wid)| id == "s1" && wid == &entry.id));
     }
 }
 
@@ -198,7 +220,10 @@ fn codebase_memory_migration_copies_and_marks() {
     assert!(copied.contains("test"));
 
     // Original is preserved (not deleted).
-    assert!(cb_dir.join("index.json").exists(), "original must be preserved");
+    assert!(
+        cb_dir.join("index.json").exists(),
+        "original must be preserved"
+    );
 }
 
 #[test]
@@ -216,10 +241,7 @@ fn path_blacklist_rejects_system_directories() {
     };
 
     let result = reg.register(blacklisted.as_path());
-    assert!(
-        result.is_err(),
-        "blacklisted path should be rejected"
-    );
+    assert!(result.is_err(), "blacklisted path should be rejected");
     let err = result.unwrap_err();
     assert!(
         matches!(err, nuomi_core::services::RegistryError::Blacklisted(_)),

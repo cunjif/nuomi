@@ -33,9 +33,7 @@ pub enum MigrationOrchestrationError {
 impl From<codebase_memory_migrator::MigrationError> for MigrationOrchestrationError {
     fn from(e: codebase_memory_migrator::MigrationError) -> Self {
         match e {
-            codebase_memory_migrator::MigrationError::Io(io) => {
-                MigrationOrchestrationError::Io(io)
-            }
+            codebase_memory_migrator::MigrationError::Io(io) => MigrationOrchestrationError::Io(io),
         }
     }
 }
@@ -110,7 +108,9 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
                 }
             }
 
-            Ok(MigrationOutcome::Migrated { workspace_id: migrated_id })
+            Ok(MigrationOutcome::Migrated {
+                workspace_id: migrated_id,
+            })
         }
     }
 }
@@ -277,7 +277,9 @@ mod tests {
         assert!(is_valid_uuid(&entries[0].id));
         // Session reparented.
         let wid: String = conn
-            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| r.get(0))
+            .query_row("SELECT workspace_id FROM sessions WHERE id='s1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_ne!(wid, MIGRATED_PLACEHOLDER);
         assert!(is_valid_uuid(&wid));

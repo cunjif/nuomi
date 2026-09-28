@@ -9,11 +9,11 @@ use rusqlite::Connection;
 use thiserror::Error;
 
 use super::workspace_open_set::{OpenSetError, WorkspaceOpenSetService};
-use crate::store::repos::workspaces;
+use crate::store::repos::events;
 use crate::store::repos::workspace_layout_snapshot;
 use crate::store::repos::workspace_layout_snapshot::{LayoutMode, LayoutSnapshotRow};
 use crate::store::repos::workspace_open_state;
-use crate::store::repos::events;
+use crate::store::repos::workspaces;
 use crate::store::{migrations, Db, StoreError};
 
 #[derive(Debug, Error)]
@@ -67,7 +67,10 @@ impl WorkspaceLayoutService {
     /// restored; non-pinned workspaces are restored when `restore_non_pinned`
     /// is true. Directory-missing workspaces are skipped. Focus and split
     /// config are restored if the referenced workspaces are still open.
-    pub fn restore_snapshot(&self, restore_non_pinned: bool) -> Result<RestoreOutcome, LayoutError> {
+    pub fn restore_snapshot(
+        &self,
+        restore_non_pinned: bool,
+    ) -> Result<RestoreOutcome, LayoutError> {
         let conn = self.conn()?;
         let snapshot = workspace_layout_snapshot::get(&conn)?;
 

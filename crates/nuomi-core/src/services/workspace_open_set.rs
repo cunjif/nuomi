@@ -11,10 +11,10 @@ use thiserror::Error;
 
 use crate::store::repos::events;
 use crate::store::repos::settings;
-use crate::store::repos::workspaces;
 use crate::store::repos::workspace_open_state;
 use crate::store::repos::workspace_open_state::WorkspaceOpenStateRow;
 use crate::store::repos::workspace_recent;
+use crate::store::repos::workspaces;
 use crate::store::{migrations, Db, StoreError};
 
 /// Maximum number of workspaces that can be open simultaneously.
@@ -201,7 +201,9 @@ impl WorkspaceOpenSetService {
             state
                 .iter()
                 .filter_map(|r| {
-                    let entry = workspaces::find_by_id(&conn, &r.workspace_id).ok().flatten()?;
+                    let entry = workspaces::find_by_id(&conn, &r.workspace_id)
+                        .ok()
+                        .flatten()?;
                     if entry.is_pinned {
                         None
                     } else {
@@ -235,7 +237,11 @@ impl WorkspaceOpenSetService {
 
 impl OpenSetProvider for WorkspaceOpenSetService {
     fn open_ids(&self) -> Result<Vec<String>, OpenSetError> {
-        Ok(self.list_open()?.into_iter().map(|r| r.workspace_id).collect())
+        Ok(self
+            .list_open()?
+            .into_iter()
+            .map(|r| r.workspace_id)
+            .collect())
     }
 
     fn focused_id(&self) -> Result<Option<String>, OpenSetError> {
@@ -262,18 +268,12 @@ fn emit_event(conn: &Connection, workspace_id: &str, kind: &str) {
     );
 }
 
-fn find_dirty_files(
-    _conn: &Connection,
-    _workspace_id: &str,
-) -> Result<Vec<String>, OpenSetError> {
+fn find_dirty_files(_conn: &Connection, _workspace_id: &str) -> Result<Vec<String>, OpenSetError> {
     // TODO: integrate with editor dirty-state tracking (ephemeral, not persisted).
     Ok(Vec::new())
 }
 
-fn find_running_tasks(
-    conn: &Connection,
-    workspace_id: &str,
-) -> Result<Vec<String>, OpenSetError> {
+fn find_running_tasks(conn: &Connection, workspace_id: &str) -> Result<Vec<String>, OpenSetError> {
     use crate::store::repos::tasks_runs;
     let runs = tasks_runs::list_active_runs_by_workspace(conn, workspace_id)?;
     Ok(runs.into_iter().map(|r| r.id).collect())
@@ -286,7 +286,11 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    fn setup() -> (WorkspaceOpenSetService, WorkspaceRegistry, tempfile::TempDir) {
+    fn setup() -> (
+        WorkspaceOpenSetService,
+        WorkspaceRegistry,
+        tempfile::TempDir,
+    ) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let svc = WorkspaceOpenSetService::new(db_path.clone());

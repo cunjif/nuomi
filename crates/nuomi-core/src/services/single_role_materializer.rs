@@ -245,7 +245,9 @@ mod tests {
             .await
             .unwrap();
         match ctx {
-            SingleRoleContext::Materialized { provider, overlay, .. } => {
+            SingleRoleContext::Materialized {
+                provider, overlay, ..
+            } => {
                 assert_eq!(provider.id(), "openai_compatible");
                 assert!(overlay.is_none());
             }

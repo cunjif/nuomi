@@ -46,9 +46,7 @@ impl From<codebase_memory_migrator::MigrationError> for RegistryError {
 impl From<nuomi_dir::NuomiDirError> for RegistryError {
     fn from(e: nuomi_dir::NuomiDirError) -> Self {
         match e {
-            nuomi_dir::NuomiDirError::Conflict(s) => {
-                RegistryError::Io(std::io::Error::other(s))
-            }
+            nuomi_dir::NuomiDirError::Conflict(s) => RegistryError::Io(std::io::Error::other(s)),
             nuomi_dir::NuomiDirError::Io(io) => RegistryError::Io(io),
         }
     }
@@ -95,16 +93,11 @@ impl WorkspaceRegistry {
                 path.to_string_lossy().to_string(),
             ));
         }
-        let canonical = workspace_guard::canonicalize(path)
-            .map_err(|e| match e {
-                workspace_guard::PathGuardError::InvalidPath(p) => {
-                    RegistryError::InvalidPath(p)
-                }
-                workspace_guard::PathGuardError::Blacklisted(p) => {
-                    RegistryError::Blacklisted(p)
-                }
-                workspace_guard::PathGuardError::Io(io) => RegistryError::Io(io),
-            })?;
+        let canonical = workspace_guard::canonicalize(path).map_err(|e| match e {
+            workspace_guard::PathGuardError::InvalidPath(p) => RegistryError::InvalidPath(p),
+            workspace_guard::PathGuardError::Blacklisted(p) => RegistryError::Blacklisted(p),
+            workspace_guard::PathGuardError::Io(io) => RegistryError::Io(io),
+        })?;
         if workspace_guard::is_blacklisted(&canonical) {
             return Err(RegistryError::Blacklisted(
                 canonical.to_string_lossy().to_string(),
@@ -122,7 +115,9 @@ impl WorkspaceRegistry {
         let mut entry = WorkspaceEntry {
             id: Uuid::now_v7().to_string(),
             root_path: root_str,
-            color_tag: workspace_palette::color_for(&canonical.to_string_lossy()).0.to_string(),
+            color_tag: workspace_palette::color_for(&canonical.to_string_lossy())
+                .0
+                .to_string(),
             created_at: crate::domain::now_ms(),
             is_active: false,
             is_pinned: false,
@@ -137,7 +132,8 @@ impl WorkspaceRegistry {
             conn.execute(
                 "UPDATE sessions SET workspace_id = ?1 WHERE workspace_id = '__migrated__'",
                 rusqlite::params![entry.id],
-            ).map_err(StoreError::Sqlite)?;
+            )
+            .map_err(StoreError::Sqlite)?;
             // Also add to open set + focus (multi-workspace model).
             let now = crate::domain::now_ms();
             let _ = crate::store::repos::workspace_open_state::insert(
@@ -149,12 +145,7 @@ impl WorkspaceRegistry {
                     is_focused: true,
                 },
             );
-            let _ = crate::store::repos::workspace_recent::touch(
-                &conn,
-                &entry.id,
-                now,
-                false,
-            );
+            let _ = crate::store::repos::workspace_recent::touch(&conn, &entry.id, now, false);
             emit_workspace_event(&conn, &entry.id, "workspace.opened");
             emit_workspace_event(&conn, &entry.id, "workspace.focused");
         }
@@ -166,8 +157,8 @@ impl WorkspaceRegistry {
     /// Never touches the filesystem or session data.
     pub fn remove(&self, id: &str) -> Result<RemoveResult, RegistryError> {
         let conn = self.conn()?;
-        let existing = repo::find_by_id(&conn, id)?
-            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let existing =
+            repo::find_by_id(&conn, id)?.ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
         let was_active = existing.is_active;
         repo::remove(&conn, id)?;
         let new_active_id = if was_active {
@@ -191,8 +182,8 @@ impl WorkspaceRegistry {
     /// before transferring activation; on failure the active state is unchanged.
     pub fn activate(&self, id: &str) -> Result<WorkspaceEntry, RegistryError> {
         let conn = self.conn()?;
-        let entry = repo::find_by_id(&conn, id)?
-            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let entry =
+            repo::find_by_id(&conn, id)?.ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
         let root = Path::new(&entry.root_path);
         if !root.is_dir() {
             return Err(RegistryError::DirectoryMissing(entry.root_path.clone()));

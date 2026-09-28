@@ -18,7 +18,7 @@ use crate::services::{
 };
 use crate::store::repos::{agent_profiles, roles, settings};
 use crate::store::StoreError;
-use crate::{CoreError};
+use crate::CoreError;
 
 /// Setting key for the default RoleAgent used by AI commit generation.
 /// Decoupled from `conversation.default_agent` to avoid cross-contamination.
@@ -158,7 +158,10 @@ pub async fn generate(
 
     let resolved = resolve_role_agent(&db_path, role_agent).await?;
 
-    let agent_display_name = resolved.as_ref().map(|r| r.name.clone()).unwrap_or_default();
+    let agent_display_name = resolved
+        .as_ref()
+        .map(|r| r.name.clone())
+        .unwrap_or_default();
 
     let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref()).await?;
     let (provider, model, overlay) = match ctx {
@@ -296,7 +299,10 @@ fn build_user_prompt(diff: &str, history: &[&str]) -> String {
 fn parse_agent_ref(s: &str) -> Option<(AgentRefKind, String)> {
     s.strip_prefix("cli:")
         .map(|id| (AgentRefKind::Cli, id.to_string()))
-        .or_else(|| s.strip_prefix("role:").map(|id| (AgentRefKind::Role, id.to_string())))
+        .or_else(|| {
+            s.strip_prefix("role:")
+                .map(|id| (AgentRefKind::Role, id.to_string()))
+        })
 }
 
 async fn resolve_role_agent(
@@ -347,7 +353,11 @@ fn resolve_ref(conn: &Connection, kind: AgentRefKind, id: &str) -> Option<Resolv
 }
 
 /// Sets the default RoleAgent for commit generation (`ai_commit.default_agent`).
-pub fn set_default_agent(conn: &Connection, kind: AgentRefKind, id: &str) -> Result<(), StoreError> {
+pub fn set_default_agent(
+    conn: &Connection,
+    kind: AgentRefKind,
+    id: &str,
+) -> Result<(), StoreError> {
     let value = format!("{}:{id}", kind.as_str());
     settings::set(conn, AI_COMMIT_DEFAULT_AGENT_KEY, &value)
 }

@@ -111,11 +111,9 @@ pub fn set_focused(conn: &Connection, workspace_id: &str) -> Result<(), StoreErr
 
 /// Returns the number of workspaces in the open set.
 pub fn count(conn: &Connection) -> Result<usize, StoreError> {
-    let n: i64 = conn.query_row(
-        "SELECT count(*) FROM workspace_open_state",
-        [],
-        |r| r.get(0),
-    )?;
+    let n: i64 = conn.query_row("SELECT count(*) FROM workspace_open_state", [], |r| {
+        r.get(0)
+    })?;
     Ok(n as usize)
 }
 
@@ -209,7 +207,10 @@ mod tests {
         insert(&conn, &row("w1")).unwrap();
         remove(&conn, "w1").unwrap();
         assert!(list(&conn).unwrap().is_empty());
-        assert!(matches!(remove(&conn, "w1"), Err(StoreError::NotFound { .. })));
+        assert!(matches!(
+            remove(&conn, "w1"),
+            Err(StoreError::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -238,7 +239,10 @@ mod tests {
     #[test]
     fn set_focused_missing_is_not_found() {
         let conn = db();
-        assert!(matches!(set_focused(&conn, "nope"), Err(StoreError::NotFound { .. })));
+        assert!(matches!(
+            set_focused(&conn, "nope"),
+            Err(StoreError::NotFound { .. })
+        ));
     }
 
     #[test]

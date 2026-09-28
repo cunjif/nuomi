@@ -22,9 +22,8 @@ pub enum PathGuardError {
 /// trailing separators to a normalized absolute path. Returns `InvalidPath`
 /// when the path does not exist or is not a directory.
 pub fn canonicalize(path: &Path) -> Result<PathBuf, PathGuardError> {
-    let resolved = std::fs::canonicalize(path).map_err(|_| {
-        PathGuardError::InvalidPath(path.to_string_lossy().to_string())
-    })?;
+    let resolved = std::fs::canonicalize(path)
+        .map_err(|_| PathGuardError::InvalidPath(path.to_string_lossy().to_string()))?;
     if !resolved.is_dir() {
         return Err(PathGuardError::InvalidPath(
             resolved.to_string_lossy().to_string(),
@@ -66,38 +65,14 @@ const BLACKLIST: &[&str] = &[
 
 #[cfg(target_os = "macos")]
 const BLACKLIST: &[&str] = &[
-    "/",
-    "/etc",
-    "/var",
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/sys",
-    "/proc",
-    "/dev",
-    "/opt",
-    "/Users",
+    "/", "/etc", "/var", "/usr", "/bin", "/sbin", "/sys", "/proc", "/dev", "/opt", "/Users",
     "/home",
 ];
 
 #[cfg(target_os = "linux")]
 const BLACKLIST: &[&str] = &[
-    "/",
-    "/etc",
-    "/var",
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/sys",
-    "/proc",
-    "/dev",
-    "/run",
-    "/opt",
-    "/boot",
-    "/lib",
-    "/lib64",
-    "/home",
-    "/root",
+    "/", "/etc", "/var", "/usr", "/bin", "/sbin", "/sys", "/proc", "/dev", "/run", "/opt", "/boot",
+    "/lib", "/lib64", "/home", "/root",
 ];
 
 /// Fallback for non-{windows,macos,linux} targets: empty blacklist.

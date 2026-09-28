@@ -42,7 +42,10 @@ fn next_seq(conn: &Connection, session_id: &str) -> Result<i64, StoreError> {
 }
 
 /// Lists all `queued` messages for `session_id`, ordered by seq.
-pub fn list_queued(conn: &Connection, session_id: &str) -> Result<Vec<MessageQueueEntry>, StoreError> {
+pub fn list_queued(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<MessageQueueEntry>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, session_id, text, status, seq, created_at
          FROM message_queue WHERE session_id = ?1 AND status = 'queued'
@@ -58,7 +61,10 @@ pub fn list_queued(conn: &Connection, session_id: &str) -> Result<Vec<MessageQue
 /// The SELECT + UPDATE are wrapped in a transaction with `BEGIN IMMEDIATE`
 /// so concurrent dequeues on separate connections serialize at the SQLite
 /// level and cannot both pick the same row.
-pub fn dequeue(conn: &Connection, session_id: &str) -> Result<Option<MessageQueueEntry>, StoreError> {
+pub fn dequeue(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<MessageQueueEntry>, StoreError> {
     conn.execute("BEGIN IMMEDIATE", [])?;
     let result = (|| -> Result<Option<MessageQueueEntry>, StoreError> {
         let entry: Option<(String, String, String, i64, i64)> = conn
@@ -67,7 +73,15 @@ pub fn dequeue(conn: &Connection, session_id: &str) -> Result<Option<MessageQueu
                  FROM message_queue WHERE session_id = ?1 AND status = 'queued'
                  ORDER BY seq ASC LIMIT 1",
                 params![session_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()?;
         match entry {

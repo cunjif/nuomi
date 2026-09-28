@@ -46,11 +46,7 @@ pub fn touch(
         .and_then(|v| v)
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(RECENT_LIST_CAPACITY);
-    let count: i64 = conn.query_row(
-        "SELECT count(*) FROM workspace_recent",
-        [],
-        |r| r.get(0),
-    )?;
+    let count: i64 = conn.query_row("SELECT count(*) FROM workspace_recent", [], |r| r.get(0))?;
     if count as usize > capacity {
         conn.execute(
             "DELETE FROM workspace_recent

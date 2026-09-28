@@ -37,7 +37,13 @@ impl ResearchAllowlist {
     /// True when `url_or_domain` points at an allowlisted domain (or a
     /// subdomain of one). Uses the built-in `DOMAINS` constant.
     pub fn is_allowed(&self, url_or_domain: &str) -> bool {
-        Self::is_allowed_with(&Self::DOMAINS.iter().map(|s| s.to_string()).collect::<Vec<_>>(), url_or_domain)
+        Self::is_allowed_with(
+            &Self::DOMAINS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            url_or_domain,
+        )
     }
 
     /// Parameterized allowlist check — accepts a custom `allowlist` and
@@ -97,7 +103,14 @@ impl ResearchFetcher {
     }
 
     pub async fn fetch(&self, source: &str) -> Result<ResearchReportEntry, EvolutionError> {
-        self.fetch_with(&ResearchAllowlist::DOMAINS.iter().map(|s| s.to_string()).collect::<Vec<_>>(), source).await
+        self.fetch_with(
+            &ResearchAllowlist::DOMAINS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            source,
+        )
+        .await
     }
 
     /// Parameterized fetch — checks against a custom `allowlist` before
@@ -276,8 +289,14 @@ mod tests {
     fn parameterized_allowlist_accepts_custom_domains() {
         let custom = vec!["custom.dev".to_string(), "api.example.org".to_string()];
         assert!(ResearchAllowlist::is_allowed_with(&custom, "custom.dev"));
-        assert!(ResearchAllowlist::is_allowed_with(&custom, "sub.custom.dev"));
-        assert!(ResearchAllowlist::is_allowed_with(&custom, "https://api.example.org/path"));
+        assert!(ResearchAllowlist::is_allowed_with(
+            &custom,
+            "sub.custom.dev"
+        ));
+        assert!(ResearchAllowlist::is_allowed_with(
+            &custom,
+            "https://api.example.org/path"
+        ));
         assert!(!ResearchAllowlist::is_allowed_with(&custom, "github.com"));
     }
 

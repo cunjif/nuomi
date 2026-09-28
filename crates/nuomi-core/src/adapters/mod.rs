@@ -62,9 +62,7 @@ pub enum AdapterError {
 pub fn spawn_candidates(program: &str) -> Vec<String> {
     let mut out = vec![program.to_string()];
     if cfg!(windows) {
-        let bare = std::path::Path::new(program)
-            .extension()
-            .is_none()
+        let bare = std::path::Path::new(program).extension().is_none()
             && !program.contains('/')
             && !program.contains('\\');
         if bare {

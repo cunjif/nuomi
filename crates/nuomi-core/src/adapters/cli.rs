@@ -161,11 +161,7 @@ impl CliAgentClient {
 
     /// Resolves everything needed to spawn synchronously so configuration
     /// errors surface deterministically before any stream polling.
-    fn prepare(
-        &self,
-        prompt: &str,
-        dynamic_args: &[String],
-    ) -> Result<Prepared, AdapterError> {
+    fn prepare(&self, prompt: &str, dynamic_args: &[String]) -> Result<Prepared, AdapterError> {
         let profile = &self.profile;
         // Defense in depth: re-check even though `new` already validated.
         if !is_allowlisted(&profile.command, &self.allowlist) {
@@ -1073,11 +1069,7 @@ mod tests {
 
     #[test]
     fn build_resume_args_flavor_default_for_claude_code() {
-        let args = build_resume_args(
-            CliFlavor::ClaudeCode,
-            None,
-            Some("abc-123"),
-        );
+        let args = build_resume_args(CliFlavor::ClaudeCode, None, Some("abc-123"));
         assert_eq!(args, vec!["--resume".to_string(), "abc-123".to_string()]);
     }
 
