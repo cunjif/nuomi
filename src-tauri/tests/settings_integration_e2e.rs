@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use nuomi_core::domain::{ProviderConfig, ProviderProtocol, Role};
+use nuomi_core::domain::{AgentRefKind, ProviderConfig, ProviderProtocol, Role};
 use nuomi_core::facade::ProviderSource;
 use nuomi_core::providers::{ChatResponse, FakeLlm, MemorySecretStore, SecretStore};
-use nuomi_core::store::{migrations, repos, Db};
 use nuomi_core::services::reference_pre_check::{
     check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
     delete_and_nullify_role_refs, detect_missing_provider,
 };
+use nuomi_core::store::{migrations, repos, Db};
 use nuomi_shell_lib::commands;
 use nuomi_shell_lib::state::AppState;
 use nuomi_shell_lib::IpcError;
@@ -117,16 +117,11 @@ async fn ac1_db_provider_config_emits_materialized_event() {
     let (state, dir, secrets) = boot(vec![FakeLlm::response("ok")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
     secrets.set("provider/p1", "sk-test").await.unwrap();
-    setup_provider_and_role(
-        &dir.path().join("t.db"),
-        "p1",
-        "r1",
-        &session.id,
-    );
+    setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
     // Turn may fail (real HTTP client, no server) but events are emitted
     // before the LLM call — that's what we verify.
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "hello".into()).await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -140,7 +135,7 @@ async fn ac2_no_db_config_emits_env_fallback_event() {
     let (state, _dir, _secrets) = boot(vec![FakeLlm::response("hi")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
 
-    commands::impl_submit_task(&state, session.id.clone(), "hello".into())
+    commands::run_conversation_turn(&state, &session.id, "hello")
         .await
         .unwrap();
 
@@ -162,14 +157,9 @@ async fn ac3_role_overlay_emits_role_applied_event() {
     let (state, dir, secrets) = boot(vec![FakeLlm::response("coded")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
     secrets.set("provider/p1", "sk-test").await.unwrap();
-    setup_provider_and_role(
-        &dir.path().join("t.db"),
-        "p1",
-        "r1",
-        &session.id,
-    );
+    setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "write code".into()).await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "write code").await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -192,22 +182,16 @@ async fn ac3_unbound_group_session_falls_to_single_role() {
     let (state, dir, secrets) = boot(vec![FakeLlm::response("ok")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
     secrets.set("provider/p1", "sk-test").await.unwrap();
-    setup_provider_and_role(
-        &dir.path().join("t.db"),
-        "p1",
-        "r1",
-        &session.id,
-    );
+    setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
     // Session has no team_id → single role path even if session kind is group.
     let db = Db::open(&db_str(&dir.path().join("t.db"))).unwrap();
-    db.0
-        .execute(
-            "UPDATE sessions SET kind = 'group' WHERE id = ?1",
-            rusqlite::params![session.id],
-        )
-        .unwrap();
+    db.0.execute(
+        "UPDATE sessions SET kind = 'group' WHERE id = ?1",
+        rusqlite::params![session.id],
+    )
+    .unwrap();
 
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "hello".into()).await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -245,7 +229,10 @@ async fn ac6_force_delete_provider_nullifies_refs() {
     // Verify no dangling references.
     let db = Db::open(&db_str(&db_path)).unwrap();
     let role = repos::roles::get(&db.0, "r1").unwrap();
-    assert!(role.provider_id.is_none(), "provider_id should be nullified");
+    assert!(
+        role.provider_id.is_none(),
+        "provider_id should be nullified"
+    );
     // Provider row is gone.
     assert!(repos::providers::get_provider(&db.0, "p1").is_err());
 }
@@ -275,7 +262,10 @@ async fn ac6_force_delete_role_nullifies_refs() {
         .unwrap();
 
     let db = Db::open(&db_str(&db_path)).unwrap();
-    assert!(repos::roles::get(&db.0, "r1").is_err(), "role should be deleted");
+    assert!(
+        repos::roles::get(&db.0, "r1").is_err(),
+        "role should be deleted"
+    );
     // ADR 0013: Session agent binding removed — check conversation_participants is cleared.
     let participant_count: i64 = db.0
         .query_row(
@@ -284,7 +274,10 @@ async fn ac6_force_delete_role_nullifies_refs() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(participant_count, 0, "role ref should be removed from participants");
+    assert_eq!(
+        participant_count, 0,
+        "role ref should be removed from participants"
+    );
 }
 
 #[tokio::test]
@@ -302,12 +295,14 @@ async fn ac6_missing_provider_detected_for_role_without_binding() {
         role.temperature = None;
         role.tool_allowlist = vec![];
         repos::roles::insert(&db.0, &role).unwrap();
-        db.0
-            .execute(
-                "UPDATE sessions SET agent_kind = 'role', agent_ref_id = ?1 WHERE id = ?2",
-                rusqlite::params!["r-loose", session.id],
-            )
-            .unwrap();
+        repos::sessions::add_participant(
+            &db.0,
+            &session.id,
+            AgentRefKind::Role,
+            "r-loose",
+            nuomi_core::domain::now_ms(),
+        )
+        .unwrap();
     }
 
     // detect_missing_provider should flag this role.
@@ -319,7 +314,7 @@ async fn ac6_missing_provider_detected_for_role_without_binding() {
     }
 
     // Running a turn should emit provider.missing event.
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "hello".into())
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello")
         .await
         .unwrap();
     let kinds = event_kinds(&state, &session.id).await;
@@ -382,12 +377,7 @@ async fn ac8_scheduler_chat_uses_same_dispatch_as_manual_chat() {
     let (state, dir, secrets) = boot(vec![FakeLlm::response("scheduled result")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
     secrets.set("provider/p1", "sk-test").await.unwrap();
-    setup_provider_and_role(
-        &dir.path().join("t.db"),
-        "p1",
-        "r1",
-        &session.id,
-    );
+    setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
     // Simulate what the scheduler does: call run_conversation_turn.
     // Turn may fail (real HTTP client) but events are emitted before.
@@ -422,12 +412,11 @@ async fn ac8_env_fallback_failure_marks_task_failed() {
     repos::tasks_runs::insert_task(&db.0, &task).unwrap();
 
     // Simulate mark_task_failed DB operation.
-    db.0
-        .execute(
-            "UPDATE tasks SET status = 'failed', updated_at = ?1 WHERE id = ?2 AND status = 'queued'",
-            rusqlite::params![now, "t-fail"],
-        )
-        .unwrap();
+    db.0.execute(
+        "UPDATE tasks SET status = 'failed', updated_at = ?1 WHERE id = ?2 AND status = 'queued'",
+        rusqlite::params![now, "t-fail"],
+    )
+    .unwrap();
 
     let updated = repos::tasks_runs::get_task(&db.0, "t-fail").unwrap();
     assert_eq!(updated.status, nuomi_core::domain::TaskStatus::Failed);
@@ -441,24 +430,28 @@ async fn ac10_all_debug_events_visible_in_timeline() {
     let (state, dir, secrets) = boot(vec![FakeLlm::response("ok")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
     secrets.set("provider/p1", "sk-test").await.unwrap();
-    setup_provider_and_role(
-        &dir.path().join("t.db"),
-        "p1",
-        "r1",
-        &session.id,
-    );
+    setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "hello".into()).await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
 
     let events = commands::impl_list_events(&state, session.id.clone(), 0)
         .await
         .unwrap();
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
-    assert!(kinds.contains(&"provider.materialized"), "missing materialized: {kinds:?}");
-    assert!(kinds.contains(&"role.applied"), "missing role.applied: {kinds:?}");
+    assert!(
+        kinds.contains(&"provider.materialized"),
+        "missing materialized: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"role.applied"),
+        "missing role.applied: {kinds:?}"
+    );
 
     // Verify payload is strongly typed (providerId is a string).
-    let mat_event = events.iter().find(|e| e.kind == "provider.materialized").unwrap();
+    let mat_event = events
+        .iter()
+        .find(|e| e.kind == "provider.materialized")
+        .unwrap();
     assert!(mat_event.payload["providerId"].is_string());
     assert_eq!(mat_event.payload["source"], "db");
 }
@@ -468,7 +461,7 @@ async fn ac10_env_fallback_event_visible_in_timeline() {
     let (state, _dir, _secrets) = boot(vec![FakeLlm::response("ok")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
 
-    commands::impl_submit_task(&state, session.id.clone(), "hello".into())
+    commands::run_conversation_turn(&state, &session.id, "hello")
         .await
         .unwrap();
 
@@ -476,7 +469,10 @@ async fn ac10_env_fallback_event_visible_in_timeline() {
         .await
         .unwrap();
     let fallback = events.iter().find(|e| e.kind == "provider.env_fallback");
-    assert!(fallback.is_some(), "env_fallback event should be in timeline");
+    assert!(
+        fallback.is_some(),
+        "env_fallback event should be in timeline"
+    );
     assert_eq!(fallback.unwrap().payload["source"], "env");
 }
 
@@ -495,15 +491,17 @@ async fn ac10_provider_missing_event_visible_in_timeline() {
         role.temperature = None;
         role.tool_allowlist = vec![];
         repos::roles::insert(&db.0, &role).unwrap();
-        db.0
-            .execute(
-                "UPDATE sessions SET agent_kind = 'role', agent_ref_id = ?1 WHERE id = ?2",
-                rusqlite::params!["r-loose", session.id],
-            )
-            .unwrap();
+        repos::sessions::add_participant(
+            &db.0,
+            &session.id,
+            AgentRefKind::Role,
+            "r-loose",
+            nuomi_core::domain::now_ms(),
+        )
+        .unwrap();
     }
 
-    let _ = commands::impl_submit_task(&state, session.id.clone(), "hello".into())
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello")
         .await
         .unwrap();
 
@@ -511,7 +509,10 @@ async fn ac10_provider_missing_event_visible_in_timeline() {
         .await
         .unwrap();
     let missing = events.iter().find(|e| e.kind == "provider.missing");
-    assert!(missing.is_some(), "provider.missing event should be in timeline");
+    assert!(
+        missing.is_some(),
+        "provider.missing event should be in timeline"
+    );
     assert!(missing.unwrap().payload["roleId"].is_string());
     assert!(missing.unwrap().payload["roleName"].is_string());
 }

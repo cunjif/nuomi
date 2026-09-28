@@ -22,12 +22,12 @@ async fn session_lifecycle_and_event_pagination() {
     let s1 = commands::impl_create_session(&state).await.unwrap();
     commands::impl_create_session(&state).await.unwrap();
     let listed = commands::impl_list_sessions(&state).await.unwrap();
-    assert_eq!(listed.len(), 3); // boot creates one
+    assert_eq!(listed.len(), 2); // boot session is in __migrated__, new ones in active ws
 
     commands::impl_resume_session(&state, s1.id.clone())
         .await
         .unwrap();
-    let result = commands::impl_submit_task(&state, s1.id.clone(), "hello".into())
+    let result = commands::run_conversation_turn(&state, &s1.id, "hello")
         .await
         .unwrap();
     assert_eq!(result.final_text, "hi");
@@ -306,5 +306,7 @@ async fn role_capability_mismatch_and_preset_protection() {
     assert_eq!(ipc_code(&err), "role.builtin_protected");
 
     // User roles still delete normally.
-    commands::impl_delete_role(&state, role.id, false).await.unwrap();
+    commands::impl_delete_role(&state, role.id, false)
+        .await
+        .unwrap();
 }
