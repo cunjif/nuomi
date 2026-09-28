@@ -751,8 +751,26 @@ pub async fn seed_builtin_roles(
 pub async fn generate_role(
     state: tauri::State<'_, AppState>,
     description: String,
+    binding: commands::RoleDirectorBindingDto,
 ) -> Result<commands::RoleDto, IpcError> {
-    commands::impl_generate_role(&state, description).await
+    commands::impl_generate_role(&state, description, binding).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_role_director_binding(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<commands::RoleDirectorBindingDto>, IpcError> {
+    commands::impl_get_role_director_binding(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_role_director_binding(
+    state: tauri::State<'_, AppState>,
+    binding: commands::RoleDirectorBindingDto,
+) -> Result<(), IpcError> {
+    commands::impl_set_role_director_binding(&state, binding).await
 }
 
 #[tauri::command]
@@ -913,8 +931,9 @@ pub async fn create_conversation(
 pub async fn list_conversations(
     state: tauri::State<'_, AppState>,
     kind: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::ConversationDto>, IpcError> {
-    commands::impl_list_conversations(&state, kind).await
+    commands::impl_list_conversations(&state, kind, workspace_id).await
 }
 
 #[tauri::command]

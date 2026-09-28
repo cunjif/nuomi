@@ -249,8 +249,12 @@ impl SchedulerRunner {
     /// Spawns the scan loop; drop/cancel the handle to stop it.
     pub fn spawn(self) -> SchedulerHandle {
         let token = CancellationToken::new();
-        let join =
-            tokio::spawn(run_loop(self.db_path, self.check_interval, self.bus, token.clone()));
+        let join = tokio::spawn(run_loop(
+            self.db_path,
+            self.check_interval,
+            self.bus,
+            token.clone(),
+        ));
         SchedulerHandle { token, join }
     }
 }
@@ -341,6 +345,7 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                             // Anchor the conversation to its schedule so a
                             // scheduled session can be traced back later.
                             Some(s.id.as_str()),
+                            "__migrated__",
                         )?;
                         let new_sid = session.id.clone();
                         let active_ws = repos::workspace_open_state::find_focused(conn)?

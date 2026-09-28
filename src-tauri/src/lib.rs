@@ -113,6 +113,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::delete_role,
         tauri_cmds::seed_builtin_roles,
         tauri_cmds::generate_role,
+        tauri_cmds::get_role_director_binding,
+        tauri_cmds::set_role_director_binding,
         tauri_cmds::get_routing_rules,
         tauri_cmds::set_routing_rules,
         tauri_cmds::route_capability,

@@ -1004,6 +1004,7 @@ pub struct ConversationDto {
     pub whiteboard_route_mode: Option<String>,
     pub participant_agents: Vec<AgentRefDto>,
     pub todo_list: Vec<TodoItemDto>,
+    pub workspace_id: String,
 }
 
 impl From<Session> for ConversationDto {
@@ -1023,6 +1024,7 @@ impl From<Session> for ConversationDto {
             whiteboard_route_mode: s.whiteboard_route_mode,
             participant_agents: Vec::new(),
             todo_list: Vec::new(),
+            workspace_id: "__migrated__".to_string(),
         }
     }
 }
@@ -1081,6 +1083,7 @@ pub struct ConversationInput {
     pub title: Option<String>,
     pub agent: Option<AgentRefInput>,
     pub team_id: Option<String>,
+    pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -1956,34 +1959,66 @@ pub async fn impl_upsert_provider(
     state: &AppState,
     provider: ProviderInput,
 ) -> Result<(), IpcError> {
-    use nuomi_core::providers::SecretStore;
+    // 1. If a new key is supplied, write it to the secret store.
     if let Some(key) = provider.api_key.as_ref() {
         let reference = format!("provider/{}", provider.name);
-        let store = nuomi_core::providers::OsKeyring;
-        store.set(&reference, key).await?;
+        // Use the AppState's secret store (OS keyring in prod, injectable
+        // MemorySecretStore in tests) so key writes stay consistent with the
+        // reads in team_runner / resolve_probe_secrets. Hardcoding OsKeyring
+        // here would bypass a test-injected store and split the key path.
+        state.secrets.set(&reference, key).await?;
     }
+    // 2. Look up the existing row (for update) before the DB write so we can
+    //    decide keyring_ref outside the transaction — specifically to validate
+    //    a retained keyring_ref still points at a live secret. A stale ref
+    //    (evicted credential, OS keyring reset, provider created through a
+    //    non-UI path, or a prior save that wrote the ref but not the secret)
+    //    would otherwise leave has_key=true with no backing secret, so the
+    //    next test-connect fails with a confusing 401 instead of "no key".
     let path = state.db_path.clone();
+    let existing: Option<ProviderConfig> = match provider.id.as_deref() {
+        Some(id) => {
+            let path = path.clone();
+            let id = id.to_string();
+            tokio::task::spawn_blocking(move || -> Result<Option<ProviderConfig>, IpcError> {
+                let db = Db::open(&path)?;
+                migrations::run(&db.0)?;
+                match repos::providers::get_provider(&db.0, &id) {
+                    Ok(row) => Ok(Some(row)),
+                    Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                        "provider.not_found",
+                        format!("provider#{id} not found"),
+                    )),
+                    Err(e) => Err(e.into()),
+                }
+            })
+            .await??
+        }
+        None => None,
+    };
+    // 3. Decide keyring_ref. A freshly supplied key always wins. When no key
+    //    is supplied we keep the stored ref — but only if the secret still
+    //    exists in the keyring; a stale ref is cleared so has_key reports
+    //    false and the UI prompts the user to re-enter the key instead of
+    //    showing a misleading "已存储密钥" placeholder.
+    let keyring_ref = match &provider.api_key {
+        Some(_) => Some(format!("provider/{}", provider.name)),
+        None => match existing.as_ref().and_then(|row| row.keyring_ref.as_deref()) {
+            Some(reference) => {
+                if state.secrets.get(reference).await.is_ok() {
+                    Some(reference.to_string())
+                } else {
+                    None
+                }
+            }
+            None => None,
+        },
+    };
+    // 4. Write the DB row with the resolved keyring_ref.
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
         let now = now_ms();
-        let existing = match provider.id.as_deref() {
-            Some(id) => match repos::providers::get_provider(&db.0, id) {
-                Ok(row) => Some(row),
-                Err(StoreError::NotFound { .. }) => {
-                    return Err(IpcError::new(
-                        "provider.not_found",
-                        format!("provider#{id} not found"),
-                    ))
-                }
-                Err(e) => return Err(e.into()),
-            },
-            None => None,
-        };
-        let keyring_ref = match &provider.api_key {
-            Some(_) => Some(format!("provider/{}", provider.name)),
-            None => existing.as_ref().and_then(|row| row.keyring_ref.clone()),
-        };
         let base_params = existing
             .as_ref()
             .map(|row| row.params.clone())
@@ -2020,17 +2055,29 @@ pub async fn impl_delete_provider(
     force: bool,
 ) -> Result<(), IpcError> {
     let path = state.db_path.clone();
+    // Fetch the keyring reference before the row is gone so we can clean up
+    // the OS credential after the DB delete succeeds. Best-effort: a keyring
+    // delete failure must not block the provider delete.
+    let keyring_ref = {
+        let path = path.clone();
+        let pid = provider_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<Option<String>, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            match repos::providers::get_provider(&db.0, &pid) {
+                Ok(row) => Ok(row.keyring_ref),
+                Err(StoreError::NotFound { .. }) => Err(IpcError::new(
+                    "provider.not_found",
+                    format!("provider#{pid} not found"),
+                )),
+                Err(e) => Err(e.into()),
+            }
+        })
+        .await??
+    };
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
         let mut db = Db::open(&path)?;
         migrations::run(&db.0)?;
-
-        // Verify the provider exists.
-        if repos::providers::get_provider(&db.0, &provider_id).is_err() {
-            return Err(IpcError::new(
-                "provider.not_found",
-                format!("provider#{provider_id} not found"),
-            ));
-        }
 
         // Two-phase delete (ADR 0011 D5): phase one — check refs.
         let refs = check_provider_refs(&db.0, &provider_id)?;
@@ -2049,7 +2096,15 @@ pub async fn impl_delete_provider(
         delete_and_nullify_provider_refs(&mut db.0, &provider_id)?;
         Ok(())
     })
-    .await?
+    .await??;
+    // Clean up the OS keyring entry (best-effort). A failure here leaves a
+    // dangling credential but does not affect correctness — the provider row
+    // is already gone, so the reference is unreachable. Without this cleanup a
+    // same-name provider recreated later would inherit the orphaned secret.
+    if let Some(reference) = keyring_ref {
+        let _ = state.secrets.delete(&reference).await;
+    }
+    Ok(())
 }
 
 pub async fn impl_list_providers(state: &AppState) -> Result<Vec<ProviderDto>, IpcError> {
@@ -2087,7 +2142,9 @@ pub struct TestProviderConnectionInput {
     pub api_key: Option<String>,
     /// Overrides the stored per-provider proxy when non-empty.
     pub proxy: Option<String>,
-    /// Model for the minimal chat probe; protocol defaults apply when empty.
+    /// Unused since the probe switched to a `GET /models` connectivity check.
+    /// Retained to keep the IPC contract stable; callers may still send a
+    /// model id but it is ignored by `impl_test_provider_connection`.
     pub model: Option<String>,
 }
 
@@ -2108,7 +2165,6 @@ async fn resolve_probe_secrets(
     api_key: Option<String>,
     proxy: Option<String>,
 ) -> Result<(String, Option<String>), IpcError> {
-    use nuomi_core::providers::SecretStore;
     let typed_key = api_key.filter(|k| !k.is_empty());
     let typed_proxy = proxy
         .map(|p| p.trim().to_string())
@@ -2141,13 +2197,29 @@ async fn resolve_probe_secrets(
     )
     .await??;
     // Keep the original semantics: typed key wins, else keyring secret.
+    // A keyring read failure (stale keyring_ref, evicted credential, service
+    // unavailable) is surfaced as an explicit error instead of being silently
+    // swallowed into an empty string. An empty key would make `list_model_ids`
+    // skip the Authorization header and the gateway would return a misleading
+    // "401 Authorization Not Found" that looks like a network/auth problem
+    // rather than a missing local secret. Callers turn this into a soft
+    // `ok:false` / `error` so the UI can tell the user to re-enter the key.
     let api_key = match typed_key {
         Some(k) => k,
         None => match stored_key {
-            Some(reference) => nuomi_core::providers::OsKeyring
+            Some(reference) => state
+                .secrets
                 .get(&reference)
                 .await
-                .unwrap_or_default(),
+                .map_err(|e| {
+                    IpcError::new(
+                        "provider.keyring_read_failed",
+                        format!(
+                            "存储的 API key 读取失败（引用 {reference}）：{e}。\
+                             请在表单中重新录入 API Key 后重试。"
+                        ),
+                    )
+                })?,
             None => String::new(),
         },
     };
@@ -2155,72 +2227,67 @@ async fn resolve_probe_secrets(
 }
 
 /// Read-only connectivity probe (5s budget): resolves the API key (explicit
-/// input, else the stored keyring secret for `provider_id`), then sends a
-/// one-token chat through the matching core client. Never persists anything;
-/// failures come back as `ok:false`, never as IPC errors.
+/// input, else the stored keyring secret for `provider_id`), then issues a
+/// lightweight `GET {base_url}/models` — the same read the "pull model list"
+/// button uses. A models GET is preferred over a chat-completion POST because
+/// some OpenAI-compatible gateways answer 404 on `/v1/chat/completions` while
+/// `/v1/models` stays reachable. Never persists anything; failures come back
+/// as `ok:false`, never as IPC errors.
 pub async fn impl_test_provider_connection(
     state: &AppState,
     input: TestProviderConnectionInput,
 ) -> Result<TestProviderConnectionDto, IpcError> {
-    use nuomi_core::providers::LlmProvider;
     /// Probe budget; mirrors the CLI-agent check so a wedged endpoint
     /// surfaces as `ok:false`, never a hang.
     const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    let (api_key, proxy) = resolve_probe_secrets(
+    // resolve_probe_secrets surfaces a keyring read failure as an IpcError
+    // (stale keyring_ref, evicted credential). Per the probe contract
+    // ("failures come back as ok:false, never as IPC errors"), catch it here
+    // and return a soft failure with an actionable message instead of letting
+    // the IPC error propagate to the frontend as a thrown exception.
+    let (api_key, proxy) = match resolve_probe_secrets(
         state,
         input.provider_id.as_deref(),
         input.api_key,
         input.proxy,
     )
-    .await?;
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(TestProviderConnectionDto {
+                ok: false,
+                latency_ms: None,
+                error: Some(e.to_string()),
+            });
+        }
+    };
 
-    let model = input
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| match input.protocol {
-            ProviderProtocolDto::OpenAiCompatible => "gpt-4o-mini".to_string(),
-            ProviderProtocolDto::AnthropicCompatible => "claude-3-5-haiku-latest".to_string(),
-        });
-    let mut request =
-        nuomi_core::providers::ChatRequest::simple(&model, "connection probe", "ping");
-    request.temperature = Some(0.0);
-    request.max_tokens = Some(1);
+    let protocol = protocol_from_dto(input.protocol);
+    // Connectivity probe via `GET {base_url}/models` — the same lightweight
+    // read the "pull model list" button uses. A chat-completion probe
+    // (`POST /v1/chat/completions`) was rejected here because some
+    // OpenAI-compatible gateways expose `/v1/models` but answer 404 on
+    // `/v1/chat/completions` (tokens scoped to listing only, or chat routed
+    // under a different path). A models GET is the minimal proof that the
+    // base URL resolves, the key authenticates, and the versioned endpoint
+    // exists — exactly what a "test connection" button promises.
+    // `input.model` is intentionally unused; the field is retained to keep
+    // the IPC contract stable (removing it would break specta bindings).
+    let _ = input.model.as_deref();
 
     let started = std::time::Instant::now();
-    // Per-provider proxy: build the client before starting the latency clock
-    // (a builder failure is a config error, not probe latency).
-    let http = nuomi_core::providers::pool::client_for_endpoint(proxy.as_deref())?;
-    let probe: std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<
-                        nuomi_core::providers::ChatResponse,
-                        nuomi_core::providers::ProviderError,
-                    >,
-                > + Send,
-        >,
-    > = match input.protocol {
-        ProviderProtocolDto::OpenAiCompatible => Box::pin(async {
-            nuomi_core::providers::OpenAiCompatibleClient::new(&input.base_url, &api_key)
-                .with_http_client(http)
-                .complete(&request)
-                .await
-        }),
-        ProviderProtocolDto::AnthropicCompatible => Box::pin(async {
-            nuomi_core::providers::AnthropicCompatibleClient::new(&input.base_url, &api_key)
-                .with_http_client(http)
-                .complete(&request)
-                .await
-        }),
-    };
+    let probe = nuomi_core::providers::list_model_ids(
+        protocol,
+        &input.base_url,
+        &api_key,
+        proxy.as_deref(),
+    );
     let result = tokio::time::timeout(TEST_TIMEOUT, probe).await;
     let latency_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
     Ok(match result {
-        Ok(Ok(_)) => TestProviderConnectionDto {
+        Ok(Ok(_models)) => TestProviderConnectionDto {
             ok: true,
             latency_ms: Some(latency_ms),
             error: None,
@@ -2267,13 +2334,22 @@ pub async fn impl_list_provider_models(
     state: &AppState,
     input: ListProviderModelsInput,
 ) -> Result<ListProviderModelsDto, IpcError> {
-    let (api_key, proxy) = resolve_probe_secrets(
+    let (api_key, proxy) = match resolve_probe_secrets(
         state,
         input.provider_id.as_deref(),
         input.api_key,
         input.proxy,
     )
-    .await?;
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(ListProviderModelsDto {
+                models: Vec::new(),
+                error: Some(e.to_string()),
+            });
+        }
+    };
     let protocol = protocol_from_dto(input.protocol);
     match nuomi_core::providers::list_model_ids(
         protocol,
@@ -2919,6 +2995,52 @@ pub async fn impl_check_cli_agent(
 
 // ---------- roles / teams / whiteboard (SPEC team-shell-m1 T4) ----------
 
+/// Whether the role director binds to a Provider or a CLI Agent profile.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RoleDirectorBindingModeDto {
+    Provider,
+    Cli,
+}
+
+/// Self-binding of the role director (the model it uses to orchestrate).
+/// NOT inherited by generated roles.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleDirectorBindingDto {
+    pub binding_mode: RoleDirectorBindingModeDto,
+    pub provider_id: Option<String>,
+    pub agent_profile_id: Option<String>,
+}
+
+impl RoleDirectorBindingDto {
+    fn into_entity(self) -> nuomi_core::services::RoleDirectorBinding {
+        use nuomi_core::services::RoleDirectorBindingMode as M;
+        nuomi_core::services::RoleDirectorBinding {
+            binding_mode: match self.binding_mode {
+                RoleDirectorBindingModeDto::Provider => M::Provider,
+                RoleDirectorBindingModeDto::Cli => M::Cli,
+            },
+            provider_id: self.provider_id,
+            agent_profile_id: self.agent_profile_id,
+        }
+    }
+}
+
+impl From<nuomi_core::services::RoleDirectorBinding> for RoleDirectorBindingDto {
+    fn from(b: nuomi_core::services::RoleDirectorBinding) -> Self {
+        use nuomi_core::services::RoleDirectorBindingMode as M;
+        Self {
+            binding_mode: match b.binding_mode {
+                M::Provider => RoleDirectorBindingModeDto::Provider,
+                M::Cli => RoleDirectorBindingModeDto::Cli,
+            },
+            provider_id: b.provider_id,
+            agent_profile_id: b.agent_profile_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleDto {
@@ -3190,6 +3312,7 @@ pub async fn impl_seed_builtin_roles(state: &AppState) -> Result<SeedRolesDto, I
 pub async fn impl_generate_role(
     state: &AppState,
     description: String,
+    binding: RoleDirectorBindingDto,
 ) -> Result<RoleDto, IpcError> {
     if description.trim().is_empty() {
         return Err(IpcError::new(
@@ -3202,6 +3325,7 @@ pub async fn impl_generate_role(
         state.secrets.clone(),
         Some(state.current_workspace()),
         &description,
+        binding.into_entity(),
     )
     .await
     .map_err(|e| match e {
@@ -3209,12 +3333,46 @@ pub async fn impl_generate_role(
             "role.no_provider",
             "no provider available to generate a role",
         ),
+        nuomi_core::services::role_director::RoleDirectorError::NoBinding => IpcError::new(
+            "role.no_binding",
+            "role director has no self-binding configured",
+        ),
         nuomi_core::services::role_director::RoleDirectorError::Rejected(msg) => {
             IpcError::new("role.director_invalid", msg)
         }
         other => IpcError::new("role.director_failed", other.to_string()),
     })?;
     Ok(RoleDto::from(role))
+}
+
+pub async fn impl_get_role_director_binding(
+    state: &AppState,
+) -> Result<Option<RoleDirectorBindingDto>, IpcError> {
+    let path = state.db_path.clone();
+    let binding = tokio::task::spawn_blocking(move || -> Result<Option<RoleDirectorBindingDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        nuomi_core::services::role_director::get_role_director_binding(&db.0)
+            .map(|opt| opt.map(RoleDirectorBindingDto::from))
+            .map_err(|e| IpcError::new("role.director_binding_failed", e.to_string()))
+    })
+    .await??;
+    Ok(binding)
+}
+
+pub async fn impl_set_role_director_binding(
+    state: &AppState,
+    binding: RoleDirectorBindingDto,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let entity = binding.into_entity();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        nuomi_core::services::role_director::set_role_director_binding(&db.0, &entity)
+            .map_err(|e| IpcError::new("role.director_binding_failed", e.to_string()))
+    })
+    .await?
 }
 
 /// Routing rules mirrored from `nuomi_core::services::RoutingRules`
@@ -4279,6 +4437,7 @@ pub async fn impl_create_conversation(
         .and_then(|a| AgentRefKind::parse(&a.kind).map(|k| (k, a.id.clone())));
     let title = input.title.clone();
     let team_id = input.team_id.clone();
+    let workspace_id = input.workspace_id.clone();
     let path = state.db_path.clone();
     let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
         let db = Db::open(&path)?;
@@ -4295,12 +4454,8 @@ pub async fn impl_create_conversation(
             &participants,
             team_id.as_deref(),
             None,
+            &workspace_id,
         )?;
-        let active_ws =
-            repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-        if !active_ws.is_empty() {
-            repos::sessions::set_workspace_id(&db.0, &session.id, &active_ws)?;
-        }
         Ok(session)
     })
     .await
@@ -4311,15 +4466,17 @@ pub async fn impl_create_conversation(
 pub async fn impl_list_conversations(
     state: &AppState,
     kind: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<ConversationDto>, IpcError> {
     let path = state.db_path.clone();
     let filter = kind.clone();
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ConversationDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws = repos::workspace_open_state::find_focused(&db.0)?.map(|r| r.workspace_id).unwrap_or_default();
-        let filter_ws = if active_ws.is_empty() { "__migrated__" } else { &active_ws };
-        let sessions = repos::sessions::list(&db.0, filter_ws, 200)?;
+        let sessions = match &workspace_id {
+            None => repos::sessions::list_all(&db.0, 200)?,
+            Some(id) => repos::sessions::list_by_workspace(&db.0, id, 200)?,
+        };
         let mut out = Vec::with_capacity(sessions.len());
         for session in &sessions {
             if filter

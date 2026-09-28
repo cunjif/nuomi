@@ -92,11 +92,7 @@ pub fn update_meta(
 }
 
 /// Upgrades a session's kind (e.g. chat → group) and sets updated_at.
-pub fn update_kind(
-    conn: &Connection,
-    id: &str,
-    kind: ConversationKind,
-) -> Result<(), StoreError> {
+pub fn update_kind(conn: &Connection, id: &str, kind: ConversationKind) -> Result<(), StoreError> {
     let n = conn.execute(
         "UPDATE sessions SET kind = ?2, updated_at = ?3 WHERE id = ?1",
         params![id, kind.as_str(), crate::domain::now_ms()],
@@ -203,9 +199,8 @@ pub fn delete_all_for_workspace(
     workspace_id: &str,
 ) -> Result<usize, StoreError> {
     let session_ids: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL")?;
         let rows = stmt.query_map(params![workspace_id], |row| row.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
@@ -325,16 +320,28 @@ pub fn cache_scope(conn: &Connection, id: &str) -> Result<Option<String>, StoreE
 
 /// Lists sessions for `workspace_id`, most recently updated first.
 /// Cross-workspace isolation: only sessions belonging to this workspace are returned.
-pub fn list(
-    conn: &Connection,
-    workspace_id: &str,
-    limit: u32,
-) -> Result<Vec<Session>, StoreError> {
+pub fn list(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
          FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_session)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Semantic alias for [`list`] — lists sessions belonging to a single workspace.
+pub fn list_by_workspace(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Session>, StoreError> {
+    list(conn, workspace_id, limit)
+}
+
+/// Lists sessions across ALL workspaces, most recently updated first.
+/// Used by the conversation list when the workspace filter is "all".
+pub fn list_all(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
+         FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], row_to_session)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 

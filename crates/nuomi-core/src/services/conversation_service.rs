@@ -6,9 +6,7 @@
 
 use rusqlite::Connection;
 
-use crate::domain::{
-    now_ms, AgentRefKind, ConversationKind, Role, Session,
-};
+use crate::domain::{now_ms, AgentRefKind, ConversationKind, Role, Session};
 use crate::store::repos::{agent_profiles, roles, sessions, settings};
 use crate::store::StoreError;
 
@@ -35,6 +33,7 @@ pub fn create_conversation(
     participants: &[(AgentRefKind, &str)],
     team_id: Option<&str>,
     schedule_id: Option<&str>,
+    workspace_id: &str,
 ) -> Result<Session, StoreError> {
     let now = now_ms();
     let session = Session {
@@ -53,6 +52,7 @@ pub fn create_conversation(
         deleted_at: None,
     };
     sessions::insert(conn, &session)?;
+    sessions::set_workspace_id(conn, &session.id, workspace_id)?;
     for (kind, id) in participants {
         sessions::add_participant(conn, &session.id, *kind, id, now)?;
     }
@@ -110,7 +110,10 @@ pub fn resolve_default_agent(conn: &Connection) -> Result<Option<ResolvedAgent>,
     // ADR 0012 D3: CLI Agent 须通过 Role 绑定才能使用，不再直接作为对话
     // 对象。默认链只选第一个 builtin 且 isRoleReady 的 Role。
     let roles_list = roles::list(conn)?;
-    if let Some(role) = roles_list.into_iter().find(|r| r.builtin && is_role_ready(r)) {
+    if let Some(role) = roles_list
+        .into_iter()
+        .find(|r| r.builtin && is_role_ready(r))
+    {
         return Ok(Some(ResolvedAgent {
             kind: AgentRefKind::Role,
             id: role.id,
@@ -195,7 +198,10 @@ fn resolve_ref(
 fn parse_agent_ref(s: &str) -> Option<(AgentRefKind, String)> {
     s.strip_prefix("cli:")
         .map(|id| (AgentRefKind::Cli, id.to_string()))
-        .or_else(|| s.strip_prefix("role:").map(|id| (AgentRefKind::Role, id.to_string())))
+        .or_else(|| {
+            s.strip_prefix("role:")
+                .map(|id| (AgentRefKind::Role, id.to_string()))
+        })
 }
 
 #[cfg(test)]
@@ -213,7 +219,7 @@ mod tests {
     fn create_chat_conversation_defaults() {
         let conn = db();
         let session =
-            create_conversation(&conn, ConversationKind::Chat, "hello", &[], None, None).unwrap();
+            create_conversation(&conn, ConversationKind::Chat, "hello", &[], None, None, "__migrated__").unwrap();
         assert_eq!(session.kind, ConversationKind::Chat);
         assert!(session.team_id.is_none());
         let loaded = sessions::get(&conn, &session.id).unwrap();
@@ -230,6 +236,7 @@ mod tests {
             &[],
             Some("team-1"),
             None,
+            "__migrated__",
         )
         .unwrap();
         assert_eq!(session.kind, ConversationKind::Group);
@@ -246,6 +253,7 @@ mod tests {
             &[(AgentRefKind::Role, "role-1")],
             None,
             None,
+            "__migrated__",
         )
         .unwrap();
         let parts = sessions::list_participants(&conn, &session.id).unwrap();
@@ -257,7 +265,7 @@ mod tests {
     fn resolve_participants_falls_through_to_none_when_empty() {
         let conn = db();
         let session =
-            create_conversation(&conn, ConversationKind::Chat, "s", &[], None, None).unwrap();
+            create_conversation(&conn, ConversationKind::Chat, "s", &[], None, None, "__migrated__").unwrap();
         let resolved = resolve_participants(&conn, &session.id).unwrap();
         assert!(resolved.is_empty());
     }
@@ -272,6 +280,7 @@ mod tests {
             &[(AgentRefKind::Role, "role-1")],
             None,
             None,
+            "__migrated__",
         )
         .unwrap();
         // role-1 doesn't exist in db → resolve_ref returns None → filtered out.
@@ -302,7 +311,8 @@ mod tests {
 
     #[test]
     fn compose_user_message_with_attachments() {
-        let result = compose_user_message("hello", &[("file.txt", ".nuomi/attachments/s1/file.txt")]);
+        let result =
+            compose_user_message("hello", &[("file.txt", ".nuomi/attachments/s1/file.txt")]);
         assert!(result.contains("hello"));
         assert!(result.contains("file.txt"));
         assert!(result.contains(".nuomi/attachments/s1/file.txt"));

@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::{new_id, now_ms, Capability, Role};
 use crate::providers::{ChatRequest, LlmProvider, SecretStore};
@@ -21,12 +21,68 @@ use crate::store::{migrations, repos, Db};
 pub enum RoleDirectorError {
     #[error("no provider available for role generation")]
     NoProvider,
+    #[error("role director has no self-binding configured")]
+    NoBinding,
     #[error("generated role rejected: {0}")]
     Rejected(String),
     #[error("store: {0}")]
     Store(String),
     #[error("provider call failed: {0}")]
     Provider(String),
+}
+
+/// Whether the role director binds to a Provider config or a CLI Agent profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RoleDirectorBindingMode {
+    Provider,
+    Cli,
+}
+
+/// Self-binding of the role director: the model the director itself uses to
+/// orchestrate / generate roles. This is NOT inherited by the roles it
+/// generates — those keep `provider_id: None` and must be bound separately
+/// in the Roles panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleDirectorBinding {
+    pub binding_mode: RoleDirectorBindingMode,
+    pub provider_id: Option<String>,
+    pub agent_profile_id: Option<String>,
+}
+
+impl RoleDirectorBinding {
+    /// Returns the id used to look up the materialized provider —
+    /// `provider_id` for Provider mode, `agent_profile_id` for Cli mode.
+    fn target_id(&self) -> Option<&str> {
+        match self.binding_mode {
+            RoleDirectorBindingMode::Provider => self.provider_id.as_deref(),
+            RoleDirectorBindingMode::Cli => self.agent_profile_id.as_deref(),
+        }
+    }
+}
+
+/// app_settings key under which the director self-binding is JSON-persisted.
+const ROLE_DIRECTOR_BINDING_KEY: &str = "role_director_binding";
+
+/// Reads the persisted director self-binding, or `None` when unset.
+pub fn get_role_director_binding(conn: &rusqlite::Connection) -> Result<Option<RoleDirectorBinding>, RoleDirectorError> {
+    let raw = repos::settings::get(conn, ROLE_DIRECTOR_BINDING_KEY)
+        .map_err(|e| RoleDirectorError::Store(e.to_string()))?;
+    match raw {
+        None => Ok(None),
+        Some(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| RoleDirectorError::Store(format!("invalid binding json: {e}"))),
+    }
+}
+
+/// Persists the director self-binding as JSON under `role_director_binding`.
+pub fn set_role_director_binding(conn: &rusqlite::Connection, binding: &RoleDirectorBinding) -> Result<(), RoleDirectorError> {
+    let json = serde_json::to_string(binding)
+        .map_err(|e| RoleDirectorError::Store(format!("binding serialize: {e}")))?;
+    repos::settings::set(conn, ROLE_DIRECTOR_BINDING_KEY, &json)
+        .map_err(|e| RoleDirectorError::Store(e.to_string()))
 }
 
 /// A validated, not-yet-persisted generated role. Wire format is camelCase
@@ -52,14 +108,16 @@ Rules:\n\
 - requiredCapabilities: subset of [\"reasoning\",\"image\",\"voice\",\"video\"] the role needs \
 from its model provider; most roles need only [\"reasoning\"].";
 
-/// Generates and persists a role for `description` using the default
-/// provider (master first — same resolution as
-/// [`super::team_runner::materialize`]).
+/// Generates and persists a role for `description` using the director's
+/// **self-binding** — the Provider or CLI Agent the director itself uses to
+/// orchestrate. The binding is NOT inherited by the generated role (it keeps
+/// `provider_id: None`); bind the role separately in the Roles panel.
 pub async fn generate_role(
     db_path: Arc<str>,
     secrets: Arc<dyn SecretStore>,
     cwd: Option<PathBuf>,
     description: &str,
+    binding: RoleDirectorBinding,
 ) -> Result<Role, RoleDirectorError> {
     let description = description.trim();
     if description.is_empty() {
@@ -71,7 +129,14 @@ pub async fn generate_role(
     let materialized = super::team_runner::materialize(db_path.clone(), secrets, cwd)
         .await
         .map_err(|e| RoleDirectorError::Store(e.to_string()))?;
-    let provider = materialized.default.ok_or(RoleDirectorError::NoProvider)?;
+    // Resolve the director's own bound model — never fall back to the default
+    // provider. A missing target id or a deleted provider/agent → NoBinding.
+    let target_id = binding.target_id().ok_or(RoleDirectorError::NoBinding)?;
+    let provider = materialized
+        .providers
+        .get(target_id)
+        .cloned()
+        .ok_or(RoleDirectorError::NoBinding)?;
     let model = provider.id().to_string();
 
     let request = ChatRequest::simple(
