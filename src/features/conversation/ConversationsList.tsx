@@ -234,6 +234,7 @@ export function ConversationsList(): ReactNode {
         </div>
       )}
 
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <AsyncBoundary
         isLoading={conversationsQuery.isLoading}
         error={conversationsQuery.error}
@@ -298,8 +299,9 @@ export function ConversationsList(): ReactNode {
           ))}
         </ul>
       </AsyncBoundary>
+      </div>
 
-      {!batchMode && <div className="mt-1"><WorkspaceFilter /></div>}
+      {!batchMode && <div className="shrink-0 border-t border-ink-muted/30 pt-1 mt-1"><WorkspaceFilter /></div>}
 
       {dialogKind && (
         <NewConversationDialog
