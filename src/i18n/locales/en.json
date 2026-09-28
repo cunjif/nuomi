@@ -108,7 +108,34 @@
     "noProviderHint": "No Provider configured. The conversation feature is unavailable. Please add at least one Provider in Settings.",
     "noRoleAgent": "Please configure a Role Agent first",
     "noRoleAgentHint": "No Role Agent configured. The conversation feature is unavailable. Please bind a Role to a Provider or CLI Agent in Settings.",
-    "goToSettings": "Go to Settings"
+    "goToSettings": "Go to Settings",
+    "status": {
+      "instantiating": {
+        "1": "Awakening the slumbering soul of code…",
+        "2": "Tying shoelaces — about to sprint!",
+        "3": "Warming up the engine, hang tight",
+        "4": "Crawling out of bed, eyelids still heavy",
+        "5": "Winding up the gears",
+        "6": "Summoning ritual in progress, half the runes are lit"
+      },
+      "preparing": {
+        "1": "Flipping through previous conversation notes",
+        "2": "Organizing thoughts — deep breath —",
+        "3": "Tuning the instrument, about to play",
+        "4": "Hauling the toolbox to the desk",
+        "5": "Checking today's sticky notes"
+      },
+      "thinking": {
+        "1": "Brewing a brilliant answer",
+        "2": "Chin in hand, deep in thought…",
+        "3": "Inspiration is on its way — looks like traffic",
+        "4": "Rehearsing the inner mental drama",
+        "5": "Whispering to the muse",
+        "6": "Downloading the idea from the cloud, 99%…",
+        "7": "Untangling a thousand threads into one",
+        "8": "The flash of insight is almost here, give it one more second"
+      }
+    }
   },
   "commands": {
     "panelLabel": "Command completions",
@@ -245,6 +272,13 @@
     "newDialogGoToSettings": "Go to Settings",
     "newDialogCreate": "Create",
     "newDialogCancel": "Cancel",
+    "workspaceSelectorLabel": "Select workspace",
+    "workspaceSelectorNone": "Please add a workspace first",
+    "workspaceBadgeUnaffiliated": "Unaffiliated",
+    "workspaceFilterAll": "All",
+    "workspaceFilterLabel": "Workspace filter",
+    "workspaceDeletedFallback": "Filtered workspace was deleted",
+    "workspaceNotFoundInDialog": "Selected workspace no longer exists, please reselect",
     "batch": "Batch",
     "clear": "Clear",
     "delete": "Delete",
@@ -499,6 +533,15 @@
       "directorGenerating": "Generating…",
       "directorSuccess": "Role \"{{name}}\" generated",
       "directorFailed": "Role generation failed",
+      "directorBindingTitle": "Director Binding",
+      "directorBindingHint": "This binding is for the director itself; it is NOT inherited by generated roles.",
+      "directorNoModel": "No model available. Configure a Provider or CLI Agent in Settings first.",
+      "bindingProvider": "Provider",
+      "bindingCli": "CLI Agent",
+      "bindingFailed": "Binding failed",
+      "directorNoBinding": "Role director has no self-binding; cannot run.",
+      "directorBindingRequired": "Please bind an execution model for the role director first.",
+      "directorBindReminder": "(The role's own model binding must be done separately in the Roles panel.)",
       "defaultBinding": "Default",
       "save": "Save",
       "saving": "Saving…",
@@ -700,7 +743,7 @@
     "apiKeyHint": "Stored encrypted in the OS keyring, never logged",
     "show": "Show",
     "hide": "Hide",
-    "hasKeyStored": "Key stored",
+    "hasKeyStored": "Stored — leave blank to keep",
     "testConnection": "Test connection",
     "testing": "Testing…",
     "testOk": "✓ Connected · {{ms}}ms",

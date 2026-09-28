@@ -20,6 +20,7 @@ function makeConversation(overrides: Partial<ConversationDto> = {}): Conversatio
     whiteboardRouteMode: null,
     participantAgents: [{ kind: "role", id: "role-1", name: "Alice" }],
     todoList: [],
+    workspaceId: "__migrated__",
     ...overrides,
   };
 }

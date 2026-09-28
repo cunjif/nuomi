@@ -108,7 +108,34 @@
     "noProviderHint": "未检测到已配置的 Provider，对话功能不可用。请先在设置中添加至少一个 Provider。",
     "noRoleAgent": "请先配置 Role Agent",
     "noRoleAgentHint": "未检测到已配置的 Role Agent，对话功能不可用。请先在设置中将 Role 绑定 Provider 或 CLI Agent。",
-    "goToSettings": "前往设置"
+    "goToSettings": "前往设置",
+    "status": {
+      "instantiating": {
+        "1": "正在唤醒沉睡的代码之魂……",
+        "2": "正在系鞋带，马上就出发！",
+        "3": "引擎预热中，请稍候片刻",
+        "4": "正在从被窝里爬起来，眼皮还有点沉",
+        "5": "正在给自己的齿轮上发条",
+        "6": "召唤仪式进行中，符文已亮起一半"
+      },
+      "preparing": {
+        "1": "正在翻阅之前的对话笔记",
+        "2": "正在整理思路，深呼吸——",
+        "3": "正在调音，马上开唱",
+        "4": "正在把工具箱搬到桌边",
+        "5": "正在清点今天的待办小纸条"
+      },
+      "thinking": {
+        "1": "正在酝酿一个绝妙的回答",
+        "2": "托腮沉思中……",
+        "3": "灵感正在路上，好像堵车了",
+        "4": "脑内小剧场正在排演",
+        "5": "正在和缪斯女神低语",
+        "6": "想法正在从云端下载，进度 99%……",
+        "7": "正在把千头万绪捋成一根线",
+        "8": "灵光马上就到，再给它一秒钟"
+      }
+    }
   },
   "commands": {
     "panelLabel": "命令补全",
@@ -245,6 +272,13 @@
     "newDialogGoToSettings": "前往设置",
     "newDialogCreate": "创建",
     "newDialogCancel": "取消",
+    "workspaceSelectorLabel": "选择工作区",
+    "workspaceSelectorNone": "请先添加工作区",
+    "workspaceBadgeUnaffiliated": "未归属",
+    "workspaceFilterAll": "全部",
+    "workspaceFilterLabel": "工作区筛选",
+    "workspaceDeletedFallback": "原筛选工作区已删除",
+    "workspaceNotFoundInDialog": "所选工作区已不存在，请重新选择",
     "batch": "批量",
     "clear": "清空",
     "delete": "删除",
@@ -499,6 +533,15 @@
       "directorGenerating": "生成中…",
       "directorSuccess": "已生成 Role「{{name}}」",
       "directorFailed": "Role 生成失败",
+      "directorBindingTitle": "角色导演绑定",
+      "directorBindingHint": "此绑定用于角色导演自身，不会被生成的角色继承",
+      "directorNoModel": "暂无可用模型，请先在设置中配置 Provider 或 CLI Agent",
+      "bindingProvider": "Provider",
+      "bindingCli": "CLI Agent",
+      "bindingFailed": "绑定设置失败",
+      "directorNoBinding": "角色导演未绑定执行模型，无法工作",
+      "directorBindingRequired": "请先为角色导演绑定执行模型",
+      "directorBindReminder": "（角色的模型绑定需另行在 Roles 面板完成）",
       "defaultBinding": "默认",
       "save": "保存",
       "saving": "保存中…",
@@ -700,7 +743,7 @@
     "apiKeyHint": "仅经 OS keyring 加密存储，不会写入日志",
     "show": "显示",
     "hide": "隐藏",
-    "hasKeyStored": "已录入密钥",
+    "hasKeyStored": "已存储，留空保留",
     "testConnection": "测试连接",
     "testing": "测试中…",
     "testOk": "✓ 已连接 · {{ms}}ms",

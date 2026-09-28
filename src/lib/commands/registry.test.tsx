@@ -38,6 +38,7 @@ function makeContext(overrides: Partial<CommandContext> = {}): { ctx: CommandCon
   const toastWarn = vi.fn();
   const ctx: CommandContext = {
     sessionId: "s1",
+    focusedWorkspaceId: null,
     ipc,
     queryClient: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }),
     navigate,

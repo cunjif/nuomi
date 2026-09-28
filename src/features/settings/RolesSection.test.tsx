@@ -159,14 +159,17 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
   });
 
   it("generates a role through the Role Director dialog", async () => {
+    const binding = { bindingMode: "provider" as const, providerId: "prov-1", agentProfileId: null };
     const generateRole = vi.fn().mockResolvedValue(ok(role({ id: "r9", name: "周报助手", generated: true })));
     injectIpcCommands({
       listRoles: vi
         .fn()
         .mockResolvedValueOnce(ok([]))
         .mockResolvedValueOnce(ok([role({ id: "r9", name: "周报助手", generated: true })])),
-      listProviders: vi.fn().mockResolvedValue(ok([])),
+      listProviders: vi.fn().mockResolvedValue(ok([{ id: "prov-1", name: "P1", protocol: "openai_compatible", baseUrl: "http://x", hasKey: true, capabilities: [], isMaster: false, settings: { models: [], defaultModel: null, temperature: null, topP: null, maxTokens: null, timeoutSecs: null, retry: null, maxConcurrency: null, priority: null, roles: [], enabled: true } }])),
       listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+      getRoleDirectorBinding: vi.fn().mockResolvedValue(ok(binding)),
+      setRoleDirectorBinding: vi.fn().mockResolvedValue(ok(null)),
       generateRole,
     } as never);
     renderWithProviders(<RolesSection />);
@@ -176,7 +179,7 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
       target: { value: "我要一个帮我写周报的角色" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
-    await waitFor(() => expect(generateRole).toHaveBeenCalledWith("我要一个帮我写周报的角色"));
+    await waitFor(() => expect(generateRole).toHaveBeenCalledWith("我要一个帮我写周报的角色", binding));
     expect(await screen.findByText("周报助手")).toBeInTheDocument();
   });
 });
