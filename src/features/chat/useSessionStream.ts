@@ -58,6 +58,8 @@ export function useSessionStream(sessionId: string | null): {
   retry: () => void;
   /** Live activity observed since last clear — guards duplicate final text. */
   hasLiveActivity: () => boolean;
+  /** Whether any stream text has arrived (first-token indicator). */
+  hasStreamText: boolean;
   clearLive: () => void;
   /** Optimistic user bubble shown before the persisted round-trip lands. */
   addOptimistic: (text: string) => void;
@@ -244,6 +246,7 @@ export function useSessionStream(sessionId: string | null): {
     error: historyQuery.error,
     retry: () => void historyQuery.refetch(),
     hasLiveActivity: () => liveActivityRef.current,
+    hasStreamText: streamText.length > 0,
     clearLive,
     addOptimistic,
     clearOptimistic,

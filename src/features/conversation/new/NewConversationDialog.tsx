@@ -9,6 +9,7 @@ import { useUiStore } from "../../../lib/store/uiStore";
 import { describeError } from "../../../i18n";
 import type { ConversationKind } from "../../../lib/conversation/kinds";
 import { isRoleReady } from "../../../lib/conversation/roleReady";
+import { WorkspaceSelector } from "./WorkspaceSelector";
 
 export interface NewConversationDialogProps {
   kind: ConversationKind;
@@ -42,6 +43,8 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
   const [title, setTitle] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(focusedWorkspaceId);
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],
@@ -70,6 +73,7 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
         title: title.trim() || null,
         agent: firstAgent,
         teamId: null,
+        workspaceId: selectedWorkspaceId ?? "__migrated__",
       });
       for (let i = 1; i < roleIds.length; i++) {
         await ipc.addConversationAgent(session.id, { kind: "role", id: roleIds[i]! });
@@ -78,13 +82,19 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
       selectSession(session.id);
       onClose();
     } catch (e) {
-      toast.error(describeError(e));
+      const msg = describeError(e);
+      if (msg.includes("workspace_not_found")) {
+        toast.error(t("conversation.workspaceNotFoundInDialog"));
+        void qc.invalidateQueries({ queryKey: ["workspaces"] });
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setCreating(false);
     }
   };
 
-  const canCreate = selectedRoleIds.size > 0 && !creating;
+  const canCreate = selectedRoleIds.size > 0 && !creating && selectedWorkspaceId !== null;
 
   return (
     <Dialog
@@ -116,6 +126,7 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogKind")}</label>
           <span className="rounded bg-ink-muted/20 px-2 py-0.5 text-sm text-ink">{kind}</span>
         </div>
+        <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
         <div>
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogTitleLabel")}</label>
           <input

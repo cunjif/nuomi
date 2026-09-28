@@ -36,9 +36,10 @@ export function GroupConversationView(): ReactNode {
   const selectSession = useUiStore((s) => s.selectSession);
   const { cycleTheme } = useTheme();
 
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const commandContext = useMemo<CommandContext>(
-    () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
-    [sessionId, qc, navigate, selectSession, cycleTheme, t],
+    () => ({ sessionId, focusedWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
+    [sessionId, focusedWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
   );
 
   const eventsQuery = useQuery({

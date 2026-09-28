@@ -11,6 +11,8 @@ import { useUiStore } from "../../lib/store/uiStore";
 import { formatRelativeTime, type RelativeTimeLocale } from "../../lib/format/relativeTime";
 import type { ConversationKind } from "../../lib/conversation/kinds";
 import { NewConversationDialog } from "./new/NewConversationDialog";
+import { WorkspaceFilter } from "./WorkspaceFilter";
+import { WorkspaceBadge } from "./WorkspaceBadge";
 
 function kindIcon(kind: string): string {
   switch (kind) {
@@ -41,6 +43,7 @@ export function ConversationsList(): ReactNode {
   const selectedSessionId = useUiStore((s) => s.selectedSessionId);
   const selectSession = useUiStore((s) => s.selectSession);
   const [filter, setFilter] = useState<ConversationKind | "all">("all");
+  const workspaceFilter = useUiStore((s) => s.conversationWorkspaceFilter);
   const [dialogKind, setDialogKind] = useState<ConversationKind | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -48,10 +51,18 @@ export function ConversationsList(): ReactNode {
   const locale: RelativeTimeLocale = i18n.language === "en" ? "en" : "zh-CN";
 
   const conversationsQuery = useQuery({
-    queryKey: ["conversations", filter],
-    queryFn: () => ipc.listConversations(filter === "all" ? null : filter),
+    queryKey: ["conversations", filter, workspaceFilter],
+    queryFn: () => ipc.listConversations(filter === "all" ? null : filter, workspaceFilter === "all" ? null : workspaceFilter),
     refetchInterval: 15_000,
   });
+
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => ipc.listWorkspaces(),
+    staleTime: 30_000,
+  });
+
+  const workspacePathMap = new Map((workspacesQuery.data ?? []).map((ws) => [ws.id, ws.rootPath]));
 
   const resumeMut = useMutation({
     mutationFn: ipc.resumeSession,
@@ -223,6 +234,8 @@ export function ConversationsList(): ReactNode {
         </div>
       )}
 
+      {!batchMode && <div className="mb-1"><WorkspaceFilter /></div>}
+
       <AsyncBoundary
         isLoading={conversationsQuery.isLoading}
         error={conversationsQuery.error}
@@ -264,6 +277,10 @@ export function ConversationsList(): ReactNode {
                 >
                   <span aria-hidden="true" className="shrink-0 text-xs">{kindIcon(conv.kind)}</span>
                   <span className="min-w-0 flex-1 truncate">{conv.title}</span>
+                  <WorkspaceBadge
+                    workspaceId={conv.workspaceId}
+                    workspaceRootPath={workspacePathMap.get(conv.workspaceId) ?? null}
+                  />
                   <span className="shrink-0 text-xs tabular-nums">
                     {formatRelativeTime(conv.createdAt, Date.now(), locale)}
                   </span>

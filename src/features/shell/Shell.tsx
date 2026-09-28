@@ -17,6 +17,7 @@ import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
 import { AreaNav } from "./AreaNav";
 import { ChatTabBar } from "./ChatTabBar";
+import { isChatPanelActive } from "./isChatPanelActive";
 import { BackgroundTray } from "./BackgroundTray";
 import { WorkbenchArea } from "./WorkbenchArea";
 import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge";
@@ -279,11 +280,13 @@ export function Shell(): ReactNode {
       <div className="flex min-h-0 flex-1">
         <LeftRail />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-raised">
-          {/* Strip row: no border of its own — the panel below is borderless
-              on top, so the chips and the panel header form one surface. */}
-          <div className="flex shrink-0 items-end border-r border-ink-muted/30 px-3 pt-1.5">
-            <ChatTabBar />
-          </div>
+          {/* Strip row: only shown on the chat panel so the tab bar never
+              leaks into settings / git / trace / board / etc. views. */}
+          {isChatPanelActive(view, activeArea) && (
+            <div className="flex shrink-0 items-end border-r border-ink-muted/30 px-3 pt-1.5">
+              <ChatTabBar />
+            </div>
+          )}
           {/* Tab panel: raised card with a small bottom inset. No top border
               — the tab chips and the panel's header (workspace path row) read
               as one continuous surface, so nothing separates them. */}

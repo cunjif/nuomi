@@ -16,7 +16,7 @@ export const sessionCommands: SlashCommand[] = [
       if (!validKinds.includes(kind)) {
         throw new Error(ctx.t("commands.newInvalidKind", { kind }));
       }
-      const session = await ctx.ipc.createConversation({ kind, title: null, agent: null, teamId: null });
+      const session = await ctx.ipc.createConversation({ kind, title: null, agent: null, teamId: null, workspaceId: ctx.focusedWorkspaceId ?? "__migrated__" });
       void ctx.queryClient.invalidateQueries({ queryKey: ["conversations"] });
       ctx.selectSession(session.id);
       ctx.toast.success(ctx.t("commands.sessionCreated"));

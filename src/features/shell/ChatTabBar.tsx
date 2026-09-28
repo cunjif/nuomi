@@ -31,7 +31,7 @@ export function ChatTabBar(): ReactNode {
 
   const { data: conversations } = useQuery({
     queryKey: ["conversations"],
-    queryFn: () => ipc.listConversations(null),
+    queryFn: () => ipc.listConversations(null, null),
     staleTime: 10_000,
   });
 

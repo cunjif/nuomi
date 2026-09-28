@@ -19,6 +19,8 @@ import type { ArgKind, CommandCategory, CommandSuggestion } from "./commandTypes
 export interface CommandContext {
   /** Currently selected session id (null when none). */
   sessionId: string | null;
+  /** Focused workspace id (used as default workspace for new conversations). */
+  focusedWorkspaceId: string | null;
   ipc: Ipc;
   queryClient: QueryClient;
   /** Switch the top-level shell view (the session list lives in the chat view's left rail). */

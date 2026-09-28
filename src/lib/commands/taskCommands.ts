@@ -34,6 +34,7 @@ export const taskCommands: SlashCommand[] = [
         title,
         agent: null,
         teamId: null,
+        workspaceId: ctx.focusedWorkspaceId ?? "__migrated__",
       });
       void ctx.queryClient.invalidateQueries({ queryKey: ["conversations"] });
       ctx.selectSession(session.id);
@@ -52,6 +53,7 @@ export const taskCommands: SlashCommand[] = [
         title: null,
         agent: null,
         teamId: null,
+        workspaceId: ctx.focusedWorkspaceId ?? "__migrated__",
       });
       void ctx.queryClient.invalidateQueries({ queryKey: ["conversations"] });
       ctx.selectSession(session.id);

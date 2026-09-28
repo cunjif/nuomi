@@ -13,6 +13,7 @@ import { Composer } from "../conversation/composer/Composer";
 import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
 
 /** U9 conversation surface: bubble stream + composer + live token stream. */
 export function ChatView(): ReactNode {
@@ -33,9 +34,10 @@ export function ChatView(): ReactNode {
     setFinalText(null);
   }, [sessionId]);
 
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const commandContext = useMemo<CommandContext>(
-    () => ({ sessionId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
-    [sessionId, qc, navigate, selectSession, cycleTheme, t],
+    () => ({ sessionId, focusedWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
+    [sessionId, focusedWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
   );
 
   const submitMut = useMutation({
@@ -113,6 +115,13 @@ export function ChatView(): ReactNode {
           onRetry={stream.retry}
         >
           <MessageList entries={entries} streamingId={submitMut.isPending ? STREAM_ENTRY_ID : null} />
+          <AgentStatusIndicator
+            agentName="AI"
+            agentColor="var(--color-ink-accent, #6366f1)"
+            isPending={submitMut.isPending}
+            hasFirstToken={stream.hasStreamText}
+            hasError={submitMut.isError}
+          />
         </AsyncBoundary>
       </div>
       <Composer

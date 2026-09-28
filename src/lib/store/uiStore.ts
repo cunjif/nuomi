@@ -103,6 +103,9 @@ interface UiState {
   layoutMode: LayoutMode;
   /** Split-screen workspace ids (two workspaces shown side-by-side). */
   splitWorkspaceIds: [string, string] | null;
+  /** Conversation list workspace filter ("all" = cross-workspace aggregation). */
+  conversationWorkspaceFilter: "all" | string;
+  setConversationWorkspaceFilter: (filter: "all" | string) => void;
   setView: (view: View) => void;
   setActiveArea: (area: ActiveArea) => void;
   setTheme: (theme: Theme) => void;
@@ -167,6 +170,8 @@ export const useUiStore = create<UiState>((set) => ({
   pinnedWorkspaceIds: [],
   layoutMode: "single",
   splitWorkspaceIds: null,
+  conversationWorkspaceFilter: "all",
+  setConversationWorkspaceFilter: (filter) => set({ conversationWorkspaceFilter: filter }),
   /**
    * Switch the view surface. Also releases the main area from the workbench:
    * `activeArea === "workbench"` short-circuits `renderView` in Shell, so a

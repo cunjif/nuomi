@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CapabilityDto, RoleInput } from "../../lib/ipc/bindings.gen";
+import type { CapabilityDto, RoleDirectorBindingDto, RoleInput } from "../../lib/ipc/bindings.gen";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { fieldClass as field } from "../../components/ui/Field";
 import { PresetRolePicker } from "./PresetRolePicker";
 import type { PresetRoleSelection } from "./PresetRolePicker";
+import { RoleDirectorBindingPanel } from "./RoleDirectorBindingPanel";
 
 /** Binding mode of the role form: unbound ("默认"), provider or CLI agent profile. */
 export type BindingMode = "none" | "provider" | "cli";
@@ -28,15 +29,32 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [description, setDescription] = useState("");
+  const [binding, setBinding] = useState<RoleDirectorBindingDto | null>(null);
 
   const generateMut = useMutation({
-    mutationFn: (desc: string) => ipc.generateRole(desc),
+    mutationFn: (desc: string) => {
+      if (!binding) {
+        return Promise.reject(new Error("role.no_binding"));
+      }
+      return ipc.generateRole(desc, binding);
+    },
     onSuccess: (role) => {
       void qc.invalidateQueries({ queryKey: ["roles"] });
-      toast.success(t("settings.roles.directorSuccess", { name: role.name }));
+      toast.success(
+        t("settings.roles.directorSuccess", { name: role.name }) +
+          " " +
+          t("settings.roles.directorBindReminder"),
+      );
       onClose();
     },
-    onError: (e) => toast.error(`${t("settings.roles.directorFailed")}: ${describeError(e)}`),
+    onError: (e) => {
+      const msg = describeError(e);
+      if (msg.includes("role.no_binding")) {
+        toast.error(t("settings.roles.directorNoBinding"));
+      } else {
+        toast.error(`${t("settings.roles.directorFailed")}: ${msg}`);
+      }
+    },
   });
 
   return (
@@ -46,7 +64,11 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
       aria-modal="true"
       aria-label={t("settings.roles.directorTitle")}
     >
-      <div className="w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
+      <div className="relative w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
+        {/* Self-binding panel: top-right of the dialog. */}
+        <div className="absolute right-2 top-2 w-44">
+          <RoleDirectorBindingPanel onBindingChange={setBinding} />
+        </div>
         <h4 className="mb-2 text-sm font-semibold text-ink">
           {t("settings.roles.directorTitle")}
         </h4>
@@ -60,6 +82,11 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
           aria-label={t("settings.roles.directorTitle")}
           className="w-full rounded border border-ink-muted/40 bg-surface px-2 py-1 text-sm text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
         />
+        {binding === null && (
+          <p className="mt-1 text-xs text-ink-muted/70">
+            {t("settings.roles.directorBindingRequired")}
+          </p>
+        )}
         <div className="mt-3 flex justify-end gap-2">
           <button
             type="button"
@@ -70,7 +97,7 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
           </button>
           <button
             type="button"
-            disabled={generateMut.isPending || description.trim().length === 0}
+            disabled={generateMut.isPending || description.trim().length === 0 || binding === null}
             onClick={() => generateMut.mutate(description.trim())}
             className="pixel-fill-accent px-3 py-1 text-sm text-surface focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
           >
