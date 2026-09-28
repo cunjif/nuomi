@@ -24,7 +24,6 @@ export function WorkspaceFilter(): ReactNode {
 
   return (
     <div className="flex items-center gap-1">
-      <label className="text-xs text-ink-muted">{t("conversation.workspaceFilterLabel")}:</label>
       <select
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
