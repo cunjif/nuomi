@@ -126,7 +126,6 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogKind")}</label>
           <span className="rounded bg-ink-muted/20 px-2 py-0.5 text-sm text-ink">{kind}</span>
         </div>
-        <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
         <div>
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogTitleLabel")}</label>
           <input
@@ -136,6 +135,7 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
             className="w-full rounded border border-ink-muted/40 bg-surface-raised px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
           />
         </div>
+        <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
         <div>
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogSelectAgents")}</label>
           {readyRoles.length === 0 ? (
