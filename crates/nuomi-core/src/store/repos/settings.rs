@@ -19,6 +19,11 @@ pub const MAX_OPEN_WORKSPACES_KEY: &str = "max_open_workspaces";
 /// Recent list capacity override (default: 20).
 pub const RECENT_LIST_CAPACITY_KEY: &str = "recent_list_capacity";
 
+/// View scope preference keys for per-surface "focused / all" toggle.
+pub const VIEW_SCOPE_BOARD: &str = "view_scope.board";
+pub const VIEW_SCOPE_APPROVALS: &str = "view_scope.approvals";
+pub const VIEW_SCOPE_SCHEDULER: &str = "view_scope.scheduler";
+
 /// Returns the stored value for `key`, or `None` when unset.
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
     let value = conn

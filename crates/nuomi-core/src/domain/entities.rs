@@ -649,6 +649,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub created_at: i64,
     pub updated_at: i64,
+    pub workspace_id: String,
 }
 
 /// One execution attempt of a task; lifecycle governed by
@@ -777,6 +778,7 @@ pub struct Schedule {
     pub session_mode: ScheduleSessionMode,
     pub session_id: Option<String>,
     pub auto_dispatch: bool,
+    pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

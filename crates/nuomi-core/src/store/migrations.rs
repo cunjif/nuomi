@@ -201,6 +201,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0025_tasks_runs_workspace.sql"
         )),
     ),
+    (
+        26,
+        "0026_schedules_workspace",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0026_schedules_workspace.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -429,5 +437,186 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idx, 1, "idx_sessions_workspace must exist");
+    }
+
+    // ---- migration 0026: schedules workspace isolation (task 7.5)
+
+    #[test]
+    fn schedules_has_workspace_id_column_and_composite_unique() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        // workspace_id column exists with default '__migrated__'
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at)
+             VALUES ('s1', 'test', '@every 60', 'tick', 1, 1)",
+            [],
+        )
+        .unwrap();
+        let wid: String = conn
+            .query_row(
+                "SELECT workspace_id FROM schedules WHERE id='s1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(wid, "__migrated__");
+
+        // Composite unique index exists
+        let idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_schedules_new_workspace_name'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1, "composite unique index must exist");
+    }
+
+    #[test]
+    fn schedules_same_name_different_workspaces_allowed() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        // Same name in different workspaces → both succeed
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at, workspace_id)
+             VALUES ('s1', 'daily', '@every 60', 'tick', 1, 1, 'ws-a')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at, workspace_id)
+             VALUES ('s2', 'daily', '@every 60', 'tick', 1, 1, 'ws-b')",
+            [],
+        )
+        .unwrap();
+
+        // Same name in same workspace → fails
+        let dup = conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at, workspace_id)
+             VALUES ('s3', 'daily', '@every 60', 'tick', 1, 1, 'ws-a')",
+            [],
+        );
+        assert!(dup.is_err(), "same name in same workspace must be rejected");
+    }
+
+    #[test]
+    fn migration_0026_preserves_existing_data() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Run migrations up to 0025 (skip 0026)
+        for &(version, name, sql) in MIGRATIONS.iter().filter(|(v, _, _)| *v < 26) {
+            conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", version).unwrap();
+            conn.execute_batch("COMMIT;").unwrap();
+            let _ = name;
+        }
+
+        // Insert a schedule before 0026 (no workspace_id column yet)
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at)
+             VALUES ('s-old', 'nightly', '@every 3600', 'build', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        // Run migration 0026
+        let sql_0026 = MIGRATIONS
+            .iter()
+            .find(|(v, _, _)| *v == 26)
+            .map(|(_, _, s)| *s)
+            .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        conn.execute_batch(sql_0026).unwrap();
+        conn.pragma_update(None, "user_version", 26).unwrap();
+        conn.execute_batch("COMMIT;").unwrap();
+
+        // Verify data preserved with __migrated__ placeholder
+        let (name, wid): (String, String) = conn
+            .query_row(
+                "SELECT name, workspace_id FROM schedules WHERE id='s-old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "nightly");
+        assert_eq!(wid, "__migrated__");
+    }
+
+    #[test]
+    fn migration_0026_mid_crash_recovery() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Run migrations up to 0025 (skip 0026) — simulates a DB from before 0026
+        for &(version, name, sql) in MIGRATIONS.iter().filter(|(v, _, _)| *v < 26) {
+            conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", version).unwrap();
+            conn.execute_batch("COMMIT;").unwrap();
+            let _ = name;
+        }
+
+        // Insert a schedule before 0026
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron_expr, task_title, created_at, updated_at)
+             VALUES ('s1', 'nightly', '@every 3600', 'build', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        // Simulate mid-crash: create a stale schedules_new (as if step 2 ran but
+        // the transaction was interrupted before completion)
+        conn.execute(
+            "CREATE TABLE schedules_new (id TEXT PRIMARY KEY, junk TEXT)",
+            [],
+        )
+        .unwrap();
+
+        // Re-run 0026 SQL — should clean up schedules_new and complete
+        let sql_0026 = MIGRATIONS
+            .iter()
+            .find(|(v, _, _)| *v == 26)
+            .map(|(_, _, s)| *s)
+            .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        conn.execute_batch(sql_0026).unwrap();
+        conn.pragma_update(None, "user_version", 26).unwrap();
+        conn.execute_batch("COMMIT;").unwrap();
+
+        // Verify workspace_id column exists
+        let col_exists: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('schedules') WHERE name='workspace_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            col_exists, 1,
+            "workspace_id column must exist after recovery"
+        );
+
+        // Verify data preserved
+        let (name, wid): (String, String) = conn
+            .query_row(
+                "SELECT name, workspace_id FROM schedules WHERE id='s1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "nightly");
+        assert_eq!(wid, "__migrated__");
+
+        // No stale schedules_new left
+        let stale: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schedules_new'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale, 0, "schedules_new must be gone after recovery");
     }
 }

@@ -300,6 +300,7 @@ mod tests {
             status: TaskStatus::Running,
             created_at: now_ms(),
             updated_at: now_ms(),
+            workspace_id: "__migrated__".into(),
         };
         repos::tasks_runs::insert_task(&conn, &task).unwrap();
         let run = Run {

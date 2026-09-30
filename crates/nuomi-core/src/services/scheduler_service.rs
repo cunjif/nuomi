@@ -375,6 +375,7 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                 status: TaskStatus::Queued,
                 created_at: now,
                 updated_at: now,
+                workspace_id: s.workspace_id.clone(),
             };
             repos::tasks_runs::insert_task(conn, &task)?;
             repos::events::append(
@@ -450,6 +451,7 @@ pub fn new_schedule_row(
         session_mode: ScheduleSessionMode::PerTrigger,
         session_id: None,
         auto_dispatch: true,
+        workspace_id: "__migrated__".to_string(),
     }
 }
 
@@ -746,7 +748,8 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "morning report");
 
-        let sched = repos::tasks_runs::get_schedule_by_name(&conn, "daily").unwrap();
+        let sched =
+            repos::tasks_runs::get_schedule_by_name(&conn, "__migrated__", "daily").unwrap();
         assert!(sched.last_triggered_at.is_some());
         let next = sched.next_trigger_at.unwrap();
         assert!(next > now_ms() - 5_000);

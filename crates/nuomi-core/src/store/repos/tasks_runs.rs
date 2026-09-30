@@ -14,8 +14,8 @@ use crate::store::StoreError;
 
 pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO tasks (id, session_id, title, description, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO tasks (id, session_id, title, description, status, created_at, updated_at, workspace_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             t.id,
             t.session_id,
@@ -23,7 +23,8 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.description,
             t.status.as_str(),
             t.created_at,
-            t.updated_at
+            t.updated_at,
+            t.workspace_id
         ],
     )?;
     Ok(())
@@ -31,7 +32,7 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
 
 pub fn get_task(conn: &Connection, id: &str) -> Result<Task, StoreError> {
     conn.query_row(
-        "SELECT id, session_id, title, description, status, created_at, updated_at
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
          FROM tasks WHERE id = ?1",
         params![id],
         row_to_task,
@@ -61,7 +62,7 @@ pub fn update_task_status(
 
 pub fn list_tasks(conn: &Connection, limit: u32) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
          FROM tasks ORDER BY created_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_task)?;
@@ -74,7 +75,7 @@ pub fn list_tasks_by_status(
     limit: u32,
 ) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
          FROM tasks WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![status.as_str(), limit], row_to_task)?;
@@ -263,6 +264,23 @@ pub fn list_pending_approvals(conn: &Connection) -> Result<Vec<Approval>, StoreE
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Lists pending approvals belonging to a specific workspace, via
+/// `approvals.run_id → runs.workspace_id` join. Ordered by `created_at ASC`.
+pub fn list_pending_approvals_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<Approval>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.run_id, a.tool_name, a.arguments_json, a.decision, a.decided_at, a.created_at
+         FROM approvals a
+         JOIN runs r ON a.run_id = r.id
+         WHERE r.workspace_id = ?1 AND a.decision = 'pending'
+         ORDER BY a.created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![workspace_id], row_to_approval)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 pub fn list_approvals_by_run(conn: &Connection, run_id: &str) -> Result<Vec<Approval>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, run_id, tool_name, arguments_json, decision, decided_at, created_at
@@ -289,8 +307,9 @@ pub fn insert_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError
         "INSERT INTO schedules
          (id, name, cron_expr, task_title, task_description, enabled,
           last_triggered_at, next_trigger_at, created_at, updated_at,
-          target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+          target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch,
+          workspace_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             s.id,
             s.name,
@@ -309,6 +328,7 @@ pub fn insert_schedule(conn: &Connection, s: &Schedule) -> Result<(), StoreError
             s.session_mode.as_str(),
             s.session_id,
             s.auto_dispatch as i64,
+            s.workspace_id,
         ],
     )?;
     Ok(())
@@ -327,10 +347,14 @@ pub fn get_schedule(conn: &Connection, id: &str) -> Result<Schedule, StoreError>
     })
 }
 
-pub fn get_schedule_by_name(conn: &Connection, name: &str) -> Result<Schedule, StoreError> {
+pub fn get_schedule_by_name(
+    conn: &Connection,
+    workspace_id: &str,
+    name: &str,
+) -> Result<Schedule, StoreError> {
     conn.query_row(
-        &schedule_select("WHERE name = ?1"),
-        params![name],
+        &schedule_select("WHERE workspace_id = ?1 AND name = ?2"),
+        params![workspace_id, name],
         row_to_schedule,
     )
     .optional()?
@@ -436,6 +460,20 @@ pub fn list_schedules(conn: &Connection, limit: u32) -> Result<Vec<Schedule>, St
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Lists schedules belonging to a specific workspace, ordered by `created_at DESC`.
+pub fn list_schedules_by_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+    limit: u32,
+) -> Result<Vec<Schedule>, StoreError> {
+    let mut stmt = conn.prepare(&format!(
+        "{} WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        schedule_select("")
+    ))?;
+    let rows = stmt.query_map(params![workspace_id, limit], row_to_schedule)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 // ---------------------------------------------------------------- workspace-scoped
 
 /// Lists tasks belonging to a specific workspace, ordered by `created_at DESC`.
@@ -445,7 +483,7 @@ pub fn list_tasks_by_workspace(
     limit: u32,
 ) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
          FROM tasks WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_task)?;
@@ -588,7 +626,8 @@ fn schedule_select(where_clause: &str) -> String {
     format!(
         "SELECT id, name, cron_expr, task_title, task_description, enabled,
          last_triggered_at, next_trigger_at, created_at, updated_at,
-         target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch
+         target_kind, agent_kind, agent_ref_id, team_id, session_mode, session_id, auto_dispatch,
+         workspace_id
          FROM schedules {where_clause}"
     )
 }
@@ -629,6 +668,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status: parse_status(4, &status, TaskStatus::parse)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        workspace_id: row.get(7)?,
     })
 }
 
@@ -688,6 +728,7 @@ fn row_to_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
         session_mode,
         session_id: row.get(15)?,
         auto_dispatch: row.get::<_, i64>(16)? != 0,
+        workspace_id: row.get(17)?,
     })
 }
 
@@ -711,6 +752,7 @@ mod tests {
             status,
             created_at: 1,
             updated_at: 1,
+            workspace_id: "__migrated__".into(),
         }
     }
 
@@ -756,6 +798,7 @@ mod tests {
             session_mode: ScheduleSessionMode::PerTrigger,
             session_id: None,
             auto_dispatch: true,
+            workspace_id: "__migrated__".into(),
         }
     }
 
@@ -996,9 +1039,14 @@ mod tests {
         insert_schedule(&conn, &schedule("s1", "nightly", true)).unwrap();
         insert_schedule(&conn, &schedule("s2", "paused", false)).unwrap();
 
-        assert_eq!(get_schedule_by_name(&conn, "nightly").unwrap().id, "s1");
+        assert_eq!(
+            get_schedule_by_name(&conn, "__migrated__", "nightly")
+                .unwrap()
+                .id,
+            "s1"
+        );
         assert!(matches!(
-            get_schedule_by_name(&conn, "nope"),
+            get_schedule_by_name(&conn, "__migrated__", "nope"),
             Err(StoreError::NotFound {
                 entity: "schedule",
                 ..
@@ -1093,5 +1141,153 @@ mod tests {
 
         let violations = detect_isolation_violations(&conn).unwrap();
         assert!(violations.is_empty());
+    }
+
+    // ---- workspace-scoped queries (task 7.1)
+
+    fn task_in_ws(id: &str, status: TaskStatus, ws: &str) -> Task {
+        let mut t = task(id, status);
+        t.workspace_id = ws.into();
+        t
+    }
+
+    fn schedule_in_ws(id: &str, name: &str, enabled: bool, ws: &str) -> Schedule {
+        let mut s = schedule(id, name, enabled);
+        s.workspace_id = ws.into();
+        s
+    }
+
+    #[test]
+    fn list_pending_approvals_by_workspace_filters_via_run_join() {
+        let conn = db();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        // ws-a: task → run → pending approval
+        insert_task(&conn, &task_in_ws("t-a", TaskStatus::Running, "ws-a")).unwrap();
+        insert_run(&conn, &run("r-a", "t-a", RunState::AwaitingApproval)).unwrap();
+        bind_run_workspace(&conn, "r-a", "ws-a").unwrap();
+        insert_approval(&conn, &approval("ap-a", "r-a")).unwrap();
+
+        // ws-b: task → run → pending approval
+        insert_task(&conn, &task_in_ws("t-b", TaskStatus::Running, "ws-b")).unwrap();
+        insert_run(&conn, &run("r-b", "t-b", RunState::AwaitingApproval)).unwrap();
+        bind_run_workspace(&conn, "r-b", "ws-b").unwrap();
+        insert_approval(&conn, &approval("ap-b", "r-b")).unwrap();
+
+        // ws-a has exactly one pending approval
+        let ws_a_appr = list_pending_approvals_by_workspace(&conn, "ws-a").unwrap();
+        assert_eq!(ws_a_appr.len(), 1);
+        assert_eq!(ws_a_appr[0].id, "ap-a");
+
+        // ws-b has exactly one pending approval
+        let ws_b_appr = list_pending_approvals_by_workspace(&conn, "ws-b").unwrap();
+        assert_eq!(ws_b_appr.len(), 1);
+        assert_eq!(ws_b_appr[0].id, "ap-b");
+
+        // unknown workspace has none
+        assert!(list_pending_approvals_by_workspace(&conn, "ws-z")
+            .unwrap()
+            .is_empty());
+
+        // resolved approvals are excluded
+        resolve_approval(&conn, "ap-a", ApprovalDecision::Approved, 5).unwrap();
+        assert!(list_pending_approvals_by_workspace(&conn, "ws-a")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn list_schedules_by_workspace_filters_correctly() {
+        let conn = db();
+
+        insert_schedule(&conn, &schedule_in_ws("s1", "nightly-a", true, "ws-a")).unwrap();
+        insert_schedule(&conn, &schedule_in_ws("s2", "hourly-a", true, "ws-a")).unwrap();
+        insert_schedule(&conn, &schedule_in_ws("s3", "nightly-b", true, "ws-b")).unwrap();
+
+        let ws_a = list_schedules_by_workspace(&conn, "ws-a", 10).unwrap();
+        assert_eq!(ws_a.len(), 2);
+        let names: Vec<&str> = ws_a.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"nightly-a"));
+        assert!(names.contains(&"hourly-a"));
+
+        let ws_b = list_schedules_by_workspace(&conn, "ws-b", 10).unwrap();
+        assert_eq!(ws_b.len(), 1);
+        assert_eq!(ws_b[0].name, "nightly-b");
+
+        assert!(list_schedules_by_workspace(&conn, "ws-z", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn get_schedule_by_name_workspace_scoped_same_name_different_workspaces() {
+        let conn = db();
+
+        // Same schedule name in two different workspaces — both succeed
+        insert_schedule(&conn, &schedule_in_ws("s1", "daily", true, "ws-a")).unwrap();
+        insert_schedule(&conn, &schedule_in_ws("s2", "daily", true, "ws-b")).unwrap();
+
+        let in_a = get_schedule_by_name(&conn, "ws-a", "daily").unwrap();
+        assert_eq!(in_a.id, "s1");
+
+        let in_b = get_schedule_by_name(&conn, "ws-b", "daily").unwrap();
+        assert_eq!(in_b.id, "s2");
+
+        // Lookup in a workspace that has no such name → NotFound
+        assert!(matches!(
+            get_schedule_by_name(&conn, "ws-z", "daily"),
+            Err(StoreError::NotFound {
+                entity: "schedule",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn get_schedule_by_name_workspace_scoped_same_workspace_conflict() {
+        let conn = db();
+
+        insert_schedule(&conn, &schedule_in_ws("s1", "dup", true, "ws-a")).unwrap();
+        // Same name in the same workspace → unique constraint violation
+        assert!(insert_schedule(&conn, &schedule_in_ws("s2", "dup", true, "ws-a")).is_err());
+    }
+
+    #[test]
+    fn insert_task_writes_focused_workspace_id() {
+        let conn = db();
+        let t = task_in_ws("t1", TaskStatus::Queued, "ws-focused");
+        insert_task(&conn, &t).unwrap();
+        let got = get_task(&conn, "t1").unwrap();
+        assert_eq!(got.workspace_id, "ws-focused");
+    }
+
+    #[test]
+    fn insert_task_writes_migrated_placeholder() {
+        let conn = db();
+        let t = task("t1", TaskStatus::Queued); // uses __migrated__ default
+        insert_task(&conn, &t).unwrap();
+        let got = get_task(&conn, "t1").unwrap();
+        assert_eq!(got.workspace_id, "__migrated__");
+    }
+
+    #[test]
+    fn update_schedule_does_not_change_workspace_id() {
+        let conn = db();
+        insert_schedule(&conn, &schedule_in_ws("s1", "original", true, "ws-a")).unwrap();
+
+        // Mutate mutable fields and call update_schedule
+        let mut s = get_schedule(&conn, "s1").unwrap();
+        s.name = "renamed".into();
+        s.cron_expr = "0 9 * * *".into();
+        s.task_title = "updated".into();
+        s.updated_at = 5;
+        // Attempt to change workspace_id in the struct — update_schedule should ignore it
+        s.workspace_id = "ws-b".into();
+        update_schedule(&conn, &s).unwrap();
+
+        // The workspace_id in DB must remain "ws-a"
+        let got = get_schedule(&conn, "s1").unwrap();
+        assert_eq!(got.workspace_id, "ws-a");
+        assert_eq!(got.name, "renamed");
     }
 }
