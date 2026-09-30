@@ -60,6 +60,25 @@ pub async fn app_setting_set(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn get_view_scope(
+    state: tauri::State<'_, AppState>,
+    surface: String,
+) -> Result<String, IpcError> {
+    commands::impl_get_view_scope(&state, surface).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_view_scope(
+    state: tauri::State<'_, AppState>,
+    surface: String,
+    scope: String,
+) -> Result<(), IpcError> {
+    commands::impl_set_view_scope(&state, surface, scope).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn create_session(
     state: tauri::State<'_, AppState>,
 ) -> Result<commands::SessionDto, IpcError> {
@@ -157,8 +176,9 @@ pub async fn create_task(
 pub async fn list_tasks(
     state: tauri::State<'_, AppState>,
     status: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::TaskDto>, IpcError> {
-    commands::impl_list_tasks(&state, status).await
+    commands::impl_list_tasks(&state, status, workspace_id).await
 }
 
 #[tauri::command]
@@ -202,8 +222,9 @@ pub async fn list_runs_by_task(
 #[specta::specta]
 pub async fn list_pending_approvals(
     state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::ApprovalDto>, IpcError> {
-    commands::impl_list_pending_approvals(&state).await
+    commands::impl_list_pending_approvals(&state, workspace_id).await
 }
 
 #[tauri::command]
@@ -346,8 +367,9 @@ pub async fn create_schedule(
 #[specta::specta]
 pub async fn list_schedules(
     state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::ScheduleDto>, IpcError> {
-    commands::impl_list_schedules(&state).await
+    commands::impl_list_schedules(&state, workspace_id).await
 }
 
 #[tauri::command]

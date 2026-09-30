@@ -94,13 +94,13 @@ export const ipc = {
     unwrap(current.clearMessageQueue(sessionId)),
   createTask: (title: string, description: string) =>
     unwrap(current.createTask(title, description)),
-  listTasks: (status: string | null) => unwrap(current.listTasks(status)),
+  listTasks: (status: string | null, workspaceId: string | null) => unwrap(current.listTasks(status, workspaceId)),
   updateTaskStatus: (taskId: string, status: string) =>
     unwrap(current.updateTaskStatus(taskId, status)),
   deleteTask: (taskId: string) => unwrap(current.deleteTask(taskId)),
   getRun: (runId: string) => unwrap(current.getRun(runId)),
   listRunsByTask: (taskId: string) => unwrap(current.listRunsByTask(taskId)),
-  listPendingApprovals: () => unwrap(current.listPendingApprovals()),
+  listPendingApprovals: (workspaceId: string | null) => unwrap(current.listPendingApprovals(workspaceId)),
   resolveApproval: (approvalId: string, approved: boolean) =>
     unwrap(current.resolveApproval(approvalId, approved)),
   listDir: (path: string) => unwrap(current.listDir(path)),
@@ -122,7 +122,7 @@ export const ipc = {
   setWorkspace: (path: string) => unwrap(current.setWorkspace(path)),
   createSchedule: (name: string, cronExpr: string, taskTitle: string, taskDescription: string) =>
     unwrap(current.createSchedule(name, cronExpr, taskTitle, taskDescription)),
-  listSchedules: () => unwrap(current.listSchedules()),
+  listSchedules: (workspaceId: string | null) => unwrap(current.listSchedules(workspaceId)),
   toggleSchedule: (scheduleId: string, enabled: boolean) =>
     unwrap(current.toggleSchedule(scheduleId, enabled)),
   deleteSchedule: (scheduleId: string) => unwrap(current.deleteSchedule(scheduleId)),
@@ -188,6 +188,8 @@ export const ipc = {
     unwrap(current.pluginEditorCall(pluginId, method, params)),
   appSettingGet: (key: string) => unwrap(current.appSettingGet(key)),
   appSettingSet: (key: string, value: string) => unwrap(current.appSettingSet(key, value)),
+  getViewScope: (surface: string) => unwrap(current.getViewScope(surface)),
+  setViewScope: (surface: string, scope: string) => unwrap(current.setViewScope(surface, scope)),
   createConversation: (input: ConversationInput) => unwrap(current.createConversation(input)),
   listConversations: (kind: string | null, workspaceId: string | null) =>
     unwrap(current.listConversations(kind, workspaceId)),

@@ -953,7 +953,7 @@ pub async fn impl_create_task(
             "task title must not be empty",
         ));
     }
-    let task = Task {
+    let mut task = Task {
         id: nuomi_core::domain::new_id(),
         session_id: state.kernel.session_id().await,
         title,
@@ -961,26 +961,26 @@ pub async fn impl_create_task(
         status: TaskStatus::Queued,
         created_at: now_ms(),
         updated_at: now_ms(),
+        workspace_id: "__migrated__".to_string(),
     };
-    let clone = task.clone();
     let path = state.db_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+    let created = tokio::task::spawn_blocking(move || -> Result<Task, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        repos::tasks_runs::insert_task(&db.0, &task)?;
         if let Some(ws) = repos::workspace_open_state::find_focused(&db.0)? {
-            repos::tasks_runs::bind_task_workspace(&db.0, &task.id, &ws.workspace_id)?;
+            task.workspace_id = ws.workspace_id;
         }
+        repos::tasks_runs::insert_task(&db.0, &task)?;
         append_domain_event(
             &db.0,
             "task.created",
             task_id_payload(&task.id),
             task.created_at,
         )?;
-        Ok(())
+        Ok(task)
     })
     .await??;
-    Ok(TaskDto::from(clone))
+    Ok(TaskDto::from(created))
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -1164,6 +1164,8 @@ pub struct TaskDto {
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub workspace_id: String,
+    pub workspace_root_path: Option<String>,
 }
 
 impl From<Task> for TaskDto {
@@ -1176,6 +1178,8 @@ impl From<Task> for TaskDto {
             status: t.status.as_str().to_string(),
             created_at: t.created_at,
             updated_at: t.updated_at,
+            workspace_id: t.workspace_id,
+            workspace_root_path: None,
         }
     }
 }
@@ -1203,6 +1207,7 @@ impl From<EventRecord> for EventDto {
 pub async fn impl_list_tasks(
     state: &AppState,
     status: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<TaskDto>, IpcError> {
     let parsed =
         match status.as_deref() {
@@ -1212,16 +1217,29 @@ pub async fn impl_list_tasks(
             })?),
         };
     let path = state.db_path.clone();
-    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<Task>, IpcError> {
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<TaskDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        Ok(match parsed {
-            Some(st) => repos::tasks_runs::list_tasks_by_status(&db.0, st, 500)?,
-            None => repos::tasks_runs::list_tasks(&db.0, 500)?,
-        })
+        let tasks: Vec<Task> = match (&workspace_id, &parsed) {
+            (Some(ws), _) => repos::tasks_runs::list_tasks_by_workspace(&db.0, ws, 500)?,
+            (None, Some(st)) => repos::tasks_runs::list_tasks_by_status(&db.0, *st, 500)?,
+            (None, None) => repos::tasks_runs::list_tasks(&db.0, 500)?,
+        };
+        let ws_map = repos::workspaces::list(&db.0)?
+            .into_iter()
+            .map(|w| (w.id, w.root_path))
+            .collect::<std::collections::HashMap<String, String>>();
+        Ok(tasks
+            .into_iter()
+            .map(|t| {
+                let mut dto = TaskDto::from(t);
+                dto.workspace_root_path = ws_map.get(&dto.workspace_id).cloned();
+                dto
+            })
+            .collect())
     })
     .await??;
-    Ok(rows.into_iter().map(TaskDto::from).collect())
+    Ok(rows)
 }
 
 /// Board transitions. `queued→running` auto-dispatches a run (SPEC D6):
@@ -1458,14 +1476,42 @@ pub async fn impl_list_runs_by_task(
 
 // ---------- approvals ----------
 
-pub async fn impl_list_pending_approvals(state: &AppState) -> Result<Vec<ApprovalDto>, IpcError> {
+pub async fn impl_list_pending_approvals(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<Vec<ApprovalDto>, IpcError> {
     let path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<Vec<ApprovalDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        Ok(repos::tasks_runs::list_pending_approvals(&db.0)?
+        let approvals = match &workspace_id {
+            Some(ws) => repos::tasks_runs::list_pending_approvals_by_workspace(&db.0, ws)?,
+            None => repos::tasks_runs::list_pending_approvals(&db.0)?,
+        };
+        let ws_map = repos::workspaces::list(&db.0)?
             .into_iter()
-            .map(Into::into)
+            .map(|w| (w.id, w.root_path))
+            .collect::<std::collections::HashMap<String, String>>();
+        let approval_ws_map: std::collections::HashMap<String, String> = {
+            let mut stmt = db.0.prepare(
+                "SELECT a.id, r.workspace_id FROM approvals a
+                 JOIN runs r ON a.run_id = r.id WHERE a.decision = 'pending'",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        Ok(approvals
+            .into_iter()
+            .map(|a| {
+                let mut dto = ApprovalDto::from(a);
+                if let Some(ws_id) = approval_ws_map.get(&dto.id) {
+                    dto.workspace_id = ws_id.clone();
+                    dto.workspace_root_path = ws_map.get(ws_id).cloned();
+                }
+                dto
+            })
             .collect())
     })
     .await?
@@ -1671,53 +1717,69 @@ pub async fn impl_create_schedule(
     // Validate expression up-front (parse errors surface immediately).
     parse_schedule(&cron_expr)
         .map_err(|e| IpcError::new("scheduler.bad_expression", e.to_string()))?;
-    let schedule = Schedule {
-        id: nuomi_core::domain::new_id(),
-        name,
-        cron_expr,
-        task_title,
-        task_description,
-        enabled: true,
-        last_triggered_at: None,
-        next_trigger_at: None,
-        created_at: now_ms(),
-        updated_at: now_ms(),
-        target_kind: ScheduleTargetKind::Task,
-        agent: None,
-        team_id: None,
-        session_mode: ScheduleSessionMode::PerTrigger,
-        session_id: None,
-        auto_dispatch: true,
-    };
-    let clone = schedule.clone();
     let path = state.db_path.clone();
     let created = tokio::task::spawn_blocking(move || -> Result<Schedule, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
+        let ws = repos::workspace_open_state::find_focused(&db.0)?.ok_or_else(|| {
+            IpcError::new(
+                "scheduler.no_focused_workspace",
+                "请先开启工作区后再创建定时任务",
+            )
+        })?;
+        let now = now_ms();
+        let schedule = Schedule {
+            id: nuomi_core::domain::new_id(),
+            name,
+            cron_expr,
+            task_title,
+            task_description,
+            enabled: true,
+            last_triggered_at: None,
+            next_trigger_at: None,
+            created_at: now,
+            updated_at: now,
+            target_kind: ScheduleTargetKind::Task,
+            agent: None,
+            team_id: None,
+            session_mode: ScheduleSessionMode::PerTrigger,
+            session_id: None,
+            auto_dispatch: true,
+            workspace_id: ws.workspace_id,
+        };
         repos::tasks_runs::insert_schedule(&db.0, &schedule)?;
         append_domain_event(
             &db.0,
             "schedule.created",
-            serde_json::json!({ "scheduleId": clone.id }),
-            clone.created_at,
+            serde_json::json!({ "scheduleId": schedule.id }),
+            schedule.created_at,
         )?;
-        Ok(clone)
+        Ok(schedule)
     })
     .await??;
     Ok(ScheduleDto::from(created))
 }
 
-pub async fn impl_list_schedules(state: &AppState) -> Result<Vec<ScheduleDto>, IpcError> {
+pub async fn impl_list_schedules(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<Vec<ScheduleDto>, IpcError> {
     let path = state.db_path.clone();
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ScheduleDto>, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let schedules = repos::tasks_runs::list_schedules(&db.0, 200)?;
+        let schedules = match &workspace_id {
+            Some(ws) => repos::tasks_runs::list_schedules_by_workspace(&db.0, ws, 200)?,
+            None => repos::tasks_runs::list_schedules(&db.0, 200)?,
+        };
+        let ws_map = repos::workspaces::list(&db.0)?
+            .into_iter()
+            .map(|w| (w.id, w.root_path))
+            .collect::<std::collections::HashMap<String, String>>();
         let mut out = Vec::with_capacity(schedules.len());
         for schedule in &schedules {
             let mut dto = ScheduleDto::from(schedule.clone());
-            // Same display-name fill as the conversation list: a row should
-            // read "Codex", not "cli:<id>".
+            dto.workspace_root_path = ws_map.get(&schedule.workspace_id).cloned();
             if let Some(agent) =
                 nuomi_core::services::name_agent_ref(&db.0, schedule.agent.as_ref())?
             {
@@ -5055,6 +5117,7 @@ fn parse_schedule_input(input: ScheduleInput) -> Result<Schedule, IpcError> {
         session_mode,
         session_id: input.session_id,
         auto_dispatch: input.auto_dispatch,
+        workspace_id: "__migrated__".to_string(),
     })
 }
 
@@ -5634,20 +5697,26 @@ pub async fn impl_upsert_schedule(
     state: &AppState,
     input: ScheduleInput,
 ) -> Result<ScheduleDto, IpcError> {
-    let schedule = parse_schedule_input(input)?;
-    let clone = schedule.clone();
+    let mut schedule = parse_schedule_input(input)?;
     let path = state.db_path.clone();
     let created = tokio::task::spawn_blocking(move || -> Result<Schedule, IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
+        let ws = repos::workspace_open_state::find_focused(&db.0)?.ok_or_else(|| {
+            IpcError::new(
+                "scheduler.no_focused_workspace",
+                "请先开启工作区后再创建定时任务",
+            )
+        })?;
+        schedule.workspace_id = ws.workspace_id;
         repos::tasks_runs::insert_schedule(&db.0, &schedule)?;
         append_domain_event(
             &db.0,
             "schedule.created",
-            serde_json::json!({ "scheduleId": clone.id }),
-            clone.created_at,
+            serde_json::json!({ "scheduleId": schedule.id }),
+            schedule.created_at,
         )?;
-        Ok(clone)
+        Ok(schedule)
     })
     .await
     .map_err(join_err)??;
@@ -5757,6 +5826,8 @@ pub struct ApprovalDto {
     pub run_id: String,
     pub tool_name: String,
     pub arguments_json: String,
+    pub workspace_id: String,
+    pub workspace_root_path: Option<String>,
 }
 
 impl From<nuomi_core::domain::Approval> for ApprovalDto {
@@ -5766,6 +5837,8 @@ impl From<nuomi_core::domain::Approval> for ApprovalDto {
             run_id: a.run_id,
             tool_name: a.tool_name,
             arguments_json: a.arguments_json,
+            workspace_id: String::new(),
+            workspace_root_path: None,
         }
     }
 }
@@ -5820,6 +5893,8 @@ pub struct ScheduleDto {
     pub auto_dispatch: bool,
     pub last_triggered_at: Option<i64>,
     pub next_trigger_at: Option<i64>,
+    pub workspace_id: String,
+    pub workspace_root_path: Option<String>,
 }
 
 impl From<Schedule> for ScheduleDto {
@@ -5843,6 +5918,8 @@ impl From<Schedule> for ScheduleDto {
             auto_dispatch: s.auto_dispatch,
             last_triggered_at: s.last_triggered_at,
             next_trigger_at: s.next_trigger_at,
+            workspace_id: s.workspace_id,
+            workspace_root_path: None,
         }
     }
 }
@@ -7001,6 +7078,69 @@ pub async fn impl_app_setting_set(
         migrations::run(&db.0)?;
         repos::settings::set(&db.0, &key, &value)
             .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))?
+}
+
+fn view_scope_key(surface: &str) -> Result<&'static str, IpcError> {
+    match surface {
+        "board" => Ok(repos::settings::VIEW_SCOPE_BOARD),
+        "approvals" => Ok(repos::settings::VIEW_SCOPE_APPROVALS),
+        "scheduler" => Ok(repos::settings::VIEW_SCOPE_SCHEDULER),
+        _ => Err(IpcError::new(
+            "view_scope.invalid_surface",
+            format!("unknown surface: {surface}"),
+        )),
+    }
+}
+
+/// Reads the view scope preference for a surface. Returns "focused" or "all"
+/// (default "all" when unset — backward compatible).
+pub async fn impl_get_view_scope(state: &AppState, surface: String) -> Result<String, IpcError> {
+    let key = view_scope_key(&surface)?;
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        Ok(repos::settings::get(&db.0, key)
+            .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))?
+            .unwrap_or_else(|| "all".to_string()))
+    })
+    .await
+    .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))?
+}
+
+/// Persists the view scope preference and emits a `view_scope.changed` event.
+pub async fn impl_set_view_scope(
+    state: &AppState,
+    surface: String,
+    scope: String,
+) -> Result<(), IpcError> {
+    let key = view_scope_key(&surface)?;
+    if scope != "focused" && scope != "all" {
+        return Err(IpcError::new(
+            "view_scope.invalid_scope",
+            format!("unknown scope: {scope}"),
+        ));
+    }
+    let path = state.db_path.clone();
+    let surface_for_event = surface.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let from = repos::settings::get(&db.0, key)
+            .map_err(|e| IpcError::new("settings.get_failed", e.to_string()))?
+            .unwrap_or_else(|| "all".to_string());
+        repos::settings::set(&db.0, key, &scope)
+            .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))?;
+        append_domain_event(
+            &db.0,
+            "view_scope.changed",
+            serde_json::json!({ "surface": surface_for_event, "from": from, "to": scope }),
+            now_ms(),
+        )?;
+        Ok(())
     })
     .await
     .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))?

@@ -86,9 +86,9 @@ async createTask(title: string, description: string) : Promise<Result<TaskDto, I
     else return { status: "error", error: e  as any };
 }
 },
-async listTasks(status: string | null) : Promise<Result<TaskDto[], IpcError>> {
+async listTasks(status: string | null, workspaceId: string | null) : Promise<Result<TaskDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_tasks", { status }) };
+    return { status: "ok", data: await TAURI_INVOKE("list_tasks", { status, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -126,9 +126,9 @@ async listRunsByTask(taskId: string) : Promise<Result<RunDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async listPendingApprovals() : Promise<Result<ApprovalDto[], IpcError>> {
+async listPendingApprovals(workspaceId: string | null) : Promise<Result<ApprovalDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_pending_approvals") };
+    return { status: "ok", data: await TAURI_INVOKE("list_pending_approvals", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -254,9 +254,9 @@ async createSchedule(name: string, cronExpr: string, taskTitle: string, taskDesc
     else return { status: "error", error: e  as any };
 }
 },
-async listSchedules() : Promise<Result<ScheduleDto[], IpcError>> {
+async listSchedules(workspaceId: string | null) : Promise<Result<ScheduleDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_schedules") };
+    return { status: "ok", data: await TAURI_INVOKE("list_schedules", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -822,6 +822,22 @@ async appSettingSet(key: string, value: string) : Promise<Result<null, IpcError>
     else return { status: "error", error: e  as any };
 }
 },
+async getViewScope(surface: string) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_view_scope", { surface }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setViewScope(surface: string, scope: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_view_scope", { surface, scope }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createConversation(input: ConversationInput) : Promise<Result<ConversationDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_conversation", { input }) };
@@ -1073,7 +1089,7 @@ resumeArgs?: string | null }
 export type AgentRefDto = { kind: string; id: string; name: string }
 export type AgentRefInput = { kind: string; id: string }
 export type AiCommitResultDto = { message: string; truncated: boolean; agentName: string; elapsedMs: number }
-export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string }
+export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceRootPath: string | null }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
 /**
@@ -1337,7 +1353,7 @@ createdTemp: boolean }
 export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number; kind: string; cancelable: boolean }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
-export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null }
+export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null; workspaceId: string; workspaceRootPath: string | null }
 export type ScheduleInput = { name: string; cronExpr: string; targetKind: string; agent: AgentRefInput | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; taskTitle: string; taskDescription: string }
 /**
  * Outcome counts of a preset seeding pass.
@@ -1346,7 +1362,7 @@ export type SeedRolesDto = { inserted: number; updated: number; skipped: number 
 export type SessionDto = { id: string; title: string; createdAt: number; updatedAt: number }
 export type SkillCreationConfigDto = { enabled: boolean; format: SkillFormatDto }
 export type SkillFormatDto = "skill_md"
-export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number }
+export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceRootPath: string | null }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
 export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 
 /**

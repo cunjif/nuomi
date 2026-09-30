@@ -170,11 +170,13 @@ export function testDoubleCommands(): CommandSet {
         status: "backlog",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        workspaceId: "__migrated__",
+        workspaceRootPath: null,
       };
       tdState.tasks.unshift(t);
       return ok(t);
     },
-    async listTasks(status) {
+    async listTasks(status, _workspaceId: string | null) {
       return ok(tdState.tasks.filter((t) => status === null || t.status === status));
     },
     async updateTaskStatus(taskId, status) {
@@ -205,7 +207,7 @@ export function testDoubleCommands(): CommandSet {
     async listRunsByTask(taskId) {
       return ok(tdState.runs.filter((r) => r.taskId === taskId));
     },
-    async listPendingApprovals() {
+    async listPendingApprovals(_workspaceId: string | null) {
       return ok([...tdState.approvals]);
     },
     async resolveApproval(approvalId, approved) {
@@ -387,11 +389,13 @@ export function testDoubleCommands(): CommandSet {
         autoDispatch: true,
         lastTriggeredAt: null,
         nextTriggerAt: null,
+        workspaceId: "__migrated__",
+        workspaceRootPath: null,
       };
       tdState.schedules.unshift(s);
       return ok(s);
     },
-    async listSchedules() {
+    async listSchedules(_workspaceId: string | null) {
       return ok([...tdState.schedules]);
     },
     async toggleSchedule(scheduleId, enabled) {
@@ -934,6 +938,12 @@ export function testDoubleCommands(): CommandSet {
     },
     async appSettingSet(key: string, value: string) {
       tdState.appSettings.set(key, value);
+      return ok(null);
+    },
+    async getViewScope(_surface: string) {
+      return ok("all");
+    },
+    async setViewScope(_surface: string, _scope: string) {
       return ok(null);
     },
 
