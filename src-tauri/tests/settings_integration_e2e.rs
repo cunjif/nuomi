@@ -408,6 +408,7 @@ async fn ac8_env_fallback_failure_marks_task_failed() {
         status: nuomi_core::domain::TaskStatus::Queued,
         created_at: now,
         updated_at: now,
+        workspace_id: "__migrated__".into(),
     };
     repos::tasks_runs::insert_task(&db.0, &task).unwrap();
 

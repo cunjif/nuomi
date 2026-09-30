@@ -12,6 +12,8 @@ describe("ApprovalsView — approve flow (AC10)", () => {
       runId: "r1",
       toolName: "write_file",
       argumentsJson: '{"path":"src/main.rs"}',
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
     const base = testDoubleCommands();
     const resolveApproval = vi.fn(base.resolveApproval);
@@ -29,7 +31,7 @@ describe("ApprovalsView — approve flow (AC10)", () => {
   });
 
   it("deny also resolves the item", async () => {
-    tdState.approvals.push({ id: "a2", runId: "r2", toolName: "git_push", argumentsJson: "{}" });
+    tdState.approvals.push({ id: "a2", runId: "r2", toolName: "git_push", argumentsJson: "{}", workspaceId: "__migrated__", workspaceRootPath: null });
     const base = testDoubleCommands();
     const resolveApproval = vi.fn(base.resolveApproval);
     injectIpcCommands({ ...base, resolveApproval });
@@ -38,5 +40,19 @@ describe("ApprovalsView — approve flow (AC10)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "拒绝" }));
 
     await waitFor(() => expect(resolveApproval).toHaveBeenCalledWith("a2", false));
+  });
+});
+
+describe("ApprovalsView — view scope toggle (task 7.3)", () => {
+  it("renders the scope toggle and calls setViewScope on click", async () => {
+    const base = testDoubleCommands();
+    const setViewScope = vi.fn(base.setViewScope);
+    injectIpcCommands({ ...base, setViewScope });
+
+    renderWithProviders(<ApprovalsView />);
+
+    const focusedBtn = await screen.findByText("仅看聚焦");
+    fireEvent.click(focusedBtn);
+    await waitFor(() => expect(setViewScope).toHaveBeenCalledWith("approvals", "focused"));
   });
 });

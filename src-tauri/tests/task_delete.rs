@@ -36,6 +36,7 @@ fn seed_task(db: &Db, id: &str, status: TaskStatus) {
             status,
             created_at: now,
             updated_at: now,
+            workspace_id: "__migrated__".into(),
         },
     )
     .unwrap();
@@ -113,7 +114,7 @@ async fn delete_cascades_runs_and_approvals_in_one_shot() {
     drop(db);
 
     // The board list no longer carries the deleted task.
-    let listed = commands::impl_list_tasks(&state, None).await.unwrap();
+    let listed = commands::impl_list_tasks(&state, None, None).await.unwrap();
     assert!(listed.iter().all(|t| t.id != "t-del"));
 }
 

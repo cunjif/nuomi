@@ -34,6 +34,8 @@ describe("BoardView — create task flow (AC10)", () => {
       status: "backlog",
       createdAt: 1,
       updatedAt: 1,
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
     const base = testDoubleCommands();
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
@@ -58,6 +60,8 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       status: "backlog",
       createdAt: 1,
       updatedAt: 1,
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
     tdState.teams.push({
       id: "team-1",
@@ -98,6 +102,8 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       status: "backlog",
       createdAt: 1,
       updatedAt: 1,
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
     injectIpcCommands(testDoubleCommands());
 
@@ -119,6 +125,8 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
       status: "backlog",
       createdAt: 1,
       updatedAt: 1,
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
   };
 
@@ -231,6 +239,8 @@ describe("BoardView — batch operations (批次二②)", () => {
       status,
       createdAt: 1,
       updatedAt: 1,
+      workspaceId: "__migrated__",
+      workspaceRootPath: null,
     });
   };
 
@@ -326,5 +336,19 @@ describe("BoardView — batch operations (批次二②)", () => {
 
     const button = await screen.findByRole("button", { name: "运行全部" });
     expect(button).toBeDisabled();
+  });
+});
+
+describe("BoardView — view scope toggle (task 7.3)", () => {
+  it("renders the scope toggle and calls setViewScope on click", async () => {
+    const base = testDoubleCommands();
+    const setViewScope = vi.fn(base.setViewScope);
+    injectIpcCommands({ ...base, setViewScope });
+
+    renderWithProviders(<BoardView />);
+
+    const focusedBtn = await screen.findByText("仅看聚焦");
+    fireEvent.click(focusedBtn);
+    await waitFor(() => expect(setViewScope).toHaveBeenCalledWith("board", "focused"));
   });
 });

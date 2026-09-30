@@ -103,6 +103,7 @@ async fn workspace_sandbox_rejects_escape() {
 #[tokio::test]
 async fn schedule_crud_validates_expression() {
     let (state, _dir) = boot(vec![]).await;
+    open_first_workspace(&state).await;
 
     let bad = commands::impl_create_schedule(
         &state,
@@ -128,14 +129,14 @@ async fn schedule_crud_validates_expression() {
     commands::impl_toggle_schedule(&state, good.id.clone(), false)
         .await
         .unwrap();
-    let all = commands::impl_list_schedules(&state).await.unwrap();
+    let all = commands::impl_list_schedules(&state, None).await.unwrap();
     let found = all.iter().find(|s| s.id == good.id).unwrap();
     assert!(!found.enabled);
 
     commands::impl_delete_schedule(&state, good.id.clone())
         .await
         .unwrap();
-    let all = commands::impl_list_schedules(&state).await.unwrap();
+    let all = commands::impl_list_schedules(&state, None).await.unwrap();
     assert!(all.iter().all(|s| s.id != good.id || !s.enabled));
 }
 
@@ -166,6 +167,7 @@ async fn approval_flow_via_commands() {
         status: nuomi_core::domain::TaskStatus::Queued,
         created_at: now,
         updated_at: now,
+        workspace_id: "__migrated__".into(),
     };
     let run = nuomi_core::domain::Run {
         id: "run-test".into(),
@@ -190,12 +192,16 @@ async fn approval_flow_via_commands() {
         .unwrap();
     match decision {
         approval_gate::GateDecision::RequireApproval { approval_id: id } => {
-            let pending = commands::impl_list_pending_approvals(&state).await.unwrap();
+            let pending = commands::impl_list_pending_approvals(&state, None)
+                .await
+                .unwrap();
             assert!(pending.iter().any(|p| p.id == id));
             commands::impl_resolve_approval(&state, id.clone(), true)
                 .await
                 .unwrap();
-            let pending = commands::impl_list_pending_approvals(&state).await.unwrap();
+            let pending = commands::impl_list_pending_approvals(&state, None)
+                .await
+                .unwrap();
             assert!(!pending.iter().any(|p| p.id == id));
         }
         other => panic!("expected approval requirement, got {other:?}"),
@@ -309,4 +315,174 @@ async fn role_capability_mismatch_and_preset_protection() {
     commands::impl_delete_role(&state, role.id, false)
         .await
         .unwrap();
+}
+
+// ---------- workspace-scoped view filter (task 7.2) ----------
+
+/// Registers the boot workspace, opens it (focusing it), and returns its id.
+async fn open_first_workspace(state: &AppState) -> String {
+    let ws_path = state.current_workspace().to_string_lossy().to_string();
+    let entry = commands::impl_add_workspace(state, ws_path).await.unwrap();
+    commands::impl_open_workspace(state, entry.id.clone())
+        .await
+        .unwrap();
+    entry.id
+}
+
+#[tokio::test]
+async fn list_tasks_with_workspace_id_filters() {
+    let (state, _dir) = boot(vec![]).await;
+    let ws_id = open_first_workspace(&state).await;
+
+    let t1 = commands::impl_create_task(&state, "in-ws".into(), String::new())
+        .await
+        .unwrap();
+    assert_eq!(t1.workspace_id, ws_id);
+
+    // Filtered by workspace → includes the task
+    let filtered = commands::impl_list_tasks(&state, None, Some(ws_id.clone()))
+        .await
+        .unwrap();
+    assert!(filtered.iter().any(|t| t.id == t1.id));
+
+    // Filtered by non-existent workspace → empty
+    let empty = commands::impl_list_tasks(&state, None, Some("ws-nope".into()))
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+
+    // No filter (None) → all tasks (backward compatible)
+    let all = commands::impl_list_tasks(&state, None, None).await.unwrap();
+    assert!(all.iter().any(|t| t.id == t1.id));
+}
+
+#[tokio::test]
+async fn list_schedules_with_workspace_id_filters() {
+    let (state, _dir) = boot(vec![]).await;
+    let ws_id = open_first_workspace(&state).await;
+
+    let s = commands::impl_create_schedule(
+        &state,
+        "daily".into(),
+        "@every 3600".into(),
+        "tick".into(),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(s.workspace_id, ws_id);
+
+    // Filtered by workspace → includes the schedule
+    let filtered = commands::impl_list_schedules(&state, Some(ws_id.clone()))
+        .await
+        .unwrap();
+    assert!(filtered.iter().any(|x| x.id == s.id));
+
+    // Filtered by non-existent workspace → empty
+    let empty = commands::impl_list_schedules(&state, Some("ws-nope".into()))
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+
+    // No filter → all schedules
+    let all = commands::impl_list_schedules(&state, None).await.unwrap();
+    assert!(all.iter().any(|x| x.id == s.id));
+}
+
+#[tokio::test]
+async fn create_schedule_rejects_without_focused_workspace() {
+    let (state, _dir) = boot(vec![]).await;
+
+    // Close all workspaces to unfocus
+    commands::impl_close_all_workspaces(&state, false)
+        .await
+        .unwrap();
+
+    let err = commands::impl_create_schedule(
+        &state,
+        "orphan".into(),
+        "@every 60".into(),
+        "tick".into(),
+        String::new(),
+    )
+    .await
+    .expect_err("must reject without focused workspace");
+    assert_eq!(ipc_code(&err), "scheduler.no_focused_workspace");
+}
+
+#[tokio::test]
+async fn create_task_writes_migrated_placeholder_when_no_focused_workspace() {
+    let (state, _dir) = boot(vec![]).await;
+
+    commands::impl_close_all_workspaces(&state, false)
+        .await
+        .unwrap();
+
+    let task = commands::impl_create_task(&state, "no-ws".into(), String::new())
+        .await
+        .unwrap();
+    assert_eq!(task.workspace_id, "__migrated__");
+}
+
+#[tokio::test]
+async fn view_scope_get_defaults_to_all() {
+    let (state, _dir) = boot(vec![]).await;
+
+    for surface in ["board", "approvals", "scheduler"] {
+        let scope = commands::impl_get_view_scope(&state, surface.into())
+            .await
+            .unwrap();
+        assert_eq!(scope, "all");
+    }
+}
+
+#[tokio::test]
+async fn view_scope_set_and_get_roundtrip() {
+    let (state, _dir) = boot(vec![]).await;
+
+    commands::impl_set_view_scope(&state, "board".into(), "focused".into())
+        .await
+        .unwrap();
+    let got = commands::impl_get_view_scope(&state, "board".into())
+        .await
+        .unwrap();
+    assert_eq!(got, "focused");
+
+    // Different surface is independent
+    let other = commands::impl_get_view_scope(&state, "approvals".into())
+        .await
+        .unwrap();
+    assert_eq!(other, "all");
+
+    // Toggle back
+    commands::impl_set_view_scope(&state, "board".into(), "all".into())
+        .await
+        .unwrap();
+    let back = commands::impl_get_view_scope(&state, "board".into())
+        .await
+        .unwrap();
+    assert_eq!(back, "all");
+}
+
+#[tokio::test]
+async fn view_scope_set_rejects_invalid_scope() {
+    let (state, _dir) = boot(vec![]).await;
+    let err = commands::impl_set_view_scope(&state, "board".into(), "bogus".into())
+        .await
+        .expect_err("invalid scope must be rejected");
+    assert_eq!(ipc_code(&err), "view_scope.invalid_scope");
+}
+
+#[tokio::test]
+async fn view_scope_rejects_invalid_surface() {
+    let (state, _dir) = boot(vec![]).await;
+    let err_get = commands::impl_get_view_scope(&state, "bogus".into())
+        .await
+        .expect_err("invalid surface must be rejected");
+    assert_eq!(ipc_code(&err_get), "view_scope.invalid_surface");
+
+    let err_set = commands::impl_set_view_scope(&state, "bogus".into(), "all".into())
+        .await
+        .expect_err("invalid surface must be rejected");
+    assert_eq!(ipc_code(&err_set), "view_scope.invalid_surface");
 }
