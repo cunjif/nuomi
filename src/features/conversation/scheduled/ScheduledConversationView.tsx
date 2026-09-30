@@ -16,7 +16,7 @@ export function ScheduledConversationView(): ReactNode {
 
   const schedulesQuery = useQuery({
     queryKey: ["schedules"],
-    queryFn: () => ipc.listSchedules(),
+    queryFn: () => ipc.listSchedules(null),
     staleTime: 30_000,
   });
 

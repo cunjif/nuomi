@@ -1,19 +1,27 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ApprovalDto } from "../../lib/ipc/bindings.gen";
+import { WorkspaceBadge } from "../conversation/WorkspaceBadge";
+import type { ViewScope } from "../common/ViewScopeToggle";
 
 interface ApprovalRowProps {
   approval: ApprovalDto;
+  scope: ViewScope;
   onResolve: (approvalId: string, approved: boolean) => void;
   pending: boolean;
 }
 
 /** One inbox item: tool name + arguments preview + approve/deny actions. */
-export function ApprovalRow({ approval, onResolve, pending }: ApprovalRowProps): ReactNode {
+export function ApprovalRow({ approval, scope, onResolve, pending }: ApprovalRowProps): ReactNode {
   const { t } = useTranslation();
   return (
     <li className="rounded border border-ink-muted/40 bg-surface-raised p-3">
-      <p className="font-mono text-sm text-ink-accent">{approval.toolName}</p>
+      <div className="flex items-center gap-2">
+        <p className="font-mono text-sm text-ink-accent">{approval.toolName}</p>
+        {scope === "all" && (
+          <WorkspaceBadge workspaceId={approval.workspaceId} workspaceRootPath={approval.workspaceRootPath} />
+        )}
+      </div>
       <pre className="mt-1 max-h-24 overflow-auto rounded bg-surface p-2 font-mono text-xs text-ink-muted">
         {approval.argumentsJson}
       </pre>

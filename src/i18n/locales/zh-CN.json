@@ -57,7 +57,9 @@
     "add": "添加",
     "remove": "移除",
     "enabled": "已启用",
-    "disabled": "已停用"
+    "disabled": "已停用",
+    "viewScopeFocused": "仅看聚焦",
+    "viewScopeAll": "全部工作区"
   },
   "shell": {
     "appName": "糯米 · nuomi",

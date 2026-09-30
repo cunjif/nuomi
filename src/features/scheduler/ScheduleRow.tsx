@@ -1,21 +1,29 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleDto } from "../../lib/ipc/bindings.gen";
+import { WorkspaceBadge } from "../conversation/WorkspaceBadge";
+import type { ViewScope } from "../common/ViewScopeToggle";
 
 interface ScheduleRowProps {
   schedule: ScheduleDto;
+  scope: ViewScope;
   pending: boolean;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
 }
 
 /** One schedule row with enable toggle and delete. */
-export function ScheduleRow({ schedule, pending, onToggle, onDelete }: ScheduleRowProps): ReactNode {
+export function ScheduleRow({ schedule, scope, pending, onToggle, onDelete }: ScheduleRowProps): ReactNode {
   const { t } = useTranslation();
   return (
     <li className="flex items-center justify-between gap-3 rounded border border-ink-muted/40 bg-surface-raised p-3">
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-ink">{schedule.name}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-medium text-ink">{schedule.name}</p>
+          {scope === "all" && (
+            <WorkspaceBadge workspaceId={schedule.workspaceId} workspaceRootPath={schedule.workspaceRootPath} />
+          )}
+        </div>
         <p className="font-mono text-xs text-ink-accent">{schedule.cronExpr}</p>
         <p className="truncate text-xs text-ink-muted">
           {schedule.taskTitle} ·{" "}

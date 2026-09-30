@@ -7,10 +7,13 @@ import type { TaskDto } from "../../lib/ipc/bindings.gen";
 import { Spinner } from "../../components/ui/Spinner";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { ipc } from "../../lib/ipc/client";
+import { WorkspaceBadge } from "../conversation/WorkspaceBadge";
 import { statusLabelKey, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
+import type { ViewScope } from "../common/ViewScopeToggle";
 
 interface TaskCardProps {
   task: TaskDto;
+  scope: ViewScope;
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -22,7 +25,7 @@ const menuButton =
   "block w-full px-3 py-1 text-left text-xs text-ink hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent";
 
 /** Draggable card with an equivalent keyboard menu (a11y rule for drag). */
-export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, onAutoFormRun }: TaskCardProps): ReactNode {
+export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithTeam, onAutoFormRun }: TaskCardProps): ReactNode {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [teamListOpen, setTeamListOpen] = useState(false);
@@ -54,6 +57,11 @@ export function TaskCard({ task, onOpenRuns, onMove, onDelete, onRunWithTeam, on
       >
         {task.title}
       </button>
+      {scope === "all" && (
+        <div className="mt-0.5">
+          <WorkspaceBadge workspaceId={task.workspaceId} workspaceRootPath={task.workspaceRootPath} />
+        </div>
+      )}
       {task.status === "running" && (
         <div className="mt-1">
           <Spinner />

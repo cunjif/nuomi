@@ -6,10 +6,12 @@ import type { TaskDto } from "../../lib/ipc/bindings.gen";
 import { TaskCard } from "./TaskCard";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { statusLabelKey, type TaskStatus } from "./taskStatuses";
+import type { ViewScope } from "../common/ViewScopeToggle";
 
 interface BoardColumnProps {
   status: TaskStatus;
   tasks: TaskDto[];
+  scope: ViewScope;
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -26,6 +28,7 @@ interface BoardColumnProps {
 export function BoardColumn({
   status,
   tasks,
+  scope,
   onOpenRuns,
   onMove,
   onDelete,
@@ -94,6 +97,7 @@ export function BoardColumn({
           <TaskCard
             key={task.id}
             task={task}
+            scope={scope}
             onOpenRuns={onOpenRuns}
             onMove={onMove}
             onDelete={onDelete}

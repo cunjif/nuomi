@@ -57,7 +57,9 @@
     "add": "Add",
     "remove": "Remove",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "viewScopeFocused": "Focused",
+    "viewScopeAll": "All Workspaces"
   },
   "shell": {
     "appName": "nuomi",

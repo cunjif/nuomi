@@ -8,15 +8,21 @@ import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { useUiStore } from "../../lib/store/uiStore";
 import { ScheduleForm } from "./ScheduleForm";
 import { ScheduleRow } from "./ScheduleRow";
+import { ViewScopeToggle } from "../common/ViewScopeToggle";
+import { useViewScope } from "../common/useViewScope";
 
 /** U13 scheduler management page. */
 export function SchedulerView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
-  const schedulesQuery = useQuery({ queryKey: ["schedules"], queryFn: ipc.listSchedules });
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const { scope, setScope } = useViewScope("scheduler");
+  const workspaceFilter = scope === "focused" ? focusedWorkspaceId : null;
+  const schedulesQuery = useQuery({ queryKey: ["schedules", workspaceFilter], queryFn: () => ipc.listSchedules(workspaceFilter) });
 
   const toggleMut = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => ipc.toggleSchedule(id, enabled),
@@ -38,7 +44,10 @@ export function SchedulerView(): ReactNode {
   return (
     <div className="h-full overflow-y-auto p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{t("scheduler.heading")}</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold">{t("scheduler.heading")}</h2>
+          <ViewScopeToggle surface="scheduler" scope={scope} onScopeChange={setScope} />
+        </div>
         <button
           type="button"
           onClick={() => setFormOpen((o) => !o)}
@@ -61,6 +70,7 @@ export function SchedulerView(): ReactNode {
             <ScheduleRow
               key={schedule.id}
               schedule={schedule}
+              scope={scope}
               pending={toggleMut.isPending || deleteMut.isPending}
               onToggle={(id, enabled) => toggleMut.mutate({ id, enabled })}
               onDelete={(id) => deleteMut.mutate(id)}

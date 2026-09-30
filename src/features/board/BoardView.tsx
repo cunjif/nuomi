@@ -17,6 +17,8 @@ import { NewTaskForm } from "./NewTaskForm";
 import { RunDrawer } from "./RunDrawer";
 import { useRunAllQueued } from "./useRunAllQueued";
 import { isTaskStatus, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
+import { ViewScopeToggle } from "../common/ViewScopeToggle";
+import { useViewScope } from "../common/useViewScope";
 
 /** U11 kanban: five status columns, drag or menu to move, run drawer. */
 export function BoardView(): ReactNode {
@@ -27,7 +29,10 @@ export function BoardView(): ReactNode {
     { taskId: string; taskTitle: string; plan: TeamPlanDto } | null
   >(null);
   const setRunDrawerTask = useUiStore((s) => s.setRunDrawerTask);
-  const tasksQuery = useQuery({ queryKey: ["tasks", null], queryFn: () => ipc.listTasks(null) });
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const { scope, setScope } = useViewScope("board");
+  const workspaceFilter = scope === "focused" ? focusedWorkspaceId : null;
+  const tasksQuery = useQuery({ queryKey: ["tasks", null, workspaceFilter], queryFn: () => ipc.listTasks(null, workspaceFilter) });
 
   const moveMut = useMutation({
     mutationFn: ({ taskId, status }: { taskId: string; status: TaskStatus }) =>
@@ -130,7 +135,10 @@ export function BoardView(): ReactNode {
   return (
     <div className="flex h-full flex-col p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{t("shell.navBoard")}</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold">{t("shell.navBoard")}</h2>
+          <ViewScopeToggle surface="board" scope={scope} onScopeChange={setScope} />
+        </div>
         <button
           type="button"
           onClick={() => setFormOpen((o) => !o)}
@@ -155,6 +163,7 @@ export function BoardView(): ReactNode {
                   key={status}
                   status={status}
                   tasks={grouped.get(status) ?? []}
+                  scope={scope}
                   onOpenRuns={setRunDrawerTask}
                   onMove={(taskId, next) => moveMut.mutate({ taskId, status: next })}
                   onDelete={(taskId) => deleteMut.mutate(taskId)}

@@ -5,6 +5,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
+import { useUiStore } from "../../lib/store/uiStore";
+import { IpcCommandError } from "../../lib/ipc/client";
 
 interface ScheduleFormProps {
   onDone: () => void;
@@ -14,6 +16,7 @@ interface ScheduleFormProps {
 export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const [name, setName] = useState("");
   const [cronExpr, setCronExpr] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
@@ -29,7 +32,17 @@ export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
       setTaskDescription("");
       onDone();
     },
-    onError: (e) => toast.error(`${t("scheduler.createFailed")}: ${describeError(e)}`),
+    onError: (e) => {
+      if (e instanceof IpcCommandError && e.code === "scheduler.no_focused_workspace") {
+        toast.error(t("scheduler.noFocusedWorkspace"));
+        return;
+      }
+      if (e instanceof IpcCommandError && e.code === "scheduler.duplicate_name") {
+        toast.error(t("scheduler.duplicateName"));
+        return;
+      }
+      toast.error(`${t("scheduler.createFailed")}: ${describeError(e)}`);
+    },
   });
 
   const field =
@@ -41,6 +54,10 @@ export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
       className="mb-2 flex flex-wrap items-end gap-2 rounded border border-ink-muted/40 bg-surface-raised p-2"
       onSubmit={(e) => {
         e.preventDefault();
+        if (!focusedWorkspaceId) {
+          toast.error(t("scheduler.noFocusedWorkspace"));
+          return;
+        }
         if (name.trim() && cronExpr.trim() && taskTitle.trim()) createMut.mutate();
       }}
     >
