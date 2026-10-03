@@ -148,6 +148,97 @@ impl WorkspaceService {
             }
         }
     }
+
+    /// Creates a file inside the sandbox. Parent directories are created if
+    /// missing. If the file already exists, it is overwritten (atomic replace
+    /// via `write_file_atomic`).
+    pub fn create_file(&self, rel: &str, content: &str) -> Result<(), WorkspaceError> {
+        self.write_file_atomic(rel, content)
+    }
+
+    /// Creates a directory inside the sandbox (idempotent, nested).
+    pub fn create_dir(&self, rel: &str) -> Result<(), WorkspaceError> {
+        let path = self.resolve(rel)?;
+        std::fs::create_dir_all(path)?;
+        Ok(())
+    }
+
+    /// Deletes a file or directory inside the sandbox. Returns `Io` (NotFound)
+    /// if the path does not exist.
+    pub fn delete(&self, rel: &str) -> Result<(), WorkspaceError> {
+        let path = self.resolve(rel)?;
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    /// Renames/moves a file or directory inside the sandbox. Both `from` and
+    /// `to` are resolved through the sandbox guard. If `to` already exists it
+    /// is removed first (Windows `rename` cannot overwrite). `from == to` is
+    /// a no-op.
+    pub fn rename(&self, from: &str, to: &str) -> Result<(), WorkspaceError> {
+        let from_path = self.resolve(from)?;
+        let to_path = self.resolve(to)?;
+        if from_path == to_path {
+            return Ok(());
+        }
+        if to_path.exists() {
+            if to_path.is_dir() {
+                std::fs::remove_dir_all(&to_path)?;
+            } else {
+                std::fs::remove_file(&to_path)?;
+            }
+        }
+        std::fs::rename(from_path, to_path)?;
+        Ok(())
+    }
+
+    /// Copies a file or directory inside the sandbox. Both paths are resolved
+    /// through the sandbox guard. Returns `InvalidPath` if `from` does not
+    /// exist or `to` already exists (does not overwrite/merge, avoiding
+    /// accidental data loss).
+    pub fn copy(&self, from: &str, to: &str) -> Result<(), WorkspaceError> {
+        let from_path = self.resolve(from)?;
+        let to_path = self.resolve(to)?;
+        if !from_path.exists() {
+            return Err(WorkspaceError::InvalidPath(
+                from_path.to_string_lossy().into_owned(),
+            ));
+        }
+        if to_path.exists() {
+            return Err(WorkspaceError::InvalidPath(
+                to_path.to_string_lossy().into_owned(),
+            ));
+        }
+        if from_path.is_dir() {
+            copy_dir_recursive(&from_path, &to_path)?;
+        } else {
+            std::fs::copy(&from_path, &to_path)?;
+        }
+        Ok(())
+    }
+}
+
+/// Recursively copies a directory tree. `to` is created if missing. Each
+/// entry is copied verbatim (file contents or nested directory). The sandbox
+/// guard is enforced by the caller resolving `from`/`to` — since `to` is
+/// inside the root, all of `to`'s descendants are too.
+fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), WorkspaceError> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
 }
 
 fn has_windows_drive_prefix(rel: &str) -> bool {
@@ -293,5 +384,130 @@ mod tests {
             ws.list_dir("f.txt"),
             Err(WorkspaceError::NotADirectory(_))
         ));
+    }
+
+    #[test]
+    fn create_file_creates_parents_and_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("a/b/c.txt", "first").unwrap();
+        assert_eq!(ws.read_file("a/b/c.txt").unwrap(), "first");
+        // Overwrite.
+        ws.create_file("a/b/c.txt", "second").unwrap();
+        assert_eq!(ws.read_file("a/b/c.txt").unwrap(), "second");
+    }
+
+    #[test]
+    fn create_dir_is_idempotent_and_nested() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_dir("x/y/z").unwrap();
+        ws.create_dir("x/y/z").unwrap(); // idempotent
+        let entries = ws.list_dir("x/y").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_dir);
+        assert_eq!(entries[0].name, "z");
+    }
+
+    #[test]
+    fn delete_file_and_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("f.txt", "x").unwrap();
+        ws.create_dir("d/sub").unwrap();
+        ws.create_file("d/sub/g.txt", "y").unwrap();
+
+        ws.delete("f.txt").unwrap();
+        assert!(ws.read_file("f.txt").is_err());
+
+        ws.delete("d").unwrap(); // recursive
+        assert!(ws.list_dir("d").is_err());
+    }
+
+    #[test]
+    fn delete_nonexistent_is_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        assert!(ws.delete("nope.txt").is_err());
+    }
+
+    #[test]
+    fn rename_file_and_dir_and_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("a.txt", "content").unwrap();
+        ws.rename("a.txt", "b.txt").unwrap();
+        assert_eq!(ws.read_file("b.txt").unwrap(), "content");
+        assert!(ws.read_file("a.txt").is_err());
+
+        // Rename onto existing target overwrites.
+        ws.create_file("c.txt", "new").unwrap();
+        ws.rename("c.txt", "b.txt").unwrap();
+        assert_eq!(ws.read_file("b.txt").unwrap(), "new");
+
+        // Rename a directory.
+        ws.create_dir("dir1/sub").unwrap();
+        ws.rename("dir1", "dir2").unwrap();
+        let entries = ws.list_dir("").unwrap();
+        assert!(entries.iter().any(|e| e.name == "dir2" && e.is_dir));
+    }
+
+    #[test]
+    fn rename_same_path_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("a.txt", "keep").unwrap();
+        ws.rename("a.txt", "a.txt").unwrap();
+        assert_eq!(ws.read_file("a.txt").unwrap(), "keep");
+    }
+
+    #[test]
+    fn copy_file_and_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("src.txt", "data").unwrap();
+        ws.copy("src.txt", "dst.txt").unwrap();
+        assert_eq!(ws.read_file("dst.txt").unwrap(), "data");
+        // Source preserved.
+        assert_eq!(ws.read_file("src.txt").unwrap(), "data");
+
+        // Copy a directory tree.
+        ws.create_file("tree/a.txt", "1").unwrap();
+        ws.create_file("tree/b.txt", "2").unwrap();
+        ws.copy("tree", "tree-copy").unwrap();
+        assert_eq!(ws.read_file("tree-copy/a.txt").unwrap(), "1");
+        assert_eq!(ws.read_file("tree-copy/b.txt").unwrap(), "2");
+    }
+
+    #[test]
+    fn copy_to_existing_is_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        ws.create_file("a.txt", "1").unwrap();
+        ws.create_file("b.txt", "2").unwrap();
+        assert!(ws.copy("a.txt", "b.txt").is_err());
+    }
+
+    #[test]
+    fn copy_from_nonexistent_is_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        assert!(ws.copy("nope.txt", "out.txt").is_err());
+    }
+
+    #[test]
+    fn file_ops_reject_escape_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = service(dir.path());
+        let escapes = ["../out.txt", "..\\out.txt", "/etc/passwd", "C:\\abs"];
+        for rel in escapes {
+            assert!(ws.create_file(rel, "x").is_err(), "create_file {rel}");
+            assert!(ws.create_dir(rel).is_err(), "create_dir {rel}");
+            assert!(ws.delete(rel).is_err(), "delete {rel}");
+            assert!(ws.rename(rel, "safe.txt").is_err(), "rename from {rel}");
+            assert!(ws.rename("safe.txt", rel).is_err(), "rename to {rel}");
+            assert!(ws.copy(rel, "safe.txt").is_err(), "copy from {rel}");
+            assert!(ws.copy("safe.txt", rel).is_err(), "copy to {rel}");
+        }
     }
 }
