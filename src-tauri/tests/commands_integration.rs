@@ -101,6 +101,80 @@ async fn workspace_sandbox_rejects_escape() {
 }
 
 #[tokio::test]
+async fn workspace_file_ops_roundtrip() {
+    let (state, dir) = boot(vec![]).await;
+    state.switch_workspace(dir.path().to_path_buf()).unwrap();
+
+    // create_file
+    commands::impl_create_file(&state, "notes/a.txt".into(), "hi".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        commands::impl_read_file(&state, "notes/a.txt".into())
+            .await
+            .unwrap(),
+        "hi",
+    );
+
+    // create_dir
+    commands::impl_create_dir(&state, "docs".into()).await.unwrap();
+    let root = commands::impl_list_dir(&state, "".into()).await.unwrap();
+    assert!(root.iter().any(|e| e.name == "docs" && e.is_dir));
+
+    // rename
+    commands::impl_rename(&state, "notes/a.txt".into(), "notes/b.txt".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        commands::impl_read_file(&state, "notes/b.txt".into())
+            .await
+            .unwrap(),
+        "hi",
+    );
+
+    // copy
+    commands::impl_copy(&state, "notes/b.txt".into(), "docs/b.txt".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        commands::impl_read_file(&state, "docs/b.txt".into())
+            .await
+            .unwrap(),
+        "hi",
+    );
+
+    // delete
+    commands::impl_delete(&state, "notes/b.txt".into())
+        .await
+        .unwrap();
+    assert!(commands::impl_read_file(&state, "notes/b.txt".into()).await.is_err());
+    // copy preserved
+    assert_eq!(
+        commands::impl_read_file(&state, "docs/b.txt".into())
+            .await
+            .unwrap(),
+        "hi",
+    );
+}
+
+#[tokio::test]
+async fn workspace_file_ops_reject_escape() {
+    let (state, dir) = boot(vec![]).await;
+    state.switch_workspace(dir.path().to_path_buf()).unwrap();
+    commands::impl_create_file(&state, "safe.txt".into(), "x".into())
+        .await
+        .unwrap();
+
+    for rel in ["../out.txt", "/etc/passwd", "C:\\abs"] {
+        assert!(commands::impl_create_file(&state, rel.into(), "x".into()).await.is_err());
+        assert!(commands::impl_create_dir(&state, rel.into()).await.is_err());
+        assert!(commands::impl_delete(&state, rel.into()).await.is_err());
+        assert!(commands::impl_rename(&state, rel.into(), "safe.txt".into()).await.is_err());
+        assert!(commands::impl_copy(&state, rel.into(), "safe.txt".into()).await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn schedule_crud_validates_expression() {
     let (state, _dir) = boot(vec![]).await;
     open_first_workspace(&state).await;

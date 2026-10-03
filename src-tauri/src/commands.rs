@@ -1563,6 +1563,43 @@ pub async fn impl_write_file(
     Ok(())
 }
 
+pub async fn impl_create_file(
+    state: &AppState,
+    path: String,
+    content: String,
+) -> Result<(), IpcError> {
+    state.workspace()?.create_file(&path, &content)?;
+    Ok(())
+}
+
+pub async fn impl_create_dir(state: &AppState, path: String) -> Result<(), IpcError> {
+    state.workspace()?.create_dir(&path)?;
+    Ok(())
+}
+
+pub async fn impl_delete(state: &AppState, path: String) -> Result<(), IpcError> {
+    state.workspace()?.delete(&path)?;
+    Ok(())
+}
+
+pub async fn impl_rename(
+    state: &AppState,
+    from: String,
+    to: String,
+) -> Result<(), IpcError> {
+    state.workspace()?.rename(&from, &to)?;
+    Ok(())
+}
+
+pub async fn impl_copy(
+    state: &AppState,
+    from: String,
+    to: String,
+) -> Result<(), IpcError> {
+    state.workspace()?.copy(&from, &to)?;
+    Ok(())
+}
+
 // ---------- git ----------
 
 pub async fn impl_git_status(state: &AppState) -> Result<Vec<GitStatusDto>, IpcError> {

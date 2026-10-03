@@ -267,6 +267,54 @@ pub async fn write_file(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn create_file(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    content: String,
+) -> Result<(), IpcError> {
+    commands::impl_create_file(&state, path, content).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn create_dir(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<(), IpcError> {
+    commands::impl_create_dir(&state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete(&state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn rename(
+    state: tauri::State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<(), IpcError> {
+    commands::impl_rename(&state, from, to).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn copy(
+    state: tauri::State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<(), IpcError> {
+    commands::impl_copy(&state, from, to).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn git_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::GitStatusDto>, IpcError> {
