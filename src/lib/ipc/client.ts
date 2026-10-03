@@ -107,6 +107,12 @@ export const ipc = {
   readFile: (path: string) => unwrap(current.readFile(path)),
   writeFile: (path: string, content: string) =>
     unwrap(current.writeFile(path, content)),
+  createFile: (path: string, content: string) =>
+    unwrap(current.createFile(path, content)),
+  createDir: (path: string) => unwrap(current.createDir(path)),
+  deletePath: (path: string) => unwrap(current.delete(path)),
+  renamePath: (from: string, to: string) => unwrap(current.rename(from, to)),
+  copyPath: (from: string, to: string) => unwrap(current.copy(from, to)),
   gitStatus: () => unwrap(current.gitStatus()),
   gitLog: (limit: number) => unwrap(current.gitLog(limit)),
   gitStage: (paths: string[]) => unwrap(current.gitStage(paths)),

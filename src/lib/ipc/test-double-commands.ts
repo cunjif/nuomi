@@ -231,6 +231,31 @@ export function testDoubleCommands(): CommandSet {
       f.size = content.length;
       return ok(null);
     },
+    async createFile(path, content) {
+      tdState.files.set(path, { isDir: false, size: content.length, content });
+      return ok(null);
+    },
+    async createDir(path) {
+      tdState.files.set(path, { isDir: true, size: 0, content: null });
+      return ok(null);
+    },
+    async delete(path) {
+      tdState.files.delete(path);
+      return ok(null);
+    },
+    async rename(from, to) {
+      const e = tdState.files.get(from);
+      if (!e) return err("workspace.invalid_path", `not found: ${from}`);
+      tdState.files.delete(from);
+      tdState.files.set(to, e);
+      return ok(null);
+    },
+    async copy(from, to) {
+      const e = tdState.files.get(from);
+      if (!e) return err("workspace.invalid_path", `not found: ${from}`);
+      tdState.files.set(to, { ...e });
+      return ok(null);
+    },
     async gitStatus() {
       return ok([]);
     },

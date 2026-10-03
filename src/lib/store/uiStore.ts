@@ -86,6 +86,17 @@ interface UiState {
   openSessionIds: string[];
   openFiles: string[];
   activeFile: string | null;
+  /**
+   * Selected node paths in the file tree panel (multi-select via Ctrl/Shift).
+   * Independent from `openFiles`/`activeFile` — selection is a transient
+   * highlight state, not "opened in editor".
+   */
+  selectedPaths: string[];
+  /** Anchor for Shift range selection (the last single-clicked node). */
+  lastSelectedPath: string | null;
+  /** Clipboard for copy/cut operations within the file tree. */
+  clipboardPaths: string[];
+  clipboardMode: "copy" | "cut" | null;
   runDrawerTaskId: string | null;
   /** Volatile per-file edit dirtiness keyed by path (content itself lives in the Query cache). */
   dirtyPaths: Record<string, boolean>;
@@ -125,6 +136,12 @@ interface UiState {
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
+  setSelectedPaths: (paths: string[]) => void;
+  toggleSelected: (path: string) => void;
+  selectRange: (from: string, to: string, visiblePaths: string[]) => void;
+  clearSelection: () => void;
+  setClipboard: (paths: string[], mode: "copy" | "cut") => void;
+  clearClipboard: () => void;
   setRunDrawerTask: (taskId: string | null) => void;
   markDirty: (path: string, dirty: boolean) => void;
   /** Sets the active workspace id (called after IPC activate/add succeeds). */
@@ -161,6 +178,10 @@ export const useUiStore = create<UiState>((set) => ({
   openSessionIds: [],
   openFiles: [],
   activeFile: null,
+  selectedPaths: [],
+  lastSelectedPath: null,
+  clipboardPaths: [],
+  clipboardMode: null,
   runDrawerTaskId: null,
   dirtyPaths: {},
   activeWorkspaceId: null,
@@ -238,6 +259,29 @@ export const useUiStore = create<UiState>((set) => ({
       };
     }),
   setActiveFile: (path) => set({ activeFile: path }),
+  setSelectedPaths: (paths) =>
+    set({
+      selectedPaths: paths,
+      lastSelectedPath: paths.length > 0 ? paths[paths.length - 1] : null,
+    }),
+  toggleSelected: (path) =>
+    set((s) => {
+      const selectedPaths = s.selectedPaths.includes(path)
+        ? s.selectedPaths.filter((p) => p !== path)
+        : [...s.selectedPaths, path];
+      return { selectedPaths, lastSelectedPath: path };
+    }),
+  selectRange: (from, to, visiblePaths) =>
+    set(() => {
+      const fromIdx = visiblePaths.indexOf(from);
+      const toIdx = visiblePaths.indexOf(to);
+      if (fromIdx === -1 || toIdx === -1) return { selectedPaths: [to] };
+      const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+      return { selectedPaths: visiblePaths.slice(lo, hi + 1) };
+    }),
+  clearSelection: () => set({ selectedPaths: [], lastSelectedPath: null }),
+  setClipboard: (paths, mode) => set({ clipboardPaths: paths, clipboardMode: mode }),
+  clearClipboard: () => set({ clipboardPaths: [], clipboardMode: null }),
   setRunDrawerTask: (taskId) => set({ runDrawerTaskId: taskId }),
   // No-op when the flag already matches so per-keystroke onChange calls don't
   // churn subscribers.
