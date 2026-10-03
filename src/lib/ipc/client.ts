@@ -205,8 +205,8 @@ export const ipc = {
     unwrap(current.removeConversationAgent(sessionId, agent)),
   deleteConversation: (sessionId: string) =>
     unwrap(current.deleteConversation(sessionId)),
-  clearConversations: () =>
-    unwrap(current.clearConversations()),
+  clearConversations: (workspaceId: string | null) =>
+    unwrap(current.clearConversations(workspaceId)),
   getAgentDetail: (agentKind: string, agentId: string) =>
     unwrap(current.getAgentDetail(agentKind, agentId)),
   submitMessage: (

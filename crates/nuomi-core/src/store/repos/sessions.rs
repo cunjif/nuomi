@@ -211,6 +211,21 @@ pub fn delete_all_for_workspace(
     Ok(count)
 }
 
+/// Soft-deletes all sessions across all workspaces. Returns the number of
+/// sessions newly marked deleted. Each session is cascaded via [`delete`].
+pub fn delete_all(conn: &Connection) -> Result<usize, StoreError> {
+    let session_ids: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM sessions WHERE deleted_at IS NULL")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let count = session_ids.len();
+    for sid in &session_ids {
+        delete(conn, sid)?;
+    }
+    Ok(count)
+}
+
 // ---------------------------------------------------- busy state (ADR 0015)
 
 /// Marks a session's agent as busy (1) or idle (0).

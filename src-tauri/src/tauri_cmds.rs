@@ -1021,8 +1021,11 @@ pub async fn delete_conversation(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn clear_conversations(state: tauri::State<'_, AppState>) -> Result<usize, IpcError> {
-    commands::impl_clear_conversations(&state).await
+pub async fn clear_conversations(
+    state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<usize, IpcError> {
+    commands::impl_clear_conversations(&state, workspace_id).await
 }
 
 #[tauri::command]

@@ -79,7 +79,7 @@ export function ConversationsList(): ReactNode {
   });
 
   const clearMut = useMutation({
-    mutationFn: () => ipc.clearConversations(),
+    mutationFn: (wsFilter: string | null) => ipc.clearConversations(wsFilter),
     onSuccess: (count) => {
       void qc.invalidateQueries({ queryKey: ["conversations"] });
       toast.success(t("conversation.cleared", { count }));
@@ -117,7 +117,7 @@ export function ConversationsList(): ReactNode {
       await deleteMut.mutateAsync(confirm.sessionId);
       if (selectedSessionId === confirm.sessionId) selectSession(null);
     } else if (confirm.type === "clear") {
-      await clearMut.mutateAsync();
+      await clearMut.mutateAsync(workspaceFilter === "all" ? null : workspaceFilter);
       selectSession(null);
     } else if (confirm.type === "batch") {
       for (const id of confirm.ids) {
@@ -132,7 +132,9 @@ export function ConversationsList(): ReactNode {
     ? confirm.type === "delete"
       ? t("conversation.confirmDeleteTitle")
       : confirm.type === "clear"
-        ? t("conversation.confirmClearTitle")
+        ? workspaceFilter === "all"
+          ? t("conversation.confirmClearTitle")
+          : t("conversation.confirmClearWorkspaceTitle")
         : t("conversation.confirmBatchDeleteTitle")
     : "";
 
@@ -140,7 +142,9 @@ export function ConversationsList(): ReactNode {
     ? confirm.type === "delete"
       ? t("conversation.confirmDeleteMessage", { title: confirm.title })
       : confirm.type === "clear"
-        ? t("conversation.confirmClearMessage")
+        ? workspaceFilter === "all"
+          ? t("conversation.confirmClearMessage")
+          : t("conversation.confirmClearWorkspaceMessage")
         : t("conversation.confirmBatchDeleteMessage", { count: confirm.ids.length })
     : "";
 

@@ -910,9 +910,9 @@ async deleteConversation(sessionId: string) : Promise<Result<null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async clearConversations() : Promise<Result<number, IpcError>> {
+async clearConversations(workspaceId: string | null) : Promise<Result<number, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("clear_conversations") };
+    return { status: "ok", data: await TAURI_INVOKE("clear_conversations", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

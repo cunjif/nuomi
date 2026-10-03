@@ -296,6 +296,8 @@
     "confirmDeleteMessage": "Delete \"{{title}}\"? This cannot be undone.",
     "confirmClearTitle": "Clear all conversations",
     "confirmClearMessage": "Clear all conversations? This cannot be undone.",
+    "confirmClearWorkspaceTitle": "Clear workspace conversations",
+    "confirmClearWorkspaceMessage": "Clear conversations in this workspace? This cannot be undone.",
     "confirmBatchDeleteTitle": "Batch delete",
     "confirmBatchDeleteMessage": "Delete {{count}} selected conversations? This cannot be undone.",
     "handoff": "Handoff",

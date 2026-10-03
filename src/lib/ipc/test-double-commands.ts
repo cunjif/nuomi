@@ -1033,9 +1033,12 @@ export function testDoubleCommands(): CommandSet {
       tdState.sessions.splice(idx, 1);
       return ok(null);
     },
-    async clearConversations() {
-      const count = tdState.sessions.length;
-      tdState.sessions = [];
+    async clearConversations(workspaceId: string | null) {
+      const toDelete = tdState.sessions.filter(
+        (s) => workspaceId === null || s.workspaceId === workspaceId,
+      );
+      const count = toDelete.length;
+      tdState.sessions = tdState.sessions.filter((s) => !toDelete.includes(s));
       return ok(count);
     },
     async getAgentDetail(agentKind, agentId) {

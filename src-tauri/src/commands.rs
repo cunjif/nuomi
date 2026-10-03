@@ -4829,27 +4829,37 @@ pub async fn impl_delete_conversation(
     Ok(())
 }
 
-pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcError> {
+pub async fn impl_clear_conversations(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<usize, IpcError> {
     let path = state.db_path.clone();
     let sids = tokio::task::spawn_blocking(move || -> Result<(usize, Vec<String>), IpcError> {
         let db = Db::open(&path)?;
         migrations::run(&db.0)?;
-        let active_ws = repos::workspace_open_state::find_focused(&db.0)?
-            .map(|r| r.workspace_id)
-            .unwrap_or_default();
-        let ws_id = if active_ws.is_empty() {
-            "__migrated__"
-        } else {
-            &active_ws
+        let (count, to_delete) = match &workspace_id {
+            None => {
+                let ids: Vec<String> = repos::sessions::list_all(&db.0, 100_000)?
+                    .into_iter()
+                    .map(|s| s.id)
+                    .collect();
+                let n = repos::sessions::delete_all(&db.0)?;
+                (n, ids)
+            }
+            Some(ws_id) => {
+                let ws = if ws_id.is_empty() {
+                    "__migrated__"
+                } else {
+                    ws_id.as_str()
+                };
+                let ids: Vec<String> = repos::sessions::list(&db.0, ws, 100_000)?
+                    .into_iter()
+                    .map(|s| s.id)
+                    .collect();
+                let n = repos::sessions::delete_all_for_workspace(&db.0, ws)?;
+                (n, ids)
+            }
         };
-        // List the sessions about to be soft-deleted so we can cascade
-        // queue cleanup + turn cancellation outside the blocking closure.
-        let to_delete = repos::sessions::list(&db.0, ws_id, 100_000)?
-            .into_iter()
-            .map(|s| s.id)
-            .collect::<Vec<_>>();
-        let count = repos::sessions::delete_all_for_workspace(&db.0, ws_id)?;
-        // P1-2: cascade — clear queued messages for every deleted session.
         for sid in &to_delete {
             let _ = repos::message_queue::clear_queued(&db.0, sid);
         }
@@ -4857,7 +4867,6 @@ pub async fn impl_clear_conversations(state: &AppState) -> Result<usize, IpcErro
     })
     .await
     .map_err(join_err)??;
-    // P1-2: cancel any in-flight turns for the deleted sessions.
     for sid in &sids.1 {
         state.session_cancels.cancel(sid);
     }

@@ -296,6 +296,8 @@
     "confirmDeleteMessage": "确定删除「{{title}}」吗？此操作不可撤销。",
     "confirmClearTitle": "清空所有会话",
     "confirmClearMessage": "确定清空所有会话吗？此操作不可撤销。",
+    "confirmClearWorkspaceTitle": "清空当前工作区会话",
+    "confirmClearWorkspaceMessage": "确定清空当前工作区的会话吗？此操作不可撤销。",
     "confirmBatchDeleteTitle": "批量删除",
     "confirmBatchDeleteMessage": "确定删除选中的 {{count}} 个会话吗？此操作不可撤销。",
     "handoff": "Handoff",
