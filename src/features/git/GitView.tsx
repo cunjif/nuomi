@@ -57,7 +57,7 @@ function Breadcrumbs({ path }: { path: string }): ReactNode {
   );
 }
 
-export function GitView(): ReactNode {
+export function GitView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -66,17 +66,17 @@ export function GitView(): ReactNode {
   const [remote, setRemote] = useState("origin");
   const [branch, setBranch] = useState("main");
 
-  const statusQuery = useQuery({ queryKey: ["git", "status"], queryFn: () => ipc.gitStatus() });
-  const logQuery = useQuery({ queryKey: ["git", "log"], queryFn: () => ipc.gitLog(20) });
-  const worktreesQuery = useQuery({ queryKey: ["git", "worktrees"], queryFn: () => ipc.gitWorktrees() });
+  const statusQuery = useQuery({ queryKey: ["git", "status", workspaceId], queryFn: () => ipc.gitStatus(workspaceId) });
+  const logQuery = useQuery({ queryKey: ["git", "log", workspaceId], queryFn: () => ipc.gitLog(20, workspaceId) });
+  const worktreesQuery = useQuery({ queryKey: ["git", "worktrees", workspaceId], queryFn: () => ipc.gitWorktrees(workspaceId) });
 
   const activeEntry = statusQuery.data?.find((e) => e.path === activeFile) ?? null;
   const activeStaged = activeEntry ? isStaged(activeEntry.indexStatus) : false;
   const activePath = activeFile ?? "";
 
   const diffQuery = useQuery({
-    queryKey: ["git", "diff", activePath, activeStaged],
-    queryFn: () => ipc.gitDiff(activePath, activeStaged),
+    queryKey: ["git", "diff", workspaceId, activePath, activeStaged],
+    queryFn: () => ipc.gitDiff(activePath, activeStaged, workspaceId),
     enabled: activeFile !== null,
   });
 
@@ -95,12 +95,12 @@ export function GitView(): ReactNode {
     onError: fail,
   });
   const stageMut = useMutation({
-    mutationFn: (paths: string[]) => ipc.gitStage(paths),
+    mutationFn: (paths: string[]) => ipc.gitStage(paths, workspaceId),
     onSuccess: refresh,
     onError: fail,
   });
   const commitMut = useMutation({
-    mutationFn: () => ipc.gitCommit(message),
+    mutationFn: () => ipc.gitCommit(message, workspaceId),
     onSuccess: () => {
       setMessage("");
       refresh();
@@ -108,7 +108,7 @@ export function GitView(): ReactNode {
     onError: fail,
   });
   const pushMut = useMutation({
-    mutationFn: () => ipc.gitPush(remote, branch),
+    mutationFn: () => ipc.gitPush(remote, branch, workspaceId),
     onSuccess: (out) => toast.success(out || t("git.pushDone")),
     onError: fail,
   });

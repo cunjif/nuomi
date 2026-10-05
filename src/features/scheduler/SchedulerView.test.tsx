@@ -11,7 +11,7 @@ describe("SchedulerView — view scope toggle (task 7.3)", () => {
     const setViewScope = vi.fn(base.setViewScope);
     injectIpcCommands({ ...base, setViewScope });
 
-    renderWithProviders(<SchedulerView />);
+    renderWithProviders(<SchedulerView workspaceId={null} />);
 
     const focusedBtn = await screen.findByText("仅看聚焦");
     fireEvent.click(focusedBtn);
@@ -41,7 +41,7 @@ describe("SchedulerView — schedule list (task 7.3)", () => {
     });
     injectIpcCommands(testDoubleCommands());
 
-    renderWithProviders(<SchedulerView />);
+    renderWithProviders(<SchedulerView workspaceId={null} />);
 
     expect(await screen.findByText("nightly-build")).toBeInTheDocument();
   });

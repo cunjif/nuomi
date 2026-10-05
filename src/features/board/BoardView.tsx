@@ -21,7 +21,7 @@ import { ViewScopeToggle } from "../common/ViewScopeToggle";
 import { useViewScope } from "../common/useViewScope";
 
 /** U11 kanban: five status columns, drag or menu to move, run drawer. */
-export function BoardView(): ReactNode {
+export function BoardView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -31,7 +31,8 @@ export function BoardView(): ReactNode {
   const setRunDrawerTask = useUiStore((s) => s.setRunDrawerTask);
   const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const { scope, setScope } = useViewScope("board");
-  const workspaceFilter = scope === "focused" ? focusedWorkspaceId : null;
+  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const tasksQuery = useQuery({ queryKey: ["tasks", null, workspaceFilter], queryFn: () => ipc.listTasks(null, workspaceFilter) });
 
   const moveMut = useMutation({

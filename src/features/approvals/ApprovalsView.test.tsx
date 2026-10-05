@@ -19,7 +19,7 @@ describe("ApprovalsView — approve flow (AC10)", () => {
     const resolveApproval = vi.fn(base.resolveApproval);
     injectIpcCommands({ ...base, resolveApproval });
 
-    renderWithProviders(<ApprovalsView />);
+    renderWithProviders(<ApprovalsView workspaceId={null} />);
 
     expect(await screen.findByText("write_file")).toBeInTheDocument();
     expect(screen.getByText('{"path":"src/main.rs"}')).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe("ApprovalsView — approve flow (AC10)", () => {
     const resolveApproval = vi.fn(base.resolveApproval);
     injectIpcCommands({ ...base, resolveApproval });
 
-    renderWithProviders(<ApprovalsView />);
+    renderWithProviders(<ApprovalsView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "拒绝" }));
 
     await waitFor(() => expect(resolveApproval).toHaveBeenCalledWith("a2", false));
@@ -49,7 +49,7 @@ describe("ApprovalsView — view scope toggle (task 7.3)", () => {
     const setViewScope = vi.fn(base.setViewScope);
     injectIpcCommands({ ...base, setViewScope });
 
-    renderWithProviders(<ApprovalsView />);
+    renderWithProviders(<ApprovalsView workspaceId={null} />);
 
     const focusedBtn = await screen.findByText("仅看聚焦");
     fireEvent.click(focusedBtn);

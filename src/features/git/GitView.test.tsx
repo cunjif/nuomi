@@ -32,7 +32,7 @@ describe("GitView (SPEC D5/US5)", () => {
     const overrides = base();
     const stage = overrides.gitStage;
     injectIpcCommands(overrides as never);
-    renderWithProviders(<GitView />);
+    renderWithProviders(<GitView workspaceId={null} />);
 
     expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /new\.txt/ }));
@@ -44,7 +44,7 @@ describe("GitView (SPEC D5/US5)", () => {
     const overrides = base();
     const commit = overrides.gitCommit;
     injectIpcCommands(overrides as never);
-    renderWithProviders(<GitView />);
+    renderWithProviders(<GitView workspaceId={null} />);
 
     fireEvent.change(await screen.findByRole("textbox", { name: /message/i }), {
       target: { value: "fix(core): x" },
@@ -57,7 +57,7 @@ describe("GitView (SPEC D5/US5)", () => {
     const overrides = base();
     const push = overrides.gitPush;
     injectIpcCommands(overrides as never);
-    renderWithProviders(<GitView />);
+    renderWithProviders(<GitView workspaceId={null} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /push/i }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("origin", "main", null));

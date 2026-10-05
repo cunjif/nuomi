@@ -15,13 +15,14 @@ import { ViewScopeToggle } from "../common/ViewScopeToggle";
 import { useViewScope } from "../common/useViewScope";
 
 /** U13 scheduler management page. */
-export function SchedulerView(): ReactNode {
+export function SchedulerView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
   const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const { scope, setScope } = useViewScope("scheduler");
-  const workspaceFilter = scope === "focused" ? focusedWorkspaceId : null;
+  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const schedulesQuery = useQuery({ queryKey: ["schedules", workspaceFilter], queryFn: () => ipc.listSchedules(workspaceFilter) });
 
   const toggleMut = useMutation({

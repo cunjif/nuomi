@@ -12,7 +12,7 @@ describe("BoardView — create task flow (AC10)", () => {
     const createTask = vi.fn(base.createTask);
     injectIpcCommands({ ...base, createTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "新建任务" }));
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "重构内核" } });
@@ -41,7 +41,7 @@ describe("BoardView — create task flow (AC10)", () => {
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
     injectIpcCommands({ ...base, updateTaskStatus });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "移动到 运行中" }));
 
@@ -76,7 +76,7 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
     injectIpcCommands({ ...base, runTeamOnTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "用团队运行" }));
     fireEvent.click(await screen.findByRole("button", { name: "梦之队" }));
@@ -107,7 +107,7 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
     });
     injectIpcCommands(testDoubleCommands());
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "用团队运行" }));
 
@@ -138,7 +138,7 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
     injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
 
@@ -188,7 +188,7 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
     injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
 
@@ -211,7 +211,7 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
     const runTeamOnTask = vi.fn(base.runTeamOnTask);
     injectIpcCommands({ ...base, previewTeam, formTeam, runTeamOnTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
     fireEvent.click(await screen.findByRole("button", { name: "自发组队运行" }));
 
@@ -251,7 +251,7 @@ describe("BoardView — batch operations (批次二②)", () => {
     const deleteTask = vi.fn(base.deleteTask);
     injectIpcCommands({ ...base, deleteTask });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
 
     // Step one only arms the confirm — no IPC call yet.
@@ -277,7 +277,7 @@ describe("BoardView — batch operations (批次二②)", () => {
     seedTask("t-run", "运行中任务", "running");
     injectIpcCommands(testDoubleCommands());
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "任务操作菜单" }));
 
     expect(screen.queryByRole("button", { name: /^删除/ })).not.toBeInTheDocument();
@@ -292,7 +292,7 @@ describe("BoardView — batch operations (批次二②)", () => {
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
     injectIpcCommands({ ...base, updateTaskStatus });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "运行全部" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认派发 3 个排队任务？" }));
 
@@ -318,7 +318,7 @@ describe("BoardView — batch operations (批次二②)", () => {
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
     injectIpcCommands({ ...base, updateTaskStatus });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "运行全部" }));
     fireEvent.click(await screen.findByRole("button", { name: "取消" }));
 
@@ -332,7 +332,7 @@ describe("BoardView — batch operations (批次二②)", () => {
     seedTask("t-bl", "待办任务", "backlog");
     injectIpcCommands(testDoubleCommands());
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
 
     const button = await screen.findByRole("button", { name: "运行全部" });
     expect(button).toBeDisabled();
@@ -345,7 +345,7 @@ describe("BoardView — view scope toggle (task 7.3)", () => {
     const setViewScope = vi.fn(base.setViewScope);
     injectIpcCommands({ ...base, setViewScope });
 
-    renderWithProviders(<BoardView />);
+    renderWithProviders(<BoardView workspaceId={null} />);
 
     const focusedBtn = await screen.findByText("仅看聚焦");
     fireEvent.click(focusedBtn);

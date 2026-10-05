@@ -16,12 +16,13 @@ import { useViewScope } from "../common/useViewScope";
  * Approvals inbox: polled as a safety net and invalidated immediately by
  * `approval.*` events on the global domain channel.
  */
-export function ApprovalsView(): ReactNode {
+export function ApprovalsView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const { scope, setScope } = useViewScope("approvals");
-  const workspaceFilter = scope === "focused" ? focusedWorkspaceId : null;
+  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const approvalsQuery = useQuery({
     queryKey: ["approvals", workspaceFilter],
     queryFn: () => ipc.listPendingApprovals(workspaceFilter),

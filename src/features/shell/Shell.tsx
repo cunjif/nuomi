@@ -333,7 +333,7 @@ function renderMainContent({
     return (
       <SplitView
         renderWorkspace={(wsId, paneIndex) =>
-          activeArea === "workbench" ? <WorkbenchArea workspaceId={wsId} paneIndex={paneIndex} /> : renderView(view)
+          activeArea === "workbench" ? <WorkbenchArea workspaceId={wsId} paneIndex={paneIndex} /> : renderView(view, wsId)
         }
       />
     );
@@ -346,23 +346,23 @@ function renderMainContent({
       <EmptyStateGuide />
     );
   }
-  return renderView(view);
+  return renderView(view, activeWorkspaceId);
 }
 
-function renderView(view: View): ReactNode {
+function renderView(view: View, workspaceId: string | null): ReactNode {
   switch (view) {
     case "chat":
       return <ConversationView />;
     case "board":
-      return <BoardView />;
+      return <BoardView workspaceId={workspaceId} />;
     case "trace":
       return <TraceView />;
     case "git":
-      return <GitView />;
+      return <GitView workspaceId={workspaceId} />;
     case "approvals":
-      return <ApprovalsView />;
+      return <ApprovalsView workspaceId={workspaceId} />;
     case "scheduler":
-      return <SchedulerView />;
+      return <SchedulerView workspaceId={workspaceId} />;
     case "settings":
       return <SettingsView />;
     case "plugins":
