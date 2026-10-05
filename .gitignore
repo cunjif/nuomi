@@ -132,4 +132,5 @@ aidlc/diagnostics/
 
 .opencode/
 .codeartsdoer/
+.bugfix/
 *.log
