@@ -25,7 +25,7 @@ vi.mock("./monacoSetup", () => ({}));
 function renderTab(path: string): void {
   renderWithProviders(
     <>
-      <MonacoTab path={path} />
+      <MonacoTab path={path} workspaceId="ws-test" />
       <Toaster />
     </>,
   );
@@ -50,7 +50,7 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     fireEvent.change(editor, { target: { value: "hello nuomi" } });
     fireEvent.keyDown(editor.closest("section") as HTMLElement, { key: "s", ctrlKey: true });
 
-    await waitFor(() => expect(writeFile).toHaveBeenCalledWith("README.md", "hello nuomi"));
+    await waitFor(() => expect(writeFile).toHaveBeenCalledWith("README.md", "hello nuomi", "ws-test"));
     await screen.findByText("文件已保存");
   });
 
@@ -69,7 +69,7 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     fireEvent.change(ta, { target: { value: "hello nuomi" } });
     fireEvent.keyDown(ta, { key: "s", ctrlKey: true });
 
-    await waitFor(() => expect(writeFile).toHaveBeenCalledWith("notes.md", "hello nuomi"));
+    await waitFor(() => expect(writeFile).toHaveBeenCalledWith("notes.md", "hello nuomi", "ws-test"));
     await screen.findByText("文件已保存");
   });
 
@@ -88,7 +88,8 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     await screen.findByLabelText("editor");
     // Source mode is plain Monaco — no rendered markdown pane (需求: 源码不显示渲染).
     expect(screen.queryByTestId("markdown-preview")).toBeNull();
-    expect(screen.getByRole("button", { name: "大纲" })).toBeInTheDocument();
+    // Outline panel defaults to open (no toggle in source mode after header removal).
+    expect(screen.getByRole("navigation", { name: "大纲" })).toBeInTheDocument();
   });
 
   it("lands a pending cross-file jump in WYSIWYG mode (markdown never mounts Monaco)", async () => {
@@ -123,7 +124,7 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     fireEvent.click(screen.getByRole("button", { name: "源码" }));
     const editor = await screen.findByLabelText("editor");
     fireEvent.change(editor, { target: { value: "y" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存 (Ctrl+S)" }));
+    fireEvent.keyDown(editor.closest("section") as HTMLElement, { key: "s", ctrlKey: true });
 
     await screen.findByText(/路径越界/);
   });

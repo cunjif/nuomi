@@ -31,6 +31,7 @@ const MonacoEditor = lazy(async () => {
 
 interface MonacoTabProps {
   path: string;
+  workspaceId: string;
 }
 
 /**
@@ -49,14 +50,19 @@ interface MonacoTabProps {
  * we deliberately add no addCommand for them inside the editor — nothing in
  * this component may shadow the global handler.
  */
-export function MonacoTab({ path }: MonacoTabProps): ReactNode {
+export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   const { t } = useTranslation();
   const { theme } = useTheme();
   const qc = useQueryClient();
   const markDirty = useUiStore((s) => s.markDirty);
+  // Cross-workspace edit ref (ADR 0017): if this tab is a cross-ref, reads
+  // and writes go to the source workspace, not the hosting one.
+  const crossRef = useUiStore((s) => s.editorByWorkspace[workspaceId]?.crossRefs[path] ?? null);
+  const effectiveWsId = crossRef?.sourceWorkspaceId ?? workspaceId;
+  const effectivePath = crossRef?.sourcePath ?? path;
   // Re-render on registry changes so preview/outline swaps are live.
   useEditorExtVersion();
-  const fileQuery = useQuery({ queryKey: ["file", path], queryFn: () => ipc.readFile(path) });
+  const fileQuery = useQuery({ queryKey: ["file", effectiveWsId, effectivePath], queryFn: () => ipc.readFile(effectivePath, effectiveWsId) });
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? fileQuery.data ?? "";
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -104,11 +110,11 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
   }, [fileQuery.isLoading, fileQuery.isError, language, path, value, extVersion]);
 
   const saveMut = useMutation({
-    mutationFn: () => ipc.writeFile(path, value),
+    mutationFn: () => ipc.writeFile(effectivePath, value, effectiveWsId),
     onSuccess: () => {
       setDraft(null);
-      markDirty(path, false);
-      void qc.invalidateQueries({ queryKey: ["file", path] });
+      markDirty(path, false, workspaceId);
+      void qc.invalidateQueries({ queryKey: ["file", effectiveWsId, effectivePath] });
       // Keep the workspace code index fresh for definition/reference nav.
       updateFileIndex(path, value);
       toast.success(t("files.saved"));
@@ -148,7 +154,7 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
 
   const applyEdit = (next: string): void => {
     setDraft(next);
-    markDirty(path, next !== (fileQuery.data ?? ""));
+    markDirty(path, next !== (fileQuery.data ?? ""), workspaceId);
   };
 
   // WYSIWYG surface (markdown) never mounts Monaco, so it registers itself
@@ -355,15 +361,10 @@ export function MonacoTab({ path }: MonacoTabProps): ReactNode {
       onKeyDown={onKeyDown}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      {/* Source-mode header (breadcrumb + controls). WYSIWYG mode drops this
-      row — its controls ride on the format toolbar line (Typora-like). */}
-      {showEditor && (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ink-muted/30 px-2 py-1">
-          {/* Breadcrumb: file name only (用户截图); full path on hover. */}
-          <span className="truncate text-xs text-ink" title={path}>
-            {path.split(/[\\/]/).pop() ?? path}
-          </span>
-          <div className="flex shrink-0 items-center gap-1">{controls}</div>
+      {crossRef !== null && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-state-warn/30 bg-state-warn/10 px-2 py-0.5 text-xs text-state-warn">
+          <span aria-hidden="true">◆</span>
+          <span>跨工作区编辑 · 保存将回写源工作区原文件</span>
         </div>
       )}
       {/* WYSIWYG toolbar row spans the FULL tab width (format buttons left,
