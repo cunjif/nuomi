@@ -242,8 +242,9 @@ pub async fn resolve_approval(
 pub async fn list_dir(
     state: tauri::State<'_, AppState>,
     path: String,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::FileEntryDto>, IpcError> {
-    commands::impl_list_dir(&state, path).await
+    commands::impl_list_dir(&state, path, workspace_id).await
 }
 
 #[tauri::command]
@@ -251,8 +252,9 @@ pub async fn list_dir(
 pub async fn read_file(
     state: tauri::State<'_, AppState>,
     path: String,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    commands::impl_read_file(&state, path).await
+    commands::impl_read_file(&state, path, workspace_id).await
 }
 
 #[tauri::command]
@@ -261,8 +263,9 @@ pub async fn write_file(
     state: tauri::State<'_, AppState>,
     path: String,
     content: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_write_file(&state, path, content).await
+    commands::impl_write_file(&state, path, content, workspace_id).await
 }
 
 #[tauri::command]
@@ -271,8 +274,9 @@ pub async fn create_file(
     state: tauri::State<'_, AppState>,
     path: String,
     content: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_create_file(&state, path, content).await
+    commands::impl_create_file(&state, path, content, workspace_id).await
 }
 
 #[tauri::command]
@@ -280,8 +284,9 @@ pub async fn create_file(
 pub async fn create_dir(
     state: tauri::State<'_, AppState>,
     path: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_create_dir(&state, path).await
+    commands::impl_create_dir(&state, path, workspace_id).await
 }
 
 #[tauri::command]
@@ -289,8 +294,9 @@ pub async fn create_dir(
 pub async fn delete(
     state: tauri::State<'_, AppState>,
     path: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_delete(&state, path).await
+    commands::impl_delete(&state, path, workspace_id).await
 }
 
 #[tauri::command]
@@ -299,8 +305,9 @@ pub async fn rename(
     state: tauri::State<'_, AppState>,
     from: String,
     to: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_rename(&state, from, to).await
+    commands::impl_rename(&state, from, to, workspace_id).await
 }
 
 #[tauri::command]
@@ -309,16 +316,18 @@ pub async fn copy(
     state: tauri::State<'_, AppState>,
     from: String,
     to: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_copy(&state, from, to).await
+    commands::impl_copy(&state, from, to, workspace_id).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn git_status(
     state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::GitStatusDto>, IpcError> {
-    commands::impl_git_status(&state).await
+    commands::impl_git_status(&state, workspace_id).await
 }
 
 #[tauri::command]
@@ -326,8 +335,9 @@ pub async fn git_status(
 pub async fn git_log(
     state: tauri::State<'_, AppState>,
     limit: u32,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::GitCommitDto>, IpcError> {
-    commands::impl_git_log(&state, limit).await
+    commands::impl_git_log(&state, limit, workspace_id).await
 }
 
 #[tauri::command]
@@ -335,8 +345,9 @@ pub async fn git_log(
 pub async fn git_stage(
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_git_stage(&state, paths).await
+    commands::impl_git_stage(&state, paths, workspace_id).await
 }
 
 #[tauri::command]
@@ -344,8 +355,9 @@ pub async fn git_stage(
 pub async fn git_commit(
     state: tauri::State<'_, AppState>,
     message: String,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    commands::impl_git_commit(&state, message).await
+    commands::impl_git_commit(&state, message, workspace_id).await
 }
 
 #[tauri::command]
@@ -354,16 +366,18 @@ pub async fn git_push(
     state: tauri::State<'_, AppState>,
     remote: String,
     branch: String,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    commands::impl_git_push(&state, remote, branch).await
+    commands::impl_git_push(&state, remote, branch, workspace_id).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn git_worktrees(
     state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
 ) -> Result<Vec<commands::GitWorktreeDto>, IpcError> {
-    commands::impl_git_worktrees(&state).await
+    commands::impl_git_worktrees(&state, workspace_id).await
 }
 
 #[tauri::command]
@@ -372,14 +386,18 @@ pub async fn git_diff(
     state: tauri::State<'_, AppState>,
     path: String,
     staged: bool,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    commands::impl_git_diff(&state, path, staged).await
+    commands::impl_git_diff(&state, path, staged, workspace_id).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn git_staged_diff(state: tauri::State<'_, AppState>) -> Result<String, IpcError> {
-    commands::impl_git_staged_diff(&state).await
+pub async fn git_staged_diff(
+    state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<String, IpcError> {
+    commands::impl_git_staged_diff(&state, workspace_id).await
 }
 
 #[tauri::command]

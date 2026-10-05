@@ -336,6 +336,48 @@ impl AppState {
     pub fn git(&self) -> GitService {
         GitService::new(self.current_workspace())
     }
+
+    /// Resolves a `WorkspaceService` for an explicit workspace id (ADR 0017).
+    /// Returns the active workspace service when `workspace_id` is `None`
+    /// (backward-compatible with pre-ADR-0017 callers). Returns
+    /// `WorkspaceError::InvalidPath` when the id is unknown or its root
+    /// directory is missing.
+    pub fn workspace_for(&self, workspace_id: Option<&str>) -> CoreResult<WorkspaceService> {
+        match workspace_id {
+            Some(id) => {
+                let entry = self
+                    .workspace_registry
+                    .find_by_id(id)
+                    .map_err(|e| CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(e.to_string())))?
+                    .ok_or_else(|| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            id.to_string(),
+                        ))
+                    })?;
+                Ok(WorkspaceService::new(PathBuf::from(entry.root_path))?)
+            }
+            None => self.workspace(),
+        }
+    }
+
+    /// Resolves a `GitService` for an explicit workspace id (ADR 0017).
+    pub fn git_for(&self, workspace_id: Option<&str>) -> CoreResult<GitService> {
+        match workspace_id {
+            Some(id) => {
+                let entry = self
+                    .workspace_registry
+                    .find_by_id(id)
+                    .map_err(|e| CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(e.to_string())))?
+                    .ok_or_else(|| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            id.to_string(),
+                        ))
+                    })?;
+                Ok(GitService::new(PathBuf::from(entry.root_path)))
+            }
+            None => Ok(self.git()),
+        }
+    }
 }
 
 /// Maps a cancelled/panicked `spawn_blocking` task into a store-backed

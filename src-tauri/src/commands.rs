@@ -28,7 +28,7 @@ use nuomi_core::plugins::approval_gate;
 use nuomi_core::plugins::LoopRunResult;
 use nuomi_core::services::capability_router::RouteOutcome;
 use nuomi_core::services::parse_schedule;
-use nuomi_core::services::SeedReport;
+use nuomi_core::services::{GitService, SeedReport};
 use nuomi_core::services::{
     check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
     delete_and_nullify_role_refs, detect_missing_provider, emit_env_fallback,
@@ -1537,8 +1537,12 @@ pub async fn impl_resolve_approval(
 
 // ---------- workspace ----------
 
-pub async fn impl_list_dir(state: &AppState, path: String) -> Result<Vec<FileEntryDto>, IpcError> {
-    let ws = state.workspace()?;
+pub async fn impl_list_dir(
+    state: &AppState,
+    path: String,
+    workspace_id: Option<String>,
+) -> Result<Vec<FileEntryDto>, IpcError> {
+    let ws = state.workspace_for(workspace_id.as_deref())?;
     Ok(ws
         .list_dir(&path)?
         .into_iter()
@@ -1550,16 +1554,23 @@ pub async fn impl_list_dir(state: &AppState, path: String) -> Result<Vec<FileEnt
         .collect())
 }
 
-pub async fn impl_read_file(state: &AppState, path: String) -> Result<String, IpcError> {
-    Ok(state.workspace()?.read_file(&path)?)
+pub async fn impl_read_file(
+    state: &AppState,
+    path: String,
+    workspace_id: Option<String>,
+) -> Result<String, IpcError> {
+    Ok(state.workspace_for(workspace_id.as_deref())?.read_file(&path)?)
 }
 
 pub async fn impl_write_file(
     state: &AppState,
     path: String,
     content: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace()?.write_file_atomic(&path, &content)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .write_file_atomic(&path, &content)?;
     Ok(())
 }
 
@@ -1567,18 +1578,29 @@ pub async fn impl_create_file(
     state: &AppState,
     path: String,
     content: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace()?.create_file(&path, &content)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .create_file(&path, &content)?;
     Ok(())
 }
 
-pub async fn impl_create_dir(state: &AppState, path: String) -> Result<(), IpcError> {
-    state.workspace()?.create_dir(&path)?;
+pub async fn impl_create_dir(
+    state: &AppState,
+    path: String,
+    workspace_id: Option<String>,
+) -> Result<(), IpcError> {
+    state.workspace_for(workspace_id.as_deref())?.create_dir(&path)?;
     Ok(())
 }
 
-pub async fn impl_delete(state: &AppState, path: String) -> Result<(), IpcError> {
-    state.workspace()?.delete(&path)?;
+pub async fn impl_delete(
+    state: &AppState,
+    path: String,
+    workspace_id: Option<String>,
+) -> Result<(), IpcError> {
+    state.workspace_for(workspace_id.as_deref())?.delete(&path)?;
     Ok(())
 }
 
@@ -1586,8 +1608,11 @@ pub async fn impl_rename(
     state: &AppState,
     from: String,
     to: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace()?.rename(&from, &to)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .rename(&from, &to)?;
     Ok(())
 }
 
@@ -1595,16 +1620,22 @@ pub async fn impl_copy(
     state: &AppState,
     from: String,
     to: String,
+    workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace()?.copy(&from, &to)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .copy(&from, &to)?;
     Ok(())
 }
 
 // ---------- git ----------
 
-pub async fn impl_git_status(state: &AppState) -> Result<Vec<GitStatusDto>, IpcError> {
-    Ok(state
-        .git()
+pub async fn impl_git_status(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<Vec<GitStatusDto>, IpcError> {
+    let git = state.git_for(workspace_id.as_deref())?;
+    Ok(git
         .status()
         .await?
         .into_iter()
@@ -1616,9 +1647,13 @@ pub async fn impl_git_status(state: &AppState) -> Result<Vec<GitStatusDto>, IpcE
         .collect())
 }
 
-pub async fn impl_git_log(state: &AppState, limit: u32) -> Result<Vec<GitCommitDto>, IpcError> {
-    Ok(state
-        .git()
+pub async fn impl_git_log(
+    state: &AppState,
+    limit: u32,
+    workspace_id: Option<String>,
+) -> Result<Vec<GitCommitDto>, IpcError> {
+    let git = state.git_for(workspace_id.as_deref())?;
+    Ok(git
         .log(limit)
         .await?
         .into_iter()
@@ -1630,38 +1665,55 @@ pub async fn impl_git_log(state: &AppState, limit: u32) -> Result<Vec<GitCommitD
         .collect())
 }
 
-pub async fn impl_git_stage(state: &AppState, paths: Vec<String>) -> Result<(), IpcError> {
+pub async fn impl_git_stage(
+    state: &AppState,
+    paths: Vec<String>,
+    workspace_id: Option<String>,
+) -> Result<(), IpcError> {
     let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-    state.git().stage(&refs).await?;
+    state.git_for(workspace_id.as_deref())?.stage(&refs).await?;
     Ok(())
 }
 
-pub async fn impl_git_commit(state: &AppState, message: String) -> Result<String, IpcError> {
+pub async fn impl_git_commit(
+    state: &AppState,
+    message: String,
+    workspace_id: Option<String>,
+) -> Result<String, IpcError> {
     if message.trim().is_empty() {
         return Err(IpcError::new(
             "git.empty_message",
             "commit message must not be empty",
         ));
     }
-    Ok(state.git().commit(&message).await?)
+    Ok(state.git_for(workspace_id.as_deref())?.commit(&message).await?)
 }
 
 pub async fn impl_git_push(
     state: &AppState,
     remote: String,
     branch: String,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    Ok(state.git().push(&remote, &branch).await?)
+    Ok(state
+        .git_for(workspace_id.as_deref())?
+        .push(&remote, &branch)
+        .await?)
 }
 
-pub async fn impl_git_worktrees(state: &AppState) -> Result<Vec<GitWorktreeDto>, IpcError> {
-    Ok(state
-        .git()
+pub async fn impl_git_worktrees(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<Vec<GitWorktreeDto>, IpcError> {
+    let ws = state.workspace_for(workspace_id.as_deref())?;
+    let root_str = ws.root().to_string_lossy().to_string();
+    let git = GitService::new(ws.root().to_path_buf());
+    Ok(git
         .list_worktrees()
         .await?
         .into_iter()
         .map(|w| GitWorktreeDto {
-            is_current: w.path == state.current_workspace().to_string_lossy(),
+            is_current: w.path == root_str,
             path: w.path,
             head: w.head,
             branch: w.branch,
@@ -1673,19 +1725,24 @@ pub async fn impl_git_diff(
     state: &AppState,
     path: String,
     staged: bool,
+    workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    let out = state.git().diff_for_path(&path, staged).await?;
+    let git = state.git_for(workspace_id.as_deref())?;
+    let out = git.diff_for_path(&path, staged).await?;
     if out.trim().is_empty() {
         // Untracked files have no diff at all (they only ever appear in the
         // status list), so synthesize one against /dev/null. A tracked file
         // with an empty diff is not in the status list in the first place.
-        return Ok(state.git().diff_untracked(&path).await?);
+        return Ok(git.diff_untracked(&path).await?);
     }
     Ok(out)
 }
 
-pub async fn impl_git_staged_diff(state: &AppState) -> Result<String, IpcError> {
-    Ok(state.git().diff_staged().await?)
+pub async fn impl_git_staged_diff(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<String, IpcError> {
+    Ok(state.git_for(workspace_id.as_deref())?.diff_staged().await?)
 }
 
 // ---------- ai commit ----------
