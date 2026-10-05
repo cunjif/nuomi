@@ -31,7 +31,7 @@ beforeEach(() => {
   // leak a registration into the next one.
   registerActiveEditor(null, () => {});
   usePaletteStore.setState({ mode: null });
-  useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat", theme: "chalkboard-dark", dirtyPaths: {}, activeWorkspaceId: null, workspaceTabs: {} });
+  useUiStore.setState({ editorByWorkspace: {}, activeArea: "chat", theme: "chalkboard-dark", activeWorkspaceId: "ws-test" });
   localStorage.removeItem(THEME_STORAGE_KEY);
 });
 
@@ -54,7 +54,7 @@ describe("QuickOpen — Ctrl+P file quick open", () => {
 
     // Enter opens the selected file and closes the palette.
     fireEvent.keyDown(input, { key: "Enter", cancelable: true });
-    expect(useUiStore.getState().activeFile).toBe("README.md");
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.activeFile).toBe("README.md");
     expect(useUiStore.getState().activeArea).toBe("workbench");
     expect(screen.queryByTestId("quick-open")).toBeNull();
   });

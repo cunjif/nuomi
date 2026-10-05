@@ -12,7 +12,7 @@ interface WorkspaceEntryDto {
 }
 
 interface SplitViewProps {
-  renderWorkspace: (workspaceId: string) => React.ReactNode;
+  renderWorkspace: (workspaceId: string, paneIndex: number) => React.ReactNode;
 }
 
 export function SplitView({ renderWorkspace }: SplitViewProps) {
@@ -31,7 +31,7 @@ export function SplitView({ renderWorkspace }: SplitViewProps) {
   const leftWs = wsMap.get(leftId);
   const rightWs = wsMap.get(rightId);
 
-  const renderPane = (id: string, ws: WorkspaceEntryDto | undefined) => {
+  const renderPane = (id: string, ws: WorkspaceEntryDto | undefined, paneIndex: number) => {
     if (!ws || !ws.directoryPresent) {
       return (
         <div className="flex h-full items-center justify-center text-sm text-paper-muted">
@@ -42,44 +42,50 @@ export function SplitView({ renderWorkspace }: SplitViewProps) {
         </div>
       );
     }
-    return renderWorkspace(id);
+    return renderWorkspace(id, paneIndex);
+  };
+
+  const renderPaneHeader = (id: string, ws: WorkspaceEntryDto | undefined, side: "left" | "right"): React.ReactNode => {
+    const name = ws ? (ws.rootPath.split(/[/\\]/).pop() ?? id) : id;
+    return (
+      <div className="flex shrink-0 items-center gap-2 border-b border-paper-line/30 bg-paper-surface/50 px-2 py-1 text-xs">
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: ws ? `var(--color-${ws.colorTag})` : "var(--paper-muted)" }}
+          aria-hidden="true"
+        />
+        <span className="truncate font-medium text-paper-fg">{name}</span>
+        {ws && !ws.directoryPresent && <span className="text-state-warn">!</span>}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            void setLayoutMode("single");
+            void setSplitWorkspaceIds(null);
+            void focusWorkspace(id);
+          }}
+          className="ml-auto px-1.5 py-0.5 text-xs rounded bg-paper-bg/80 text-paper-muted hover:text-paper-fg"
+        >
+          {side === "left" ? "保留左侧" : "保留右侧"}
+        </button>
+      </div>
+    );
   };
 
   return (
     <div className="flex h-full w-full gap-px bg-paper-line/30">
       <div
-        className="flex-1 overflow-hidden bg-paper-bg relative group"
+        className="flex flex-1 flex-col overflow-hidden bg-paper-bg"
         onClick={() => void focusWorkspace(leftId)}
       >
-        {renderPane(leftId, leftWs)}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            void setLayoutMode("single");
-            void setSplitWorkspaceIds(null);
-            void focusWorkspace(leftId);
-          }}
-          className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-paper-bg/80 text-paper-muted opacity-0 group-hover:opacity-100 hover:text-paper-fg"
-        >
-          保留此侧
-        </button>
+        {renderPaneHeader(leftId, leftWs, "left")}
+        <div className="min-h-0 flex-1">{renderPane(leftId, leftWs, 0)}</div>
       </div>
       <div
-        className="flex-1 overflow-hidden bg-paper-bg relative group"
+        className="flex flex-1 flex-col overflow-hidden bg-paper-bg"
         onClick={() => void focusWorkspace(rightId)}
       >
-        {renderPane(rightId, rightWs)}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            void setLayoutMode("single");
-            void setSplitWorkspaceIds(null);
-            void focusWorkspace(rightId);
-          }}
-          className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-paper-bg/80 text-paper-muted opacity-0 group-hover:opacity-100 hover:text-paper-fg"
-        >
-          保留此侧
-        </button>
+        {renderPaneHeader(rightId, rightWs, "right")}
+        <div className="min-h-0 flex-1">{renderPane(rightId, rightWs, 1)}</div>
       </div>
     </div>
   );

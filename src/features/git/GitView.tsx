@@ -66,9 +66,9 @@ export function GitView(): ReactNode {
   const [remote, setRemote] = useState("origin");
   const [branch, setBranch] = useState("main");
 
-  const statusQuery = useQuery({ queryKey: ["git", "status"], queryFn: ipc.gitStatus });
+  const statusQuery = useQuery({ queryKey: ["git", "status"], queryFn: () => ipc.gitStatus() });
   const logQuery = useQuery({ queryKey: ["git", "log"], queryFn: () => ipc.gitLog(20) });
-  const worktreesQuery = useQuery({ queryKey: ["git", "worktrees"], queryFn: ipc.gitWorktrees });
+  const worktreesQuery = useQuery({ queryKey: ["git", "worktrees"], queryFn: () => ipc.gitWorktrees() });
 
   const activeEntry = statusQuery.data?.find((e) => e.path === activeFile) ?? null;
   const activeStaged = activeEntry ? isStaged(activeEntry.indexStatus) : false;

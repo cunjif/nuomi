@@ -162,6 +162,7 @@ export function Shell(): ReactNode {
   const activeArea = useUiStore((s) => s.activeArea);
   const openWorkspaceIds = useUiStore((s) => s.openWorkspaceIds);
   const layoutMode = useUiStore((s) => s.layoutMode);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   useGlobalNavShortcuts();
   useGlobalPaletteShortcuts();
   const queryClient = useQueryClient();
@@ -292,7 +293,7 @@ export function Shell(): ReactNode {
               as one continuous surface, so nothing separates them. */}
           <div className="mb-2 min-h-0 flex-1 overflow-hidden rounded-b-lg border-r border-b border-ink-muted/30 bg-surface-raised">
             <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
-              {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode })}
+              {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode, activeWorkspaceId })}
             </ErrorBoundary>
           </div>
         </main>
@@ -316,11 +317,13 @@ function renderMainContent({
   view,
   openWorkspaceIds,
   layoutMode,
+  activeWorkspaceId,
 }: {
   activeArea: string;
   view: View;
   openWorkspaceIds: string[];
   layoutMode: LayoutMode;
+  activeWorkspaceId: string | null;
 }): ReactNode {
   if (layoutMode === "overview") {
     return openWorkspaceIds.length === 0 ? <EmptyStateGuide /> : <OverviewGrid />;
@@ -329,14 +332,21 @@ function renderMainContent({
     if (openWorkspaceIds.length === 0) return <EmptyStateGuide />;
     return (
       <SplitView
-        renderWorkspace={() =>
-          activeArea === "workbench" ? <WorkbenchArea /> : renderView(view)
+        renderWorkspace={(wsId, paneIndex) =>
+          activeArea === "workbench" ? <WorkbenchArea workspaceId={wsId} paneIndex={paneIndex} /> : renderView(view)
         }
       />
     );
   }
   // layoutMode === "single"
-  return activeArea === "workbench" ? <WorkbenchArea /> : renderView(view);
+  if (activeArea === "workbench") {
+    return activeWorkspaceId !== null ? (
+      <WorkbenchArea workspaceId={activeWorkspaceId} />
+    ) : (
+      <EmptyStateGuide />
+    );
+  }
+  return renderView(view);
 }
 
 function renderView(view: View): ReactNode {

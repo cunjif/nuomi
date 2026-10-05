@@ -37,7 +37,7 @@ describe("GitView (SPEC D5/US5)", () => {
     expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /new\.txt/ }));
     fireEvent.click(screen.getByRole("button", { name: /stage/i }));
-    await waitFor(() => expect(stage).toHaveBeenCalledWith(["new.txt"]));
+    await waitFor(() => expect(stage).toHaveBeenCalledWith(["new.txt"], null));
   });
 
   it("commits with the typed message", async () => {
@@ -50,7 +50,7 @@ describe("GitView (SPEC D5/US5)", () => {
       target: { value: "fix(core): x" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^commit$/i }));
-    await waitFor(() => expect(commit).toHaveBeenCalledWith("fix(core): x"));
+    await waitFor(() => expect(commit).toHaveBeenCalledWith("fix(core): x", null));
   });
 
   it("pushes to the remote/branch inputs", async () => {
@@ -60,6 +60,6 @@ describe("GitView (SPEC D5/US5)", () => {
     renderWithProviders(<GitView />);
 
     fireEvent.click(await screen.findByRole("button", { name: /push/i }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("origin", "main"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("origin", "main", null));
   });
 });

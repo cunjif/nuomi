@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { measureAsync } from "../../lib/perf/metrics";
+import { useUiStore } from "../../lib/store/uiStore";
 
 interface CrossSearchOutcomeDto {
   groups: {
@@ -16,6 +17,10 @@ export function CrossSearchPanel() {
   const [matchContent, setMatchContent] = useState(false);
   const [result, setResult] = useState<CrossSearchOutcomeDto | null>(null);
   const [searching, setSearching] = useState(false);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const openFile = useUiStore((s) => s.openFile);
+  const registerCrossRef = useUiStore((s) => s.registerCrossRef);
+  const focusWorkspace = useUiStore((s) => s.focusWorkspace);
 
   const search = useCallback(async () => {
     if (!query.trim()) return;
@@ -31,6 +36,16 @@ export function CrossSearchPanel() {
       setSearching(false);
     }
   }, [query, matchContent]);
+
+  const handleOpenMatch = (sourceWorkspaceId: string, relativePath: string): void => {
+    if (activeWorkspaceId === null) return;
+    const targetWs = activeWorkspaceId;
+    void focusWorkspace(targetWs);
+    openFile(relativePath, targetWs);
+    if (sourceWorkspaceId !== targetWs) {
+      registerCrossRef(targetWs, relativePath, sourceWorkspaceId, relativePath);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-paper-bg">
@@ -74,12 +89,17 @@ export function CrossSearchPanel() {
             {group.matches.map((match, i) => (
               <div
                 key={i}
+                onClick={() => handleOpenMatch(group.workspaceId, match.relativePath)}
                 className="ml-6 py-0.5 text-sm text-paper-muted hover:text-paper-fg cursor-pointer"
+                title={activeWorkspaceId !== null ? `在当前工作区打开（来自 ${group.workspaceName}）` : "请先选择一个工作区"}
               >
                 {match.relativePath}
                 <span className="ml-2 text-xs text-paper-faint">
                   {match.matchType === "fileName" ? "文件名" : "内容"}
                 </span>
+                {activeWorkspaceId !== null && group.workspaceId !== activeWorkspaceId && (
+                  <span className="ml-2 text-xs text-paper-accent">↗ 拉到当前</span>
+                )}
               </div>
             ))}
           </div>

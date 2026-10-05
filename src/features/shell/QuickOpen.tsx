@@ -20,10 +20,13 @@ import { registerPaletteCommand, usePaletteCommands, type PaletteCommand } from 
 import { usePaletteStore } from "../../lib/store/paletteStore";
 import { THEME_STORAGE_KEY, nextTheme, useUiStore } from "../../lib/store/uiStore";
 import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "../../lib/ipc/client";
 
 const MAX_RESULTS = 50;
 
-type PaletteItem = { kind: "file"; path: string } | { kind: "command"; cmd: PaletteCommand };
+type PaletteItem =
+  | { kind: "file"; path: string; sourceWorkspaceId?: string; sourceWorkspaceName?: string }
+  | { kind: "command"; cmd: PaletteCommand };
 
 // ── builtin commands ─────────────────────────────────────────────────────
 
@@ -78,8 +81,9 @@ function registerBuiltinCommands(): void {
     id: "shell.closeFile",
     titleKey: "palette.cmd.closeFile",
     run: () => {
-      const { activeFile, closeFile } = ui();
-      if (activeFile !== null) closeFile(activeFile);
+      const { activeWorkspaceId, editorByWorkspace, closeFile } = ui();
+      const activeFile = activeWorkspaceId !== null ? (editorByWorkspace[activeWorkspaceId]?.activeFile ?? null) : null;
+      if (activeFile !== null && activeWorkspaceId !== null) closeFile(activeFile, activeWorkspaceId);
     },
   });
   // Workspace commands (task 8.2).
@@ -194,16 +198,26 @@ export function QuickOpen(): ReactNode {
   const mode = usePaletteStore((s) => s.mode);
   const close = usePaletteStore((s) => s.close);
   const openFile = useUiStore((s) => s.openFile);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const registerCrossRef = useUiStore((s) => s.registerCrossRef);
   const commands = usePaletteCommands();
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  const [scope, setScope] = useState<"current" | "all">("current");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const filesQuery = useQuery({
     queryKey: ["workspace-files"],
     queryFn: listWorkspaceFiles,
-    enabled: mode === "files",
+    enabled: mode === "files" && scope === "current",
     staleTime: 60_000,
+  });
+
+  const crossQuery = useQuery({
+    queryKey: ["cross-workspace-files", query],
+    queryFn: () => ipc.crossWorkspaceSearch(query, false),
+    enabled: mode === "files" && scope === "all" && query.trim().length > 0,
+    staleTime: 30_000,
   });
 
   // Reset per open and per keystroke (VSCode resets selection on type).
@@ -218,6 +232,24 @@ export function QuickOpen(): ReactNode {
 
   const items = useMemo<PaletteItem[]>(() => {
     if (mode === "files") {
+      if (scope === "all") {
+        const groups = crossQuery.data?.groups ?? [];
+        const q = query.trim().toLowerCase();
+        const results: PaletteItem[] = [];
+        for (const group of groups) {
+          for (const match of group.matches) {
+            if (q === "" || match.relativePath.toLowerCase().includes(q)) {
+              results.push({
+                kind: "file",
+                path: match.relativePath,
+                sourceWorkspaceId: group.workspaceId,
+                sourceWorkspaceName: group.workspaceName,
+              });
+            }
+          }
+        }
+        return results.slice(0, MAX_RESULTS);
+      }
       const paths = filesQuery.data ?? [];
       const q = query.trim().toLowerCase();
       if (q === "") return paths.slice(0, MAX_RESULTS).map((path) => ({ kind: "file" as const, path }));
@@ -240,14 +272,19 @@ export function QuickOpen(): ReactNode {
         .map((cmd) => ({ kind: "command" as const, cmd }));
     }
     return [];
-  }, [mode, filesQuery.data, query, commands, t]);
+  }, [mode, filesQuery.data, crossQuery.data, scope, query, commands, t]);
 
   const clampedIdx = Math.min(activeIdx, Math.max(0, items.length - 1));
 
   const runItem = (item: PaletteItem): void => {
     close();
-    if (item.kind === "file") openFile(item.path);
-    else item.cmd.run();
+    if (item.kind === "file" && activeWorkspaceId !== null) {
+      const sourceWs = item.sourceWorkspaceId ?? activeWorkspaceId;
+      openFile(item.path, activeWorkspaceId);
+      if (item.sourceWorkspaceId !== undefined && item.sourceWorkspaceId !== activeWorkspaceId) {
+        registerCrossRef(activeWorkspaceId, item.path, sourceWs, item.path);
+      }
+    } else if (item.kind === "command") item.cmd.run();
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
@@ -296,6 +333,30 @@ export function QuickOpen(): ReactNode {
           placeholder={mode === "files" ? t("palette.filePlaceholder") : t("palette.commandPlaceholder")}
           className="w-full border-b border-ink-muted/30 bg-transparent px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted"
         />
+        {mode === "files" && (
+          <div className="flex items-center gap-1 border-b border-ink-muted/30 px-2 py-1 text-[11px]">
+            <button
+              type="button"
+              data-testid="scope-current"
+              onClick={() => setScope("current")}
+              className={`rounded px-2 py-0.5 ${
+                scope === "current" ? "bg-surface-overlay text-ink" : "text-ink-muted hover:bg-surface-overlay/50"
+              }`}
+            >
+              {t("palette.scopeCurrent")}
+            </button>
+            <button
+              type="button"
+              data-testid="scope-all"
+              onClick={() => setScope("all")}
+              className={`rounded px-2 py-0.5 ${
+                scope === "all" ? "bg-surface-overlay text-ink" : "text-ink-muted hover:bg-surface-overlay/50"
+              }`}
+            >
+              {t("palette.scopeAll")}
+            </button>
+          </div>
+        )}
         <ul role="listbox" aria-label={t("palette.filePlaceholder")} className="max-h-80 overflow-y-auto p-1">
           {items.length === 0 && (
             <li className="px-2 py-3 text-center text-xs text-ink-muted" role="option" aria-selected={false}>
@@ -317,7 +378,14 @@ export function QuickOpen(): ReactNode {
                   }`}
                 >
                   <span className="truncate">{item.path.split(/[\\/]/).pop() ?? item.path}</span>
-                  <span className="shrink-0 truncate font-mono text-[10px] opacity-70">{item.path}</span>
+                  <span className="flex shrink-0 items-center gap-2 truncate font-mono text-[10px] opacity-70">
+                    {item.sourceWorkspaceName !== undefined && (
+                      <span className="rounded bg-surface-overlay/60 px-1 text-ink-muted">
+                        {item.sourceWorkspaceName}
+                      </span>
+                    )}
+                    {item.path}
+                  </span>
                 </button>
               </li>
             ) : (
