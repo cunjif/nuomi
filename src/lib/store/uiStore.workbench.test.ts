@@ -1,7 +1,7 @@
 /**
  * uiStore workbench-specific tests: activeArea semantics, openFile triggers
  * workbench, setView releases workbench (spec 5.3 — workbench navigation
- * state).
+ * state). Per-ADR-0017 editor state is bucketed by workspace id.
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubLocalStorage } from "../../test/stubStorage";
@@ -14,11 +14,8 @@ beforeEach(() => {
     activeArea: "chat",
     theme: "chalkboard-dark",
     selectedSessionId: null,
-    openFiles: [],
-    activeFile: null,
-    dirtyPaths: {},
+    editorByWorkspace: {},
     activeWorkspaceId: null,
-    workspaceTabs: {},
   });
 });
 
@@ -37,22 +34,29 @@ describe("uiStore workbench — activeArea semantics", () => {
 
 describe("uiStore workbench — openFile triggers workbench", () => {
   it("openFile sets activeArea=workbench", () => {
-    useUiStore.getState().openFile("src/main.rs");
+    useUiStore.getState().openFile("src/main.rs", "ws-a");
     expect(useUiStore.getState().activeArea).toBe("workbench");
-    expect(useUiStore.getState().activeFile).toBe("src/main.rs");
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.activeFile).toBe("src/main.rs");
   });
 
-  it("openFile appends to openFiles if not already open", () => {
-    useUiStore.setState({ openFiles: ["a.ts"], activeFile: "a.ts" });
-    useUiStore.getState().openFile("b.ts");
-    expect(useUiStore.getState().openFiles).toEqual(["a.ts", "b.ts"]);
-    expect(useUiStore.getState().activeFile).toBe("b.ts");
+  it("openFile appends to the workspace bucket if not already open", () => {
+    useUiStore.getState().openFile("a.ts", "ws-a");
+    useUiStore.getState().openFile("b.ts", "ws-a");
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.openFiles).toEqual(["a.ts", "b.ts"]);
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.activeFile).toBe("b.ts");
   });
 
   it("openFile does not duplicate an already-open file", () => {
-    useUiStore.setState({ openFiles: ["a.ts"], activeFile: "a.ts" });
-    useUiStore.getState().openFile("a.ts");
-    expect(useUiStore.getState().openFiles).toEqual(["a.ts"]);
+    useUiStore.getState().openFile("a.ts", "ws-a");
+    useUiStore.getState().openFile("a.ts", "ws-a");
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.openFiles).toEqual(["a.ts"]);
+  });
+
+  it("openFile in different workspaces are independent buckets", () => {
+    useUiStore.getState().openFile("a.ts", "ws-a");
+    useUiStore.getState().openFile("c.ts", "ws-b");
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.openFiles).toEqual(["a.ts"]);
+    expect(useUiStore.getState().editorByWorkspace["ws-b"]?.openFiles).toEqual(["c.ts"]);
   });
 });
 
@@ -74,57 +78,23 @@ describe("uiStore workbench — selectSession returns to chat", () => {
   });
 });
 
-describe("uiStore workbench — switchWorkspace tab save/restore", () => {
-  it("saves current workspace tabs and restores target tabs on switch", () => {
-    useUiStore.setState({
-      activeWorkspaceId: "ws-a",
-      openFiles: ["src/a.ts", "src/b.ts"],
-      activeFile: "src/b.ts",
-      workspaceTabs: {
-        "ws-b": { openFiles: ["lib/c.ts"], activeFile: "lib/c.ts" },
-      },
-    });
+describe("uiStore workbench — switchWorkspace preserves per-workspace buckets", () => {
+  it("switching only flips activeWorkspaceId; each bucket is independently retained", () => {
+    useUiStore.getState().openFile("src/a.ts", "ws-a");
+    useUiStore.getState().openFile("src/b.ts", "ws-a");
+    useUiStore.getState().openFile("lib/c.ts", "ws-b");
+    useUiStore.setState({ activeWorkspaceId: "ws-a" });
 
     useUiStore.getState().switchWorkspace("ws-b");
 
-    // ws-a's tabs were saved.
-    expect(useUiStore.getState().workspaceTabs["ws-a"]).toEqual({
-      openFiles: ["src/a.ts", "src/b.ts"],
-      activeFile: "src/b.ts",
-    });
-    // ws-b's tabs were restored.
-    expect(useUiStore.getState().openFiles).toEqual(["lib/c.ts"]);
-    expect(useUiStore.getState().activeFile).toBe("lib/c.ts");
+    // ws-a's bucket is untouched (preserved in-place — the bucket IS the state).
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.openFiles).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+    // ws-b's bucket is also intact.
+    expect(useUiStore.getState().editorByWorkspace["ws-b"]?.openFiles).toEqual(["lib/c.ts"]);
     expect(useUiStore.getState().activeWorkspaceId).toBe("ws-b");
-  });
-
-  it("starts fresh when the target has no saved tabs", () => {
-    useUiStore.setState({
-      activeWorkspaceId: "ws-a",
-      openFiles: ["src/a.ts"],
-      activeFile: "src/a.ts",
-      workspaceTabs: {},
-    });
-
-    useUiStore.getState().switchWorkspace("ws-c");
-
-    expect(useUiStore.getState().openFiles).toEqual([]);
-    expect(useUiStore.getState().activeFile).toBeNull();
-  });
-
-  it("does not save tabs when no workspace was active", () => {
-    useUiStore.setState({
-      activeWorkspaceId: null,
-      openFiles: ["src/x.ts"],
-      activeFile: "src/x.ts",
-      workspaceTabs: {},
-    });
-
-    useUiStore.getState().switchWorkspace("ws-d");
-
-    expect(useUiStore.getState().workspaceTabs).toEqual({});
-    expect(useUiStore.getState().openFiles).toEqual([]);
-    expect(useUiStore.getState().activeWorkspaceId).toBe("ws-d");
   });
 
   it("setActiveWorkspaceId updates the active workspace id", () => {

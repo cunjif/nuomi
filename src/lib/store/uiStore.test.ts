@@ -76,10 +76,10 @@ describe("uiStore activeArea navigation state (需求 5)", () => {
   });
 
   it("openFile switches to workbench area", () => {
-    useUiStore.setState({ openFiles: [], activeFile: null, activeArea: "chat" });
-    useUiStore.getState().openFile("src/main.rs");
+    useUiStore.setState({ editorByWorkspace: {}, activeArea: "chat" });
+    useUiStore.getState().openFile("src/main.rs", "ws-test");
     expect(useUiStore.getState().activeArea).toBe("workbench");
-    expect(useUiStore.getState().activeFile).toBe("src/main.rs");
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.activeFile).toBe("src/main.rs");
   });
 
   it("selecting a session returns to the chat area", () => {
@@ -103,24 +103,26 @@ describe("uiStore activeArea navigation state (需求 5)", () => {
 
 describe("uiStore dirtyPaths tracking", () => {
   it("markDirty toggles a path and no-ops on redundant updates", () => {
-    useUiStore.setState({ dirtyPaths: {} });
+    useUiStore.setState({ editorByWorkspace: {} });
     const { markDirty } = useUiStore.getState();
-    markDirty("a.ts", true);
-    expect(useUiStore.getState().dirtyPaths["a.ts"]).toBe(true);
+    markDirty("a.ts", true, "ws-test");
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.dirtyPaths["a.ts"]).toBe(true);
     // Redundant set returns the same state object (no subscriber churn).
     const before = useUiStore.getState();
-    markDirty("a.ts", true);
+    markDirty("a.ts", true, "ws-test");
     expect(useUiStore.getState()).toBe(before);
-    markDirty("a.ts", false);
-    expect(useUiStore.getState().dirtyPaths).toEqual({});
+    markDirty("a.ts", false, "ws-test");
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.dirtyPaths).toEqual({});
   });
 
   it("closeFile drops the dirty entry for the closed tab", () => {
-    useUiStore.setState({ openFiles: ["a.ts", "b.ts"], activeFile: "b.ts", dirtyPaths: {} });
+    useUiStore.setState({ editorByWorkspace: {} });
     const s = useUiStore.getState();
-    s.markDirty("b.ts", true);
-    s.closeFile("b.ts");
-    expect(useUiStore.getState().dirtyPaths["b.ts"]).toBeUndefined();
-    expect(useUiStore.getState().openFiles).toEqual(["a.ts"]);
+    s.openFile("a.ts", "ws-test");
+    s.openFile("b.ts", "ws-test");
+    s.markDirty("b.ts", true, "ws-test");
+    s.closeFile("b.ts", "ws-test");
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.dirtyPaths["b.ts"]).toBeUndefined();
+    expect(useUiStore.getState().editorByWorkspace["ws-test"]?.openFiles).toEqual(["a.ts"]);
   });
 });

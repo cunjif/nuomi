@@ -64,10 +64,35 @@ export function resolveInitialTheme(): Theme {
   return "chalkboard-dark";
 }
 
-/** Per-workspace editor tab snapshot, saved on switch and restored on return. */
-interface WorkspaceTabSnapshot {
+/** Per-workspace editor state bucket (ADR 0017). Keyed by workspace id in
+ * `editorByWorkspace`. Each workspace owns an independent set of open files,
+ * selection, clipboard, dirtiness, and cross-workspace edit references. */
+interface WorkspaceEditorState {
   openFiles: string[];
   activeFile: string | null;
+  selectedPaths: string[];
+  lastSelectedPath: string | null;
+  clipboardPaths: string[];
+  clipboardMode: "copy" | "cut" | null;
+  dirtyPaths: Record<string, boolean>;
+  /** Cross-workspace edit refs (ADR 0017): key = local tab path (relative to
+   * this workspace), value = where the file actually lives. Reads/writes go
+   * to the source workspace; the local path is only the tab label. */
+  crossRefs: Record<string, { sourceWorkspaceId: string; sourcePath: string }>;
+}
+
+/** Empty editor bucket for a freshly opened workspace. */
+function emptyEditorState(): WorkspaceEditorState {
+  return {
+    openFiles: [],
+    activeFile: null,
+    selectedPaths: [],
+    lastSelectedPath: null,
+    clipboardPaths: [],
+    clipboardMode: null,
+    dirtyPaths: {},
+    crossRefs: {},
+  };
 }
 
 /** Layout mode for the main content area. */
@@ -84,26 +109,11 @@ interface UiState {
    * never reorders (ephemeral UI state, not persisted).
    */
   openSessionIds: string[];
-  openFiles: string[];
-  activeFile: string | null;
-  /**
-   * Selected node paths in the file tree panel (multi-select via Ctrl/Shift).
-   * Independent from `openFiles`/`activeFile` — selection is a transient
-   * highlight state, not "opened in editor".
-   */
-  selectedPaths: string[];
-  /** Anchor for Shift range selection (the last single-clicked node). */
-  lastSelectedPath: string | null;
-  /** Clipboard for copy/cut operations within the file tree. */
-  clipboardPaths: string[];
-  clipboardMode: "copy" | "cut" | null;
+  /** Per-workspace editor state buckets (ADR 0017). Keyed by workspace id. */
+  editorByWorkspace: Record<string, WorkspaceEditorState>;
   runDrawerTaskId: string | null;
-  /** Volatile per-file edit dirtiness keyed by path (content itself lives in the Query cache). */
-  dirtyPaths: Record<string, boolean>;
   /** Currently active workspace id (mirrors the backend active workspace). */
   activeWorkspaceId: string | null;
-  /** Per-workspace editor tab snapshots, keyed by workspace id. */
-  workspaceTabs: Record<string, WorkspaceTabSnapshot>;
   /** Open workspace ids ordered by most-recently-focused. */
   openWorkspaceIds: string[];
   /** Focused workspace id (the one the user is currently interacting with). */
@@ -133,23 +143,36 @@ interface UiState {
    * in openSessionIds, so clicking a chip never shuffles the strip.
    */
   activateChatTab: (sessionId: string) => void;
-  openFile: (path: string) => void;
-  closeFile: (path: string) => void;
-  setActiveFile: (path: string) => void;
-  setSelectedPaths: (paths: string[]) => void;
-  toggleSelected: (path: string) => void;
-  selectRange: (from: string, to: string, visiblePaths: string[]) => void;
-  clearSelection: () => void;
-  setClipboard: (paths: string[], mode: "copy" | "cut") => void;
-  clearClipboard: () => void;
+  /** Opens a file in the given workspace's editor bucket (ADR 0017). */
+  openFile: (path: string, workspaceId: string) => void;
+  /** Closes a file in the given workspace's editor bucket. */
+  closeFile: (path: string, workspaceId: string) => void;
+  /** Sets the active file within the given workspace's bucket. */
+  setActiveFile: (path: string, workspaceId: string) => void;
+  setSelectedPaths: (paths: string[], workspaceId: string) => void;
+  toggleSelected: (path: string, workspaceId: string) => void;
+  selectRange: (from: string, to: string, visiblePaths: string[], workspaceId: string) => void;
+  clearSelection: (workspaceId: string) => void;
+  setClipboard: (paths: string[], mode: "copy" | "cut", workspaceId: string) => void;
+  clearClipboard: (workspaceId: string) => void;
   setRunDrawerTask: (taskId: string | null) => void;
-  markDirty: (path: string, dirty: boolean) => void;
+  markDirty: (path: string, dirty: boolean, workspaceId: string) => void;
+  /** Records a cross-workspace edit ref (ADR 0017): the tab at `localPath`
+   *  in `workspaceId` actually lives at `sourcePath` in `sourceWorkspaceId`. */
+  registerCrossRef: (
+    workspaceId: string,
+    localPath: string,
+    sourceWorkspaceId: string,
+    sourcePath: string,
+  ) => void;
+  /** Looks up the cross-workspace ref for a tab, if any. */
+  crossRefFor: (workspaceId: string, path: string) => { sourceWorkspaceId: string; sourcePath: string } | null;
   /** Sets the active workspace id (called after IPC activate/add succeeds). */
   setActiveWorkspaceId: (id: string | null) => void;
   /**
-   * Saves the current workspace's editor tabs, clears the tab bar, then
-   * restores the target workspace's previously saved tabs (or starts fresh
-   * if none were saved).
+   * Switches the active workspace. Per-workspace editor state lives in
+   * `editorByWorkspace` buckets, so switching only flips `activeWorkspaceId`
+   * — each workspace's tabs/selection are independently preserved (ADR 0017).
    */
   switchWorkspace: (workspaceId: string) => void;
   /** Opens a workspace (adds to open set + focuses). Calls IPC openWorkspace. */
@@ -170,22 +193,15 @@ interface UiState {
   syncFromOpenSet: () => Promise<void>;
 }
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   view: "chat",
   activeArea: "chat",
   theme: resolveInitialTheme(),
   selectedSessionId: null,
   openSessionIds: [],
-  openFiles: [],
-  activeFile: null,
-  selectedPaths: [],
-  lastSelectedPath: null,
-  clipboardPaths: [],
-  clipboardMode: null,
+  editorByWorkspace: {},
   runDrawerTaskId: null,
-  dirtyPaths: {},
   activeWorkspaceId: null,
-  workspaceTabs: {},
   openWorkspaceIds: [],
   focusedWorkspaceId: null,
   pinnedWorkspaceIds: [],
@@ -238,83 +254,167 @@ export const useUiStore = create<UiState>((set) => ({
       // Activation never reorders: the chip keeps the slot it was opened in.
       return { selectedSessionId: sessionId };
     }),
-  openFile: (path) =>
-    set((s) => ({
-      openFiles: s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path],
-      activeFile: path,
-      // Opening a workspace file reveals the workbench area (nav rework:
-      // the editor is the workbench surface).
-      activeArea: "workbench",
-    })),
-  closeFile: (path) =>
+  openFile: (path, workspaceId) =>
     set((s) => {
-      const openFiles = s.openFiles.filter((p) => p !== path);
-      const dirtyPaths = { ...s.dirtyPaths };
-      delete dirtyPaths[path];
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      const openFiles = bucket.openFiles.includes(path)
+        ? bucket.openFiles
+        : [...bucket.openFiles, path];
       return {
-        openFiles,
-        dirtyPaths,
-        activeFile:
-          s.activeFile === path ? (openFiles.at(-1) ?? null) : s.activeFile,
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, openFiles, activeFile: path },
+        },
+        // Opening a workspace file reveals the workbench area (nav rework:
+        // the editor is the workbench surface).
+        activeArea: "workbench",
       };
     }),
-  setActiveFile: (path) => set({ activeFile: path }),
-  setSelectedPaths: (paths) =>
-    set({
-      selectedPaths: paths,
-      lastSelectedPath: paths.length > 0 ? paths[paths.length - 1] : null,
-    }),
-  toggleSelected: (path) =>
+  closeFile: (path, workspaceId) =>
     set((s) => {
-      const selectedPaths = s.selectedPaths.includes(path)
-        ? s.selectedPaths.filter((p) => p !== path)
-        : [...s.selectedPaths, path];
-      return { selectedPaths, lastSelectedPath: path };
+      const bucket = s.editorByWorkspace[workspaceId];
+      if (!bucket) return s;
+      const openFiles = bucket.openFiles.filter((p) => p !== path);
+      const dirtyPaths = { ...bucket.dirtyPaths };
+      delete dirtyPaths[path];
+      const activeFile =
+        bucket.activeFile === path ? (openFiles.at(-1) ?? null) : bucket.activeFile;
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, openFiles, dirtyPaths, activeFile },
+        },
+      };
     }),
-  selectRange: (from, to, visiblePaths) =>
-    set(() => {
+  setActiveFile: (path, workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, activeFile: path },
+        },
+      };
+    }),
+  setSelectedPaths: (paths, workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: {
+            ...bucket,
+            selectedPaths: paths,
+            lastSelectedPath: paths.length > 0 ? (paths[paths.length - 1] ?? null) : null,
+          },
+        },
+      };
+    }),
+  toggleSelected: (path, workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      const selectedPaths = bucket.selectedPaths.includes(path)
+        ? bucket.selectedPaths.filter((p) => p !== path)
+        : [...bucket.selectedPaths, path];
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, selectedPaths, lastSelectedPath: path },
+        },
+      };
+    }),
+  selectRange: (from, to, visiblePaths, workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
       const fromIdx = visiblePaths.indexOf(from);
       const toIdx = visiblePaths.indexOf(to);
-      if (fromIdx === -1 || toIdx === -1) return { selectedPaths: [to] };
+      if (fromIdx === -1 || toIdx === -1) {
+        return {
+          editorByWorkspace: {
+            ...s.editorByWorkspace,
+            [workspaceId]: { ...bucket, selectedPaths: [to] },
+          },
+        };
+      }
       const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
-      return { selectedPaths: visiblePaths.slice(lo, hi + 1) };
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, selectedPaths: visiblePaths.slice(lo, hi + 1) },
+        },
+      };
     }),
-  clearSelection: () => set({ selectedPaths: [], lastSelectedPath: null }),
-  setClipboard: (paths, mode) => set({ clipboardPaths: paths, clipboardMode: mode }),
-  clearClipboard: () => set({ clipboardPaths: [], clipboardMode: null }),
+  clearSelection: (workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId];
+      if (!bucket) return s;
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, selectedPaths: [], lastSelectedPath: null },
+        },
+      };
+    }),
+  setClipboard: (paths, mode, workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, clipboardPaths: paths, clipboardMode: mode },
+        },
+      };
+    }),
+  clearClipboard: (workspaceId) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId];
+      if (!bucket) return s;
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, clipboardPaths: [], clipboardMode: null },
+        },
+      };
+    }),
   setRunDrawerTask: (taskId) => set({ runDrawerTaskId: taskId }),
   // No-op when the flag already matches so per-keystroke onChange calls don't
   // churn subscribers.
-  markDirty: (path, dirty) =>
+  markDirty: (path, dirty, workspaceId) =>
     set((s) => {
-      if ((s.dirtyPaths[path] ?? false) === dirty) return s;
-      const dirtyPaths = { ...s.dirtyPaths };
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      if ((bucket.dirtyPaths[path] ?? false) === dirty) return s;
+      const dirtyPaths = { ...bucket.dirtyPaths };
       if (dirty) dirtyPaths[path] = true;
       else delete dirtyPaths[path];
-      return { dirtyPaths };
-    }),
-  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
-  switchWorkspace: (workspaceId) =>
-    set((s) => {
-      const workspaceTabs = { ...s.workspaceTabs };
-      // Save the current workspace's editor tab snapshot.
-      if (s.activeWorkspaceId) {
-        workspaceTabs[s.activeWorkspaceId] = {
-          openFiles: s.openFiles,
-          activeFile: s.activeFile,
-        };
-      }
-      // Restore the target workspace's saved tabs (or start fresh).
-      const snapshot = workspaceTabs[workspaceId];
-      const openFiles = snapshot?.openFiles ?? [];
-      const activeFile = snapshot?.activeFile ?? null;
       return {
-        activeWorkspaceId: workspaceId,
-        openFiles,
-        activeFile,
-        workspaceTabs,
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, dirtyPaths },
+        },
       };
     }),
+  registerCrossRef: (workspaceId, localPath, sourceWorkspaceId, sourcePath) =>
+    set((s) => {
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: {
+            ...bucket,
+            crossRefs: {
+              ...bucket.crossRefs,
+              [localPath]: { sourceWorkspaceId, sourcePath },
+            },
+          },
+        },
+      };
+    }),
+  crossRefFor: (workspaceId, path) => {
+    const bucket = get().editorByWorkspace[workspaceId];
+    return bucket?.crossRefs[path] ?? null;
+  },
+  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
+  switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId }),
   openWorkspace: async (id) => {
     await measureAsync("workspace.open", () => invoke("open_workspace", { id }), { workspaceId: id });
     set((s) => ({
