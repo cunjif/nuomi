@@ -151,3 +151,45 @@ detectIsolationViolations(): Promise<IsolationViolationDto[]>
 
 - 所有新增字段在 TS bindings 中为可选（`?:`）或 `| null`，支持旧前端降级。
 - 存量命令（`getWorkspace` / `setWorkspace` / `activateWorkspace` / `getActiveWorkspace`）保持不变，内部委托到多工作区模型。
+
+## 带 workspaceId 的文件操作（ADR 0017）
+
+多工作区文件编辑面板要求文件操作能定位到具体工作区。以下命令新增可选参数 `workspace_id: Option<String>`：
+
+- `None` 时回退到 `active_workspace_id`（向后兼容单工作区调用）。
+- `Some(id)` 时通过 `AppState::workspace_for(workspace_id)` 解析对应 `WorkspaceEntry` 的 `root_path` 作为沙箱根。
+
+### 文件操作族
+
+```typescript
+listDir(path: string, workspaceId?: string): Promise<DirEntry[]>
+readFile(path: string, workspaceId?: string): Promise<string>
+writeFile(path: string, content: string, workspaceId?: string): Promise<null>
+createFile(path: string, content: string, workspaceId?: string): Promise<null>
+createDir(path: string, workspaceId?: string): Promise<null>
+delete(path: string, workspaceId?: string): Promise<null>
+rename(oldPath: string, newPath: string, workspaceId?: string): Promise<null>
+copy(oldPath: string, newPath: string, workspaceId?: string): Promise<null>
+```
+
+### Git 操作族
+
+```typescript
+gitStatus(workspaceId?: string): Promise<GitStatusDto>
+gitLog(limit: number, workspaceId?: string): Promise<GitLogEntry[]>
+gitStage(paths: string[], workspaceId?: string): Promise<null>
+gitCommit(message: string, workspaceId?: string): Promise<null>
+gitPush(remote: string, branch: string, workspaceId?: string): Promise<null>
+gitWorktrees(workspaceId?: string): Promise<WorktreeDto[]>
+gitDiff(path: string, workspaceId?: string): Promise<string>
+gitStagedDiff(workspaceId?: string): Promise<string>
+```
+
+### 跨工作区编辑回写
+
+当用户在 A 工作区打开了来自 B 工作区的文件（经 `crossWorkspaceSearch` 拉到当前打开），`uiStore.registerCrossRef(workspaceId=A, localPath, sourceWorkspaceId=B, sourcePath)` 记录映射。MonacoTab 读取/保存时使用 `effectiveWsId` / `effectivePath`（优先 crossRef 的 source 值），确保内容回写到源工作区 B 的原文件，而非 A 工作区沙箱。
+
+### 脏文件关闭确认
+
+- **单文件级**：`FileTabs` 的 × 按钮两步确认（第一次点 × 显示"确认关闭/取消"，第二次确认才执行 `closeFile`）。
+- **工作区级**：`WorkspaceTabBar` 的关闭按钮先检查 `editorByWorkspace[id].dirtyPaths`，若有脏文件则弹 Dialog 列出文件名，用户"强制关闭"后调 `closeWorkspace(id, force=true)`，否则直接 `closeWorkspace(id, force=false)`。
