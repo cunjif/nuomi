@@ -318,7 +318,8 @@ export function requestOpenSymbol(path: string, line: number): void {
     return;
   }
   pendingJump = { path, line };
-  useUiStore.getState().openFile(path);
+  const s = useUiStore.getState();
+  if (s.activeWorkspaceId !== null) s.openFile(path, s.activeWorkspaceId);
 }
 
 /** MonacoTab consumes the jump targeted at its file once mounted. */

@@ -13,6 +13,7 @@ import { ExtensionsPanel } from "../../lib/editor-ext/ExtensionsPanel";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { MonacoTab } from "./MonacoTab";
+import { WorkspaceBottomBar } from "./WorkspaceBottomBar";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
 import { useUiStore } from "../../lib/store/uiStore";
 
@@ -79,23 +80,23 @@ export function EditorToolbar(): ReactNode {
  * scrolls — every panel owns exactly one scroll container and every flex
  * ancestor carries min-h-0 so the inner heights are definite.
  */
-export function EditorArea(): ReactNode {
+export function EditorArea({ workspaceId, paneIndex }: { workspaceId: string; paneIndex?: number }): ReactNode {
   const { t } = useTranslation();
-  const openFiles = useUiStore((s) => s.openFiles);
-  const activeFile = useUiStore((s) => s.activeFile);
+  const openFiles = useUiStore((s) => s.editorByWorkspace[workspaceId]?.openFiles ?? []);
+  const activeFile = useUiStore((s) => s.editorByWorkspace[workspaceId]?.activeFile ?? null);
 
   return (
     <section aria-label={t("files.treeLabel")} className="flex h-full min-h-0 flex-1 flex-col bg-surface-raised">
       {/* Open-file tab strip: directly below the 对话|文件编辑 nav row
       (用户布局), spanning the editor panel. */}
-      {openFiles.length > 0 && <FileTabs />}
+      {openFiles.length > 0 && <FileTabs workspaceId={workspaceId} />}
       <div className="flex min-h-0 flex-1">
         {/* Editor column: Monaco header/body/status live inside MonacoTab;
         the column itself never scrolls (Monaco owns its own viewport).
         Overlays (extension floating panels) anchor here. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {activeFile !== null && openFiles.includes(activeFile) ? (
-            <MonacoTab key={activeFile} path={activeFile} />
+            <MonacoTab key={`${workspaceId}:${activeFile}`} path={activeFile} workspaceId={workspaceId} />
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-ink-muted">
               {t("editor.openFileHint")}
@@ -113,8 +114,9 @@ export function EditorArea(): ReactNode {
         >
           <EditorToolbar />
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            <FileTree />
+            <FileTree workspaceId={workspaceId} />
           </div>
+          <WorkspaceBottomBar workspaceId={workspaceId} paneIndex={paneIndex} />
         </aside>
       </div>
     </section>

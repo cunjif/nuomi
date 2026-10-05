@@ -27,6 +27,7 @@ import {
 const ILLEGAL_NAME_CHARS = /[/\\:*?"<>|]/;
 
 interface NodeContext {
+  workspaceId: string;
   selectedPaths: string[];
   renaming: string | null;
   creating: { parent: string; isDir: boolean } | null;
@@ -46,19 +47,19 @@ function useNodeCtx(): NodeContext {
   return ctx;
 }
 
-export function FileTree(): ReactNode {
+export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const rootQuery = useQuery({ queryKey: ["dir", ""], queryFn: () => ipc.listDir("") });
+  const rootQuery = useQuery({ queryKey: ["dir", workspaceId, ""], queryFn: () => ipc.listDir("", workspaceId) });
 
-  const selectedPaths = useUiStore((s) => s.selectedPaths);
-  const lastSelectedPath = useUiStore((s) => s.lastSelectedPath);
+  const selectedPaths = useUiStore((s) => s.editorByWorkspace[workspaceId]?.selectedPaths ?? []);
+  const lastSelectedPath = useUiStore((s) => s.editorByWorkspace[workspaceId]?.lastSelectedPath ?? null);
   const setSelectedPaths = useUiStore((s) => s.setSelectedPaths);
   const toggleSelected = useUiStore((s) => s.toggleSelected);
   const selectRange = useUiStore((s) => s.selectRange);
   const clearSelection = useUiStore((s) => s.clearSelection);
-  const clipboardPaths = useUiStore((s) => s.clipboardPaths);
-  const clipboardMode = useUiStore((s) => s.clipboardMode);
+  const clipboardPaths = useUiStore((s) => s.editorByWorkspace[workspaceId]?.clipboardPaths ?? []);
+  const clipboardMode = useUiStore((s) => s.editorByWorkspace[workspaceId]?.clipboardMode ?? null);
   const setClipboard = useUiStore((s) => s.setClipboard);
   const clearClipboard = useUiStore((s) => s.clearClipboard);
   const openFile = useUiStore((s) => s.openFile);
@@ -84,21 +85,21 @@ export function FileTree(): ReactNode {
   function handleNodeClick(e: React.MouseEvent, path: string, isDir: boolean): void {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      toggleSelected(path);
+      toggleSelected(path, workspaceId);
       return;
     }
     if (e.shiftKey && lastSelectedPath) {
       e.preventDefault();
-      selectRange(lastSelectedPath, path, getVisiblePaths());
+      selectRange(lastSelectedPath, path, getVisiblePaths(), workspaceId);
       return;
     }
-    setSelectedPaths([path]);
-    if (!isDir) openFile(path);
+    setSelectedPaths([path], workspaceId);
+    if (!isDir) openFile(path, workspaceId);
   }
 
   function handleNodeContextMenu(e: React.MouseEvent, path: string, isDir: boolean): void {
     e.preventDefault();
-    if (!selectedPaths.includes(path)) setSelectedPaths([path]);
+    if (!selectedPaths.includes(path)) setSelectedPaths([path], workspaceId);
     setMenu({ x: e.clientX, y: e.clientY, path, isDir });
   }
 
@@ -148,6 +149,7 @@ export function FileTree(): ReactNode {
   }
 
   const ctxValue: NodeContext = {
+    workspaceId,
     selectedPaths,
     renaming,
     creating,
@@ -211,14 +213,14 @@ export function FileTree(): ReactNode {
       label: t("files.copy"),
       icon: "copy",
       disabled: selectedPaths.length === 0,
-      onSelect: () => setClipboard(selectedPaths, "copy"),
+      onSelect: () => setClipboard(selectedPaths, "copy", workspaceId),
     });
     items.push({
       type: "item",
       id: "cut",
       label: t("files.cut"),
       disabled: selectedPaths.length === 0,
-      onSelect: () => setClipboard(selectedPaths, "cut"),
+      onSelect: () => setClipboard(selectedPaths, "cut", workspaceId),
     });
     items.push({
       type: "item",
@@ -230,7 +232,7 @@ export function FileTree(): ReactNode {
         try {
           if (clipboardMode === "cut") {
             await batchMoveInto(clipboardPaths, targetDir);
-            clearClipboard();
+            clearClipboard(workspaceId);
           } else {
             await batchCopyInto(clipboardPaths, targetDir);
           }
@@ -259,7 +261,7 @@ export function FileTree(): ReactNode {
     try {
       await batchDelete(selectedPaths);
       qc.invalidateQueries({ queryKey: ["dir"] });
-      clearSelection();
+      clearSelection(workspaceId);
       setDeleteOpen(false);
     } catch (err) {
       setError(describeError(err));
@@ -402,7 +404,7 @@ function DirNode({ parent, name, depth }: { parent: string; name: string; depth:
 
 function LeafNode({ parent, name, depth }: { parent: string; name: string; depth: number }): ReactNode {
   const ctx = useNodeCtx();
-  const activeFile = useUiStore((s) => s.activeFile);
+  const activeFile = useUiStore((s) => s.editorByWorkspace[ctx.workspaceId]?.activeFile ?? null);
   const path = joinPath(parent, name);
   const selected = ctx.selectedPaths.includes(path);
   const isRenaming = ctx.renaming === path;

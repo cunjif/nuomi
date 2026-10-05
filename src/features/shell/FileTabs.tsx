@@ -5,11 +5,11 @@ import { Icon } from "../../components/ui/Icon/Icon";
 import { useUiStore } from "../../lib/store/uiStore";
 
 /** Open-file tab strip: dirty files show a dot and close via a two-step confirm. */
-export function FileTabs(): ReactNode {
+export function FileTabs({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
-  const openFiles = useUiStore((s) => s.openFiles);
-  const activeFile = useUiStore((s) => s.activeFile);
-  const dirtyPaths = useUiStore((s) => s.dirtyPaths);
+  const openFiles = useUiStore((s) => s.editorByWorkspace[workspaceId]?.openFiles ?? []);
+  const activeFile = useUiStore((s) => s.editorByWorkspace[workspaceId]?.activeFile ?? null);
+  const dirtyPaths = useUiStore((s) => s.editorByWorkspace[workspaceId]?.dirtyPaths ?? {});
   const setActiveFile = useUiStore((s) => s.setActiveFile);
   const closeFile = useUiStore((s) => s.closeFile);
   /** path awaiting a second click on × (two-step confirm, keyboard friendly) */
@@ -17,7 +17,7 @@ export function FileTabs(): ReactNode {
 
   const requestClose = (path: string): void => {
     if (dirtyPaths[path]) setConfirmingPath(path);
-    else closeFile(path);
+    else closeFile(path, workspaceId);
   };
 
   return (
@@ -38,7 +38,7 @@ export function FileTabs(): ReactNode {
               type="button"
               role="tab"
               aria-selected={activeFile === path}
-              onClick={() => setActiveFile(path)}
+              onClick={() => setActiveFile(path, workspaceId)}
               title={dirty ? `${path} · ${t("tab.unsavedTitle")}` : path}
               className="flex max-w-40 items-center gap-1 truncate px-2 py-1 focus-visible:ring-2 focus-visible:ring-ink-accent"
             >
@@ -51,7 +51,7 @@ export function FileTabs(): ReactNode {
                   type="button"
                   onClick={() => {
                     setConfirmingPath(null);
-                    closeFile(path);
+                    closeFile(path, workspaceId);
                   }}
                   aria-label={`${t("tab.closeConfirm")} ${path}`}
                   className="px-1 py-1 text-xs text-state-danger hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"

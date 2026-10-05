@@ -18,7 +18,9 @@ import { extractDocComment, getWorkspaceIndex } from "../indexer/workspace-index
 export const EXT_ID = "builtin.hover-docs";
 
 function activeFilePath(): string {
-  return useUiStore.getState().activeFile ?? "";
+  const s = useUiStore.getState();
+  const wsId = s.activeWorkspaceId;
+  return wsId !== null ? (s.editorByWorkspace[wsId]?.activeFile ?? "") : "";
 }
 
 const hoverProvider: Monaco.languages.HoverProvider = {
