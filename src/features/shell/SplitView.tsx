@@ -1,6 +1,7 @@
 import { useUiStore } from "../../lib/store/uiStore";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 
 interface WorkspaceEntryDto {
   id: string;
@@ -16,6 +17,7 @@ interface SplitViewProps {
 }
 
 export function SplitView({ renderWorkspace }: SplitViewProps) {
+  const { t } = useTranslation();
   const { splitWorkspaceIds, focusWorkspace, setLayoutMode, setSplitWorkspaceIds } =
     useUiStore();
 
@@ -36,7 +38,7 @@ export function SplitView({ renderWorkspace }: SplitViewProps) {
       return (
         <div className="flex h-full items-center justify-center text-sm text-paper-muted">
           <div className="text-center">
-            <p className="mb-2">目录缺失</p>
+            <p className="mb-2">{t("split.dirMissing")}</p>
             <p className="text-xs text-paper-faint">{ws?.rootPath ?? id}</p>
           </div>
         </div>
@@ -65,7 +67,7 @@ export function SplitView({ renderWorkspace }: SplitViewProps) {
           }}
           className="ml-auto px-1.5 py-0.5 text-xs rounded bg-paper-bg/80 text-paper-muted hover:text-paper-fg"
         >
-          {side === "left" ? "保留左侧" : "保留右侧"}
+          {side === "left" ? t("split.keepLeft") : t("split.keepRight")}
         </button>
       </div>
     );

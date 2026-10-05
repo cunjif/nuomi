@@ -903,6 +903,9 @@
     "closeDirtyTitle": "关闭工作区",
     "closeDirtyBody": "该工作区有以下未保存文件，强制关闭将丢弃修改：",
     "closeDirtyConfirm": "强制关闭",
+    "pin": "固定",
+    "unpin": "取消固定",
+    "splitNeedsTwo": "至少打开两个工作区才能分屏",
     "current": "工作区",
     "setupFailed": "设置工作区失败",
     "currentDir": "当前工作目录",
@@ -968,5 +971,22 @@
     "plugin_install_failed": "插件安装失败：{{message}}",
     "plugin_uninstall_failed": "插件卸载失败：{{message}}",
     "plugin_open_dir_failed": "无法打开插件目录：{{message}}"
+  },
+  "split": {
+    "keepLeft": "保留左侧",
+    "keepRight": "保留右侧",
+    "dirMissing": "目录缺失"
+  },
+  "crossSearch": {
+    "placeholder": "跨工作区搜索…",
+    "matchContent": "内容",
+    "search": "搜索",
+    "searching": "搜索中…",
+    "skipped": "已跳过 {{count}} 个目录缺失的工作区",
+    "matchTypeFileName": "文件名",
+    "matchTypeContent": "内容",
+    "openFromHint": "在当前工作区打开（来自 {{name}}）",
+    "selectWorkspaceHint": "请先选择一个工作区",
+    "pullToCurrent": "↗ 拉到当前"
   }
 }

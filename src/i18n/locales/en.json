@@ -897,6 +897,9 @@
     "closeDirtyTitle": "Close workspace",
     "closeDirtyBody": "This workspace has unsaved files. Force close will discard changes:",
     "closeDirtyConfirm": "Force close",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "splitNeedsTwo": "Open at least two workspaces to split",
     "current": "Workspace",
     "setupFailed": "Failed to set workspace",
     "currentDir": "Current directory",
@@ -968,5 +971,22 @@
     "chat": "Chat",
     "editor": "Files",
     "workbench": "Workbench"
+  },
+  "split": {
+    "keepLeft": "Keep left",
+    "keepRight": "Keep right",
+    "dirMissing": "Directory missing"
+  },
+  "crossSearch": {
+    "placeholder": "Cross-workspace search…",
+    "matchContent": "Content",
+    "search": "Search",
+    "searching": "Searching…",
+    "skipped": "Skipped {{count}} workspaces with missing directories",
+    "matchTypeFileName": "filename",
+    "matchTypeContent": "content",
+    "openFromHint": "Open in current workspace (from {{name}})",
+    "selectWorkspaceHint": "Select a workspace first",
+    "pullToCurrent": "↗ pull to current"
   }
 }
