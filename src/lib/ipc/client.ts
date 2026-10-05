@@ -103,24 +103,36 @@ export const ipc = {
   listPendingApprovals: (workspaceId: string | null) => unwrap(current.listPendingApprovals(workspaceId)),
   resolveApproval: (approvalId: string, approved: boolean) =>
     unwrap(current.resolveApproval(approvalId, approved)),
-  listDir: (path: string) => unwrap(current.listDir(path)),
-  readFile: (path: string) => unwrap(current.readFile(path)),
-  writeFile: (path: string, content: string) =>
-    unwrap(current.writeFile(path, content)),
-  createFile: (path: string, content: string) =>
-    unwrap(current.createFile(path, content)),
-  createDir: (path: string) => unwrap(current.createDir(path)),
-  deletePath: (path: string) => unwrap(current.delete(path)),
-  renamePath: (from: string, to: string) => unwrap(current.rename(from, to)),
-  copyPath: (from: string, to: string) => unwrap(current.copy(from, to)),
-  gitStatus: () => unwrap(current.gitStatus()),
-  gitLog: (limit: number) => unwrap(current.gitLog(limit)),
-  gitStage: (paths: string[]) => unwrap(current.gitStage(paths)),
-  gitCommit: (message: string) => unwrap(current.gitCommit(message)),
-  gitPush: (remote: string, branch: string) => unwrap(current.gitPush(remote, branch)),
-  gitWorktrees: () => unwrap(current.gitWorktrees()),
-  gitDiff: (path: string, staged: boolean) => unwrap(current.gitDiff(path, staged)),
-  gitStagedDiff: () => unwrap(current.gitStagedDiff()),
+  listDir: (path: string, workspaceId?: string | null) =>
+    unwrap(current.listDir(path, workspaceId ?? null)),
+  readFile: (path: string, workspaceId?: string | null) =>
+    unwrap(current.readFile(path, workspaceId ?? null)),
+  writeFile: (path: string, content: string, workspaceId?: string | null) =>
+    unwrap(current.writeFile(path, content, workspaceId ?? null)),
+  createFile: (path: string, content: string, workspaceId?: string | null) =>
+    unwrap(current.createFile(path, content, workspaceId ?? null)),
+  createDir: (path: string, workspaceId?: string | null) =>
+    unwrap(current.createDir(path, workspaceId ?? null)),
+  deletePath: (path: string, workspaceId?: string | null) =>
+    unwrap(current.delete(path, workspaceId ?? null)),
+  renamePath: (from: string, to: string, workspaceId?: string | null) =>
+    unwrap(current.rename(from, to, workspaceId ?? null)),
+  copyPath: (from: string, to: string, workspaceId?: string | null) =>
+    unwrap(current.copy(from, to, workspaceId ?? null)),
+  gitStatus: (workspaceId?: string | null) => unwrap(current.gitStatus(workspaceId ?? null)),
+  gitLog: (limit: number, workspaceId?: string | null) =>
+    unwrap(current.gitLog(limit, workspaceId ?? null)),
+  gitStage: (paths: string[], workspaceId?: string | null) =>
+    unwrap(current.gitStage(paths, workspaceId ?? null)),
+  gitCommit: (message: string, workspaceId?: string | null) =>
+    unwrap(current.gitCommit(message, workspaceId ?? null)),
+  gitPush: (remote: string, branch: string, workspaceId?: string | null) =>
+    unwrap(current.gitPush(remote, branch, workspaceId ?? null)),
+  gitWorktrees: (workspaceId?: string | null) => unwrap(current.gitWorktrees(workspaceId ?? null)),
+  gitDiff: (path: string, staged: boolean, workspaceId?: string | null) =>
+    unwrap(current.gitDiff(path, staged, workspaceId ?? null)),
+  gitStagedDiff: (workspaceId?: string | null) =>
+    unwrap(current.gitStagedDiff(workspaceId ?? null)),
   listCommitAgents: () => unwrap(current.listCommitAgents()),
   aiCommitGenerate: (roleAgent?: { kind: string; id: string }) =>
     unwrap(current.aiCommitGenerate(roleAgent ?? null)),

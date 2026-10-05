@@ -142,129 +142,129 @@ async resolveApproval(approvalId: string, approved: boolean) : Promise<Result<nu
     else return { status: "error", error: e  as any };
 }
 },
-async listDir(path: string) : Promise<Result<FileEntryDto[], IpcError>> {
+async listDir(path: string, workspaceId: string | null) : Promise<Result<FileEntryDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_dir", { path }) };
+    return { status: "ok", data: await TAURI_INVOKE("list_dir", { path, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async readFile(path: string) : Promise<Result<string, IpcError>> {
+async readFile(path: string, workspaceId: string | null) : Promise<Result<string, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("read_file", { path }) };
+    return { status: "ok", data: await TAURI_INVOKE("read_file", { path, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async writeFile(path: string, content: string) : Promise<Result<null, IpcError>> {
+async writeFile(path: string, content: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("write_file", { path, content }) };
+    return { status: "ok", data: await TAURI_INVOKE("write_file", { path, content, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async createFile(path: string, content: string) : Promise<Result<null, IpcError>> {
+async createFile(path: string, content: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_file", { path, content }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_file", { path, content, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async createDir(path: string) : Promise<Result<null, IpcError>> {
+async createDir(path: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_dir", { path }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_dir", { path, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async delete(path: string) : Promise<Result<null, IpcError>> {
+async delete(path: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("delete", { path }) };
+    return { status: "ok", data: await TAURI_INVOKE("delete", { path, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async rename(from: string, to: string) : Promise<Result<null, IpcError>> {
+async rename(from: string, to: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("rename", { from, to }) };
+    return { status: "ok", data: await TAURI_INVOKE("rename", { from, to, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async copy(from: string, to: string) : Promise<Result<null, IpcError>> {
+async copy(from: string, to: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("copy", { from, to }) };
+    return { status: "ok", data: await TAURI_INVOKE("copy", { from, to, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitStatus() : Promise<Result<GitStatusDto[], IpcError>> {
+async gitStatus(workspaceId: string | null) : Promise<Result<GitStatusDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_status") };
+    return { status: "ok", data: await TAURI_INVOKE("git_status", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitLog(limit: number) : Promise<Result<GitCommitDto[], IpcError>> {
+async gitLog(limit: number, workspaceId: string | null) : Promise<Result<GitCommitDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_log", { limit }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_log", { limit, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitStage(paths: string[]) : Promise<Result<null, IpcError>> {
+async gitStage(paths: string[], workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_stage", { paths }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_stage", { paths, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitCommit(message: string) : Promise<Result<string, IpcError>> {
+async gitCommit(message: string, workspaceId: string | null) : Promise<Result<string, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_commit", { message }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_commit", { message, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitPush(remote: string, branch: string) : Promise<Result<string, IpcError>> {
+async gitPush(remote: string, branch: string, workspaceId: string | null) : Promise<Result<string, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_push", { remote, branch }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_push", { remote, branch, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitWorktrees() : Promise<Result<GitWorktreeDto[], IpcError>> {
+async gitWorktrees(workspaceId: string | null) : Promise<Result<GitWorktreeDto[], IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_worktrees") };
+    return { status: "ok", data: await TAURI_INVOKE("git_worktrees", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitDiff(path: string, staged: boolean) : Promise<Result<string, IpcError>> {
+async gitDiff(path: string, staged: boolean, workspaceId: string | null) : Promise<Result<string, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_diff", { path, staged }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_diff", { path, staged, workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async gitStagedDiff() : Promise<Result<string, IpcError>> {
+async gitStagedDiff(workspaceId: string | null) : Promise<Result<string, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_staged_diff") };
+    return { status: "ok", data: await TAURI_INVOKE("git_staged_diff", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
