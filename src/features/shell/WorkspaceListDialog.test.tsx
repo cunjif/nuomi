@@ -12,12 +12,27 @@ import { WorkspaceListDialog } from "./WorkspaceListDialog";
 const openDialog = vi.fn();
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialog(...a) }));
 
+// uiStore.openWorkspace calls tauri invoke("open_workspace") directly (not
+// ipc.openWorkspace), so mock the core invoke to route open_workspace into
+// the test-double which updates isFocused on tdState.workspaces.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "open_workspace") {
+      const id = args?.id as string;
+      for (const w of tdState.workspaces ?? []) w.isFocused = w.id === id;
+      return { workspaceId: id };
+    }
+    return undefined;
+  },
+}));
+
 function makeWs(overrides: Partial<WorkspaceEntryDto> & { id: string }): WorkspaceEntryDto {
   return {
     rootPath: `C:\\projects\\${overrides.id}`,
     colorTag: "ink-blue",
     createdAt: 1,
     isActive: false,
+    isFocused: false,
     directoryPresent: true,
     ...overrides,
   };
@@ -61,15 +76,15 @@ describe("WorkspaceListDialog — list switching", () => {
   it("clicking a non-active row activates it and closes the dialog", async () => {
     const onClose = vi.fn();
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isActive: true }),
-      makeWs({ id: "ws-2", rootPath: "C:\\beta", isActive: false }),
+      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isFocused: true }),
+      makeWs({ id: "ws-2", rootPath: "C:\\beta", isFocused: false }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={onClose} />);
     await screen.findByText("C:\\beta");
 
     fireEvent.click(screen.getByText("C:\\beta"));
     await waitFor(() => {
-      expect(tdState.workspaces.find((w) => w.id === "ws-2")?.isActive).toBe(true);
+      expect(tdState.workspaces.find((w) => w.id === "ws-2")?.isFocused).toBe(true);
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -77,7 +92,7 @@ describe("WorkspaceListDialog — list switching", () => {
   it("clicking the active row does not trigger activation or close", async () => {
     const onClose = vi.fn();
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isActive: true }),
+      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isFocused: true }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={onClose} />);
     await screen.findByText("C:\\alpha");
@@ -101,7 +116,7 @@ describe("WorkspaceListDialog — add workspace", () => {
 describe("WorkspaceListDialog — remove workspace", () => {
   it("remove button shows confirmation then removes on confirm", async () => {
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\removable", isActive: true }),
+      makeWs({ id: "ws-1", rootPath: "C:\\removable", isFocused: true }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
     await screen.findByText("C:\\removable");

@@ -340,6 +340,10 @@ export function testDoubleCommands(): CommandSet {
       return ok(0);
     },
     async openWorkspace(id: string) {
+      // Mirror backend: open_workspace flips is_focused in the open set.
+      for (const w of tdState.workspaces ?? []) {
+        w.isFocused = w.id === id;
+      }
       return ok({ workspaceId: id } as OpenWorkspaceResult);
     },
     async closeWorkspace(id: string, _force: boolean) {

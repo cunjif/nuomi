@@ -17,14 +17,39 @@ vi.mock("@monaco-editor/react", () => ({
 // Skip the self-hosted monaco wiring (imports the real editor kernel).
 vi.mock("./monacoSetup", () => ({}));
 
+const folderPick = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => folderPick(...a) }));
+
+// uiStore.openWorkspace/focusWorkspace call tauri invoke directly; route
+// open_workspace/focus_workspace into tdState so isFocused updates land.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "open_workspace" || cmd === "focus_workspace") {
+      const id = args?.id as string;
+      for (const w of tdState.workspaces ?? []) w.isFocused = w.id === id;
+      return { workspaceId: id };
+    }
+    if (cmd === "close_workspace") return { closedId: args?.id, newFocusedId: null };
+    if (cmd === "get_open_set") {
+      return { openWorkspaces: [], focusedWorkspaceId: null, pinnedWorkspaceIds: [], unreadIndicators: [] };
+    }
+    if (cmd === "set_layout_snapshot") return null;
+    return undefined;
+  },
+}));
+
 function openInStore(path: string): void {
-  useUiStore.setState({ openFiles: [path], activeFile: path, dirtyPaths: {} });
+  useUiStore.setState({
+    editorByWorkspace: {
+      "ws-test": { openFiles: [path], activeFile: path, selectedPaths: [], lastSelectedPath: null, clipboardPaths: [], clipboardMode: null, dirtyPaths: {}, crossRefs: {} },
+    },
+  });
 }
 
 function renderPanel(): void {
   renderWithProviders(
     <>
-      <EditorArea />
+      <EditorArea workspaceId="ws-test" />
       <Toaster />
     </>,
   );
@@ -49,7 +74,7 @@ describe("EditorArea — editor dirty flow", () => {
     fireEvent.change(await screen.findByLabelText("editor"), { target: { value: "hello nuomi" } });
     await waitFor(() => expect(tab).toHaveAttribute("title", "README.md · 未保存的更改"));
 
-    fireEvent.click(screen.getByRole("button", { name: "保存 (Ctrl+S)" }));
+    fireEvent.keyDown(screen.getByLabelText("editor").closest("section") as HTMLElement, { key: "s", ctrlKey: true });
     await screen.findByText("文件已保存");
     await waitFor(() => expect(tab).toHaveAttribute("title", "README.md"));
   });
@@ -94,7 +119,7 @@ describe("EditorArea — workspace sidebar toolbar", () => {
   function renderWithToolbar(): void {
     renderWithProviders(
       <>
-        <EditorArea />
+        <EditorArea workspaceId="ws-test" />
         <Toaster />
       </>,
     );
@@ -108,54 +133,47 @@ describe("EditorArea — workspace sidebar toolbar", () => {
     expect(label).toHaveAttribute("title", "D:\\projects\\demo");
   });
 
-  it("opens the switch dialog and persists the new root on save", async () => {
-    tdState.workspaceRoot = "C:\\workspace";
+  it("opens the switch dialog and activates a workspace on row click", async () => {
+    tdState.workspaces.push(
+      { id: "ws-current", rootPath: "C:\\workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
+      { id: "ws-other", rootPath: "D:\\other", colorTag: "paper-yellow", createdAt: 2, isActive: false, isFocused: false, directoryPresent: true },
+    );
     renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
-    // Modal per 用户 SVG: readonly current dir row + new dir input + 选择.
     const dialog = await screen.findByRole("dialog", { name: "切换工作区" });
-    // The current root appears twice (readonly row + toolbar label) — the
-    // readonly one lives inside the dialog.
-    expect(within(dialog).getByText("C:\\workspace")).toBeInTheDocument();
-    const input = screen.getByLabelText("新的工作目录");
-    expect(input).toHaveValue("C:\\workspace");
-
-    fireEvent.change(input, { target: { value: "E:\\next" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    // Clicking a non-focused workspace row activates it (openWorkspace) and closes.
+    fireEvent.click(within(dialog).getByText("D:\\other"));
 
     await waitFor(() => {
-      expect(tdState.workspaceRoot).toBe("E:\\next");
-      expect(tdState.workspaceConfigured).toBe(true);
+      expect(tdState.workspaces.find((w) => w.id === "ws-other")?.isFocused).toBe(true);
     });
-    // The dialog closes after a successful switch; the toolbar shows the new root.
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "切换工作区" })).toBeNull());
-    expect(await screen.findByText("E:\\next")).toBeInTheDocument();
   });
 
   it("取消 closes the dialog without persisting", async () => {
-    tdState.workspaceRoot = "C:\\workspace";
+    tdState.workspaces.push(
+      { id: "ws-current", rootPath: "C:\\workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
+    );
     renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
-    fireEvent.change(await screen.findByLabelText("新的工作目录"), { target: { value: "E:\\nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByText("取消"));
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "切换工作区" })).toBeNull());
-    expect(tdState.workspaceRoot).toBe("C:\\workspace");
+    expect(tdState.workspaces.find((w) => w.id === "ws-current")?.isFocused).toBe(true);
   });
 
-  it("选择 fills the input from the OS folder picker", async () => {
-    const pickOpen = vi.fn().mockResolvedValue("D:\\picked\\dir");
-    vi.doMock("@tauri-apps/plugin-dialog", () => ({ open: pickOpen }));
-    tdState.workspaceRoot = "C:\\workspace";
+  it("新增工作区 button calls the OS folder picker", async () => {
+    folderPick.mockResolvedValue("D:\\picked\\dir");
+    tdState.workspaces.push(
+      { id: "ws-current", rootPath: "C:\\workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
+    );
     renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
-    fireEvent.click(await screen.findByRole("button", { name: "选择" }));
+    fireEvent.click(await screen.findByText("新增工作区"));
 
-    await waitFor(() => expect(screen.getByLabelText("新的工作目录")).toHaveValue("D:\\picked\\dir"));
-    expect(pickOpen).toHaveBeenCalledWith({ directory: true, multiple: false, title: "选择" });
-    vi.doUnmock("@tauri-apps/plugin-dialog");
+    await waitFor(() => expect(folderPick).toHaveBeenCalled());
   });
 });

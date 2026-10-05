@@ -35,19 +35,24 @@ function WorkspaceRow({
   onRemove: (id: string) => void;
 }): ReactNode {
   const { t } = useTranslation();
+  // Use the open-set focused flag (not registry is_active) so the highlight
+  // matches WorkspaceBottomBar, which derives its active tab from the same
+  // open-set focused workspace. registry.is_active is only mutated by
+  // activate/add/remove and goes stale when switching via open/focus.
+  const focused = ws.isFocused === true;
   return (
     <li
       className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs ${
-        ws.isActive ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
+        focused ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
       }`}
-      onClick={() => !ws.isActive && onActivate(ws.id)}
+      onClick={() => !focused && onActivate(ws.id)}
     >
       <span
         aria-hidden="true"
         className={`inline-block size-2.5 rounded-full border border-ink-muted/40 ${COLOR_MAP[ws.colorTag] ?? "bg-ink-muted"}`}
       />
       <span className="flex-1 truncate" title={ws.rootPath}>{ws.rootPath}</span>
-      {ws.isActive && <span className="text-[10px] font-semibold text-ink-accent">●</span>}
+      {focused && <span className="text-[10px] font-semibold text-ink-accent">●</span>}
       {!ws.directoryPresent && (
         <span className="text-[10px] text-state-warn" title={t("workspace.directoryMissing")}>⚠</span>
       )}
@@ -94,9 +99,7 @@ export function WorkspaceListDialog({
       const selected = await pickFolder({ directory: true, multiple: false });
       if (!selected) return;
       const entry = await ipc.addWorkspace(selected);
-      if (entry.isActive) {
-        useUiStore.getState().switchWorkspace(entry.id);
-      }
+      await useUiStore.getState().openWorkspace(entry.id);
       invalidate();
       toast.success(t("workspace.added"));
     } catch (e) {
@@ -106,8 +109,7 @@ export function WorkspaceListDialog({
 
   const handleActivate = async (id: string): Promise<void> => {
     try {
-      await ipc.activateWorkspace(id);
-      useUiStore.getState().switchWorkspace(id);
+      await useUiStore.getState().openWorkspace(id);
       invalidate();
       toast.success(t("workspace.switched"));
       onClose();
