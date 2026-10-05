@@ -38,6 +38,8 @@ export function WorkspaceBottomBar({
   const switchWorkspace = useUiStore((s) => s.switchWorkspace);
   const focusWorkspace = useUiStore((s) => s.focusWorkspace);
   const closeWorkspace = useUiStore((s) => s.closeWorkspace);
+  const pinWorkspace = useUiStore((s) => s.pinWorkspace);
+  const unpinWorkspace = useUiStore((s) => s.unpinWorkspace);
   const editorByWorkspace = useUiStore((s) => s.editorByWorkspace);
   const splitWorkspaceIds = useUiStore((s) => s.splitWorkspaceIds);
   const setSplitWorkspaceIds = useUiStore((s) => s.setSplitWorkspaceIds);
@@ -74,6 +76,11 @@ export function WorkspaceBottomBar({
       void setSplitWorkspaceIds([other, id]);
       void setLayoutMode("split");
     }
+  };
+
+  const canSplit = (id: string): boolean => {
+    const other = workspaceId !== id ? workspaceId : (splitWorkspaceIds?.find((x) => x !== id) ?? openWorkspaceIds.find((x) => x !== id));
+    return other !== undefined && other !== id;
   };
 
   const handleClose = (id: string): void => {
@@ -148,13 +155,26 @@ export function WorkspaceBottomBar({
                 >
                   <button
                     type="button"
+                    disabled={!canSplit(ws.id)}
                     onClick={() => {
                       handleSplit(ws.id);
                       setMenuForId(null);
                     }}
-                    className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink"
+                    title={canSplit(ws.id) ? undefined : t("workspace.splitNeedsTwo")}
+                    className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                   >
                     {t("workspace.splitOpen")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pinned) void unpinWorkspace(ws.id);
+                      else void pinWorkspace(ws.id);
+                      setMenuForId(null);
+                    }}
+                    className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink"
+                  >
+                    {pinned ? t("workspace.unpin") : t("workspace.pin")}
                   </button>
                   <button
                     type="button"

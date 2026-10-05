@@ -192,4 +192,4 @@ gitStagedDiff(workspaceId?: string): Promise<string>
 ### 脏文件关闭确认
 
 - **单文件级**：`FileTabs` 的 × 按钮两步确认（第一次点 × 显示"确认关闭/取消"，第二次确认才执行 `closeFile`）。
-- **工作区级**：`WorkspaceTabBar` 的关闭按钮先检查 `editorByWorkspace[id].dirtyPaths`，若有脏文件则弹 Dialog 列出文件名，用户"强制关闭"后调 `closeWorkspace(id, force=true)`，否则直接 `closeWorkspace(id, force=false)`。
+- **工作区级**：`WorkspaceBottomBar` 的关闭按钮先检查 `editorByWorkspace[id].dirtyPaths`，若有脏文件则弹 Dialog 列出文件名，用户"强制关闭"后调 `closeWorkspace(id, force=true)`，否则直接 `closeWorkspace(id, force=false)`。
