@@ -14,6 +14,7 @@ pub mod roles;
 pub mod session_cli_handles;
 pub mod sessions;
 pub mod settings;
+pub mod steward;
 pub mod tasks_runs;
 pub mod teams;
 pub mod whiteboard;

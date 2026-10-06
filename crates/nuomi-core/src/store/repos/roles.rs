@@ -249,9 +249,14 @@ mod tests {
             r.created_at = at;
             insert(&conn, &r).unwrap();
         }
-        let ids: Vec<String> = list(&conn).unwrap().into_iter().map(|r| r.id).collect();
+        let ids: Vec<String> = list(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|r| !r.id.starts_with("role_steward_"))
+            .map(|r| r.id)
+            .collect();
         assert_eq!(ids, vec!["early", "mid", "late"]);
-        assert_eq!(count(&conn).unwrap(), 3);
+        assert_eq!(count(&conn).unwrap(), 3 + 5);
     }
 
     #[test]
@@ -300,7 +305,7 @@ mod tests {
         insert(&conn, &role("r1", "one")).unwrap();
         assert!(delete(&conn, "r1").unwrap());
         assert!(!delete(&conn, "r1").unwrap());
-        assert_eq!(count(&conn).unwrap(), 0);
+        assert_eq!(count(&conn).unwrap(), 5);
     }
 
     #[test]

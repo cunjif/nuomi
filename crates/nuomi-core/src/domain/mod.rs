@@ -3,6 +3,8 @@
 pub mod entities;
 pub mod run_state;
 pub mod status;
+pub mod steward;
+pub mod steward_enums;
 
 pub use entities::{
     AgentProfile, AgentRefKind, Approval, ApprovalDecision, Attachment, AttachmentKind, Capability,
@@ -19,6 +21,14 @@ pub use run_state::{
     LandingTracker, LandingTransitionError, MutationError, RunEvent, RunState, TransitionError,
 };
 pub use status::{derive_status, DerivedStatus, RunFacts};
+pub use steward::{
+    DevRoleBinding, DevTeam, EvolutionArtifact, EvolutionCycle, EvolutionDataPool, EvolutionTask,
+    GateDecision, StewardAi, StewardChangeSnapshot, StewardSession,
+};
+pub use steward_enums::{
+    ArtifactStatus, ArtifactType, CyclePhase, CycleStatus, DevRoleKind, GateDecisionKind,
+    TaskPhase, TaskStatus as StewardTaskStatus, TriggerSource,
+};
 
 use thiserror::Error;
 

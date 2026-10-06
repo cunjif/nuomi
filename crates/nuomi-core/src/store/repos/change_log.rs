@@ -138,13 +138,14 @@ mod tests {
     #[test]
     fn all_tracked_tables_capture_inserts() {
         let conn = db();
+        let skip = tail_after(&conn, 0, 100).unwrap().len();
         insert_session(&conn, "s1");
         insert_team(&conn, "t1", "team-a");
         insert_role(&conn, "r1", "role-a");
         insert_agent_profile(&conn, "ap1", "profile-a");
         insert_task(&conn, "tk1", "task-a");
         insert_run(&conn, "run1", "tk1");
-        let entries = tail_after(&conn, 0, 100).unwrap();
+        let entries = tail_after(&conn, skip as i64, 100).unwrap();
         let tables: Vec<(&str, ChangeOp)> = entries
             .iter()
             .map(|e| (e.table_name.as_str(), e.op))
@@ -166,12 +167,13 @@ mod tests {
     #[test]
     fn updates_and_deletes_are_captured() {
         let conn = db();
+        let skip = tail_after(&conn, 0, 100).unwrap().len();
         insert_role(&conn, "r1", "role-a");
         conn.execute("UPDATE roles SET name = 'role-b' WHERE id = 'r1'", [])
             .unwrap();
         conn.execute("DELETE FROM roles WHERE id = 'r1'", [])
             .unwrap();
-        let entries = tail_after(&conn, 0, 100).unwrap();
+        let entries = tail_after(&conn, skip as i64, 100).unwrap();
         let ops: Vec<ChangeOp> = entries.iter().map(|e| e.op).collect();
         assert_eq!(
             ops,
@@ -184,21 +186,21 @@ mod tests {
     #[test]
     fn seq_is_monotonic_and_tail_after_pages_correctly() {
         let conn = db();
+        let skip = tail_after(&conn, 0, 100).unwrap().len() as i64;
         for i in 0..5 {
             insert_session(&conn, &format!("s{i}"));
         }
-        let page1 = tail_after(&conn, 0, 2).unwrap();
+        let page1 = tail_after(&conn, skip, 2).unwrap();
         assert_eq!(page1.len(), 2);
-        assert_eq!(page1[0].seq, 1);
-        assert_eq!(page1[1].seq, 2);
+        assert_eq!(page1[0].seq, skip + 1);
+        assert_eq!(page1[1].seq, skip + 2);
         let page2 = tail_after(&conn, page1[1].seq, 2).unwrap();
-        assert_eq!(page2[0].seq, 3);
-        assert_eq!(page2[1].seq, 4);
+        assert_eq!(page2[0].seq, skip + 3);
+        assert_eq!(page2[1].seq, skip + 4);
         let page3 = tail_after(&conn, page2[1].seq, 10).unwrap();
         assert_eq!(page3.len(), 1);
-        assert_eq!(page3[0].seq, 5);
-        // full read is strictly increasing
-        let all = tail_after(&conn, 0, 100).unwrap();
+        assert_eq!(page3[0].seq, skip + 5);
+        let all = tail_after(&conn, skip, 100).unwrap();
         let seqs: Vec<i64> = all.iter().map(|e| e.seq).collect();
         let mut sorted = seqs.clone();
         sorted.sort_unstable();

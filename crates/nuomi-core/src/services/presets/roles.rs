@@ -283,7 +283,7 @@ mod tests {
         );
         assert_eq!(
             repos::roles::count(&conn).unwrap() as usize,
-            PRESET_ROLES.len()
+            PRESET_ROLES.len() + 5
         );
 
         // Builtin refresh preserves a user-set provider binding.

@@ -209,6 +209,46 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0026_schedules_workspace.sql"
         )),
     ),
+    (
+        27,
+        "0027_steward_sessions",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0027_steward_sessions.sql"
+        )),
+    ),
+    (
+        28,
+        "0028_steward_ai",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0028_steward_ai.sql"
+        )),
+    ),
+    (
+        29,
+        "0029_evolution_cycles",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0029_evolution_cycles.sql"
+        )),
+    ),
+    (
+        30,
+        "0030_evolution_gate_and_pool",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0030_evolution_gate_and_pool.sql"
+        )),
+    ),
+    (
+        31,
+        "0031_steward_builtin_roles",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0031_steward_builtin_roles.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -618,5 +658,117 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stale, 0, "schedules_new must be gone after recovery");
+    }
+
+    // ---- migration 0027-0031: steward AI tables (T1-13 idempotency)
+
+    /// Runs migrations up to and including a target version by manually
+    /// executing each SQL batch and updating user_version.
+    fn run_migrations_to(conn: &Connection, target: i64) {
+        let mut current: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        for &(version, name, sql) in MIGRATIONS {
+            if version <= current || version > target {
+                continue;
+            }
+            conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", version).unwrap();
+            conn.execute_batch("COMMIT;").unwrap();
+            current = version;
+            let _ = name;
+        }
+    }
+
+    #[test]
+    fn migrations_steward_tables_idempotent_on_empty_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        // First run: applies all migrations 0001-0031
+        run(&conn).unwrap();
+        let v1: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v1, 31);
+
+        // Second run: no-op (user_version already 31)
+        run(&conn).unwrap();
+        let v2: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v2, 31);
+
+        // Steward tables exist and are empty (except roles331 seeds 5 builtin roles)
+        let steward_sessions: i64 = conn
+            .query_row("SELECT count(*) FROM steward_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(steward_sessions, 0);
+        let builtin_roles: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM roles WHERE id LIKE 'role_steward_%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(builtin_roles, 5);
+    }
+
+    #[test]
+    fn migrations_0027_0031_preserve_existing_data() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Run migrations up to 0026 (pre-steward)
+        run_migrations_to(&conn, 26);
+
+        // Insert existing data that must survive 0027-0031
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, kind)
+             VALUES ('pre-steward', 'existing', 1, 1, 'chat')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO roles (id, name, created_at, updated_at)
+             VALUES ('role_user_1', 'UserRole', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        // Now run steward migrations 0027-0031
+        run_migrations_to(&conn, 31);
+
+        // Existing data preserved
+        let session_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sessions WHERE id = 'pre-steward'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_count, 1);
+
+        let user_role: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM roles WHERE id = 'role_user_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_role, 1);
+
+        // Steward tables now exist
+        let steward_ai: i64 = conn
+            .query_row("SELECT count(*) FROM steward_ai", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(steward_ai, 0);
+
+        // 5 builtin steward roles seeded (INSERT OR IGNORE is idempotent)
+        let builtin: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM roles WHERE id LIKE 'role_steward_%' AND builtin = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(builtin, 5);
     }
 }
