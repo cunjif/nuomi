@@ -28,7 +28,6 @@ use nuomi_core::plugins::approval_gate;
 use nuomi_core::plugins::LoopRunResult;
 use nuomi_core::services::capability_router::RouteOutcome;
 use nuomi_core::services::parse_schedule;
-use nuomi_core::services::{GitService, SeedReport};
 use nuomi_core::services::{
     check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,
     delete_and_nullify_role_refs, detect_missing_provider, emit_env_fallback,
@@ -36,6 +35,7 @@ use nuomi_core::services::{
     materialize_single_role, resolve_participants, run_team as core_run_team, MissingProviderHint,
     ResolvedAgent, SingleRoleContext, TeamRunOutcome,
 };
+use nuomi_core::services::{GitService, SeedReport};
 use nuomi_core::store::{migrations, repos, Db, StoreError};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
@@ -1559,7 +1559,9 @@ pub async fn impl_read_file(
     path: String,
     workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    Ok(state.workspace_for(workspace_id.as_deref())?.read_file(&path)?)
+    Ok(state
+        .workspace_for(workspace_id.as_deref())?
+        .read_file(&path)?)
 }
 
 pub async fn impl_write_file(
@@ -1591,7 +1593,9 @@ pub async fn impl_create_dir(
     path: String,
     workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace_for(workspace_id.as_deref())?.create_dir(&path)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .create_dir(&path)?;
     Ok(())
 }
 
@@ -1600,7 +1604,9 @@ pub async fn impl_delete(
     path: String,
     workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state.workspace_for(workspace_id.as_deref())?.delete(&path)?;
+    state
+        .workspace_for(workspace_id.as_deref())?
+        .delete(&path)?;
     Ok(())
 }
 
@@ -1686,7 +1692,10 @@ pub async fn impl_git_commit(
             "commit message must not be empty",
         ));
     }
-    Ok(state.git_for(workspace_id.as_deref())?.commit(&message).await?)
+    Ok(state
+        .git_for(workspace_id.as_deref())?
+        .commit(&message)
+        .await?)
 }
 
 pub async fn impl_git_push(
@@ -1742,7 +1751,10 @@ pub async fn impl_git_staged_diff(
     state: &AppState,
     workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    Ok(state.git_for(workspace_id.as_deref())?.diff_staged().await?)
+    Ok(state
+        .git_for(workspace_id.as_deref())?
+        .diff_staged()
+        .await?)
 }
 
 // ---------- ai commit ----------
@@ -7247,6 +7259,1087 @@ pub async fn impl_set_view_scope(
     })
     .await
     .map_err(|e| IpcError::new("settings.set_failed", e.to_string()))?
+}
+
+// ---------- steward ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardSessionDto {
+    pub id: String,
+    pub steward_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<nuomi_core::domain::StewardSession> for StewardSessionDto {
+    fn from(s: nuomi_core::domain::StewardSession) -> Self {
+        Self {
+            id: s.id,
+            steward_id: s.steward_id,
+            title: s.title,
+            goal: s.goal,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum StewardReplyDto {
+    Text {
+        content: String,
+    },
+    ConfigProposal {
+        proposal_id: String,
+        diff: String,
+        confirm_handle: String,
+    },
+    EvolutionAccepted {
+        cycle_id: String,
+        progress_subscribe_handle: String,
+    },
+    Clarify {
+        candidates: Vec<StewardIntentDto>,
+    },
+    Refused {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum StewardIntentDto {
+    ConfigChange {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+        description: String,
+    },
+    Evolution {
+        instruction: String,
+    },
+    Scheduling {
+        description: String,
+    },
+    Diagnosis {
+        question: String,
+    },
+    Freeform {
+        message: String,
+    },
+}
+
+impl From<nuomi_core::steward::intent::StewardIntent> for StewardIntentDto {
+    fn from(i: nuomi_core::steward::intent::StewardIntent) -> Self {
+        use nuomi_core::steward::intent::StewardIntent as I;
+        match i {
+            I::ConfigChange {
+                target,
+                description,
+            } => Self::ConfigChange {
+                target,
+                description,
+            },
+            I::Evolution { instruction } => Self::Evolution { instruction },
+            I::Scheduling { description } => Self::Scheduling { description },
+            I::Diagnosis { question } => Self::Diagnosis { question },
+            I::Freeform { message } => Self::Freeform { message },
+        }
+    }
+}
+
+impl From<nuomi_core::steward::kernel::StewardReply> for StewardReplyDto {
+    fn from(r: nuomi_core::steward::kernel::StewardReply) -> Self {
+        use nuomi_core::steward::kernel::StewardReply as R;
+        match r {
+            R::Text { content } => Self::Text { content },
+            R::ConfigProposal {
+                proposal_id,
+                diff,
+                confirm_handle,
+            } => Self::ConfigProposal {
+                proposal_id,
+                diff,
+                confirm_handle,
+            },
+            R::EvolutionAccepted {
+                cycle_id,
+                progress_subscribe_handle,
+            } => Self::EvolutionAccepted {
+                cycle_id,
+                progress_subscribe_handle,
+            },
+            R::Clarify { candidates } => Self::Clarify {
+                candidates: candidates.into_iter().map(Into::into).collect(),
+            },
+            R::Refused { reason } => Self::Refused { reason },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppStateSnapshotDto {
+    pub providers: Vec<ProviderSummaryDto>,
+    pub roles: Vec<RoleSummaryDto>,
+    pub teams: Vec<TeamSummaryDto>,
+    pub agent_profiles: Vec<AgentProfileSummaryDto>,
+    pub sessions: Vec<SessionSummaryDto>,
+    pub recent_events: Vec<EventSummaryDto>,
+    pub memory_entries: Vec<MemorySummaryDto>,
+    pub prompt_versions: Vec<PromptVersionSummaryDto>,
+    pub evolution_cycles: Vec<CycleSummaryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub protocol: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub builtin: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub topology: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummaryDto {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSummaryDto {
+    pub id: i64,
+    pub kind: String,
+    pub aggregate_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySummaryDto {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptVersionSummaryDto {
+    pub id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CycleSummaryDto {
+    pub id: String,
+    pub phase: String,
+    pub status: String,
+}
+
+impl From<nuomi_core::steward::snapshot::AppStateSnapshot> for AppStateSnapshotDto {
+    fn from(s: nuomi_core::steward::snapshot::AppStateSnapshot) -> Self {
+        Self {
+            providers: s
+                .providers
+                .into_iter()
+                .map(|p| ProviderSummaryDto {
+                    id: p.id,
+                    name: p.name,
+                    protocol: p.protocol,
+                })
+                .collect(),
+            roles: s
+                .roles
+                .into_iter()
+                .map(|r| RoleSummaryDto {
+                    id: r.id,
+                    name: r.name,
+                    builtin: r.builtin,
+                })
+                .collect(),
+            teams: s
+                .teams
+                .into_iter()
+                .map(|t| TeamSummaryDto {
+                    id: t.id,
+                    name: t.name,
+                    topology: t.topology,
+                })
+                .collect(),
+            agent_profiles: s
+                .agent_profiles
+                .into_iter()
+                .map(|a| AgentProfileSummaryDto {
+                    id: a.id,
+                    name: a.name,
+                    kind: a.kind,
+                })
+                .collect(),
+            sessions: s
+                .sessions
+                .into_iter()
+                .map(|s| SessionSummaryDto {
+                    id: s.id,
+                    title: s.title,
+                    kind: s.kind,
+                })
+                .collect(),
+            recent_events: s
+                .recent_events
+                .into_iter()
+                .map(|e| EventSummaryDto {
+                    id: e.id,
+                    kind: e.kind,
+                    aggregate_type: e.aggregate_type,
+                })
+                .collect(),
+            memory_entries: s
+                .memory_entries
+                .into_iter()
+                .map(|m| MemorySummaryDto {
+                    id: m.id,
+                    content: m.content,
+                })
+                .collect(),
+            prompt_versions: s
+                .prompt_versions
+                .into_iter()
+                .map(|p| PromptVersionSummaryDto {
+                    id: p.id,
+                    status: p.status,
+                })
+                .collect(),
+            evolution_cycles: s
+                .evolution_cycles
+                .into_iter()
+                .map(|c| CycleSummaryDto {
+                    id: c.id,
+                    phase: c.phase,
+                    status: c.status,
+                })
+                .collect(),
+        }
+    }
+}
+
+pub async fn impl_steward_create_session(
+    state: &AppState,
+    title: String,
+) -> Result<StewardSessionDto, IpcError> {
+    let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let session =
+        nuomi_core::steward::kernel::create_steward_session(state.db_path.clone(), &title, &ws_id)
+            .await?;
+    Ok(session.into())
+}
+
+pub async fn impl_steward_list_sessions(
+    state: &AppState,
+) -> Result<Vec<StewardSessionDto>, IpcError> {
+    let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let sessions =
+        nuomi_core::steward::kernel::list_steward_sessions(state.db_path.clone(), &ws_id).await?;
+    Ok(sessions.into_iter().map(Into::into).collect())
+}
+
+pub async fn impl_steward_send_message(
+    state: &AppState,
+    session_id: String,
+    text: String,
+) -> Result<StewardReplyDto, IpcError> {
+    let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let bus = state.kernel.context().bus();
+    let reply = nuomi_core::steward::kernel::handle_message(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        &session_id,
+        &text,
+        &ws_id,
+        Some(bus),
+    )
+    .await?;
+    Ok(reply.into())
+}
+
+pub async fn impl_steward_get_app_snapshot(
+    state: &AppState,
+) -> Result<AppStateSnapshotDto, IpcError> {
+    let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let snapshot = nuomi_core::steward::snapshot::read(state.db_path.clone(), &ws_id).await?;
+    Ok(snapshot.into())
+}
+
+// ---------- steward config change ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigTargetInput {
+    pub target_type: String,
+    pub target_id: String,
+}
+
+impl TryFrom<ConfigTargetInput> for nuomi_core::steward::config_change::ConfigTarget {
+    type Error = IpcError;
+    fn try_from(input: ConfigTargetInput) -> Result<Self, Self::Error> {
+        match input.target_type.as_str() {
+            "provider" => Ok(Self::Provider {
+                id: input.target_id,
+            }),
+            "role" => Ok(Self::Role {
+                id: input.target_id,
+            }),
+            "team" => Ok(Self::Team {
+                id: input.target_id,
+            }),
+            "agent_profile" => Ok(Self::AgentProfile {
+                id: input.target_id,
+            }),
+            _ => Err(IpcError::new(
+                "steward.invalid_target",
+                format!("unknown target_type: {}", input.target_type),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigProposalDto {
+    pub proposal_id: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub diff_preview: String,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::steward::config_change::ConfigChangeProposal> for ConfigProposalDto {
+    fn from(p: nuomi_core::steward::config_change::ConfigChangeProposal) -> Self {
+        Self {
+            proposal_id: p.proposal_id,
+            target_type: p.target_type,
+            target_id: p.target_id,
+            diff_preview: p.diff_preview,
+            created_at: p.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigChangeResultDto {
+    pub proposal_id: String,
+    pub snapshot_id: String,
+    pub target_type: String,
+    pub target_id: String,
+}
+
+impl From<nuomi_core::steward::config_change::ConfigChangeResult> for ConfigChangeResultDto {
+    fn from(r: nuomi_core::steward::config_change::ConfigChangeResult) -> Self {
+        Self {
+            proposal_id: r.proposal_id,
+            snapshot_id: r.snapshot_id,
+            target_type: r.target_type,
+            target_id: r.target_id,
+        }
+    }
+}
+
+pub async fn impl_steward_propose_config_change(
+    state: &AppState,
+    target: ConfigTargetInput,
+    intent: String,
+) -> Result<ConfigProposalDto, IpcError> {
+    let target: nuomi_core::steward::config_change::ConfigTarget = target.try_into()?;
+    let proposal =
+        nuomi_core::steward::config_change::propose(state.db_path.clone(), target, &intent).await?;
+    Ok(proposal.into())
+}
+
+pub async fn impl_steward_confirm_config_change(
+    state: &AppState,
+    proposal_id: String,
+) -> Result<ConfigChangeResultDto, IpcError> {
+    let result = nuomi_core::steward::config_change::confirm_config_change(
+        state.db_path.clone(),
+        &proposal_id,
+    )
+    .await?;
+    Ok(result.into())
+}
+
+pub async fn impl_steward_rollback_config_change(
+    state: &AppState,
+    snapshot_id: String,
+) -> Result<(), IpcError> {
+    nuomi_core::steward::config_change::rollback_config_change(state.db_path.clone(), &snapshot_id)
+        .await?;
+    Ok(())
+}
+
+// ---------- steward dev team ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DevTeamDto {
+    pub team_id: String,
+    pub steward_id: String,
+    pub created_at: i64,
+    pub bindings: Vec<DevRoleBindingDto>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DevRoleBindingDto {
+    pub role_kind: String,
+    pub agent_kind: String,
+    pub agent_ref_id: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DevRoleBindingInput {
+    pub role_kind: String,
+    pub agent_kind: String,
+    pub agent_ref_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionTaskDto {
+    pub id: String,
+    pub cycle_id: String,
+    pub phase: String,
+    pub dev_role: String,
+    pub depends_on: Vec<String>,
+    pub status: String,
+    pub acceptance_criteria: String,
+    pub trigger_source: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub async fn impl_steward_get_dev_team(state: &AppState) -> Result<DevTeamDto, IpcError> {
+    let result = nuomi_core::steward::dev_team::get_dev_team(state.db_path.clone()).await?;
+    Ok(DevTeamDto {
+        team_id: result.team.id,
+        steward_id: result.team.steward_id,
+        created_at: result.team.created_at,
+        bindings: result
+            .bindings
+            .into_iter()
+            .map(|b| DevRoleBindingDto {
+                role_kind: b.role_kind.as_str().into(),
+                agent_kind: b.agent_kind.as_str().into(),
+                agent_ref_id: b.agent_ref_id,
+                updated_at: b.updated_at,
+            })
+            .collect(),
+    })
+}
+
+pub async fn impl_steward_set_dev_role_binding(
+    state: &AppState,
+    binding: DevRoleBindingInput,
+) -> Result<(), IpcError> {
+    let role_kind = parse_dev_role_kind(&binding.role_kind)?;
+    let agent_kind = parse_agent_ref_kind(&binding.agent_kind)?;
+    let dev_binding = nuomi_core::domain::DevRoleBinding {
+        role_kind,
+        agent_kind,
+        agent_ref_id: binding.agent_ref_id,
+        updated_at: nuomi_core::domain::now_ms(),
+    };
+    nuomi_core::steward::dev_team::set_dev_role_binding(
+        state.db_path.clone(),
+        role_kind,
+        dev_binding,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn impl_steward_list_cycle_tasks(
+    state: &AppState,
+    cycle_id: String,
+) -> Result<Vec<EvolutionTaskDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let tasks = tokio::task::spawn_blocking(
+        move || -> Result<Vec<nuomi_core::domain::EvolutionTask>, IpcError> {
+            let db = Db::open(&db_path)?;
+            migrations::run(&db.0)?;
+            let tasks = repos::steward::list_tasks_by_cycle(&db.0, &cycle_id)?;
+            Ok(tasks)
+        },
+    )
+    .await??;
+    Ok(tasks
+        .into_iter()
+        .map(|t| EvolutionTaskDto {
+            id: t.id,
+            cycle_id: t.cycle_id,
+            phase: t.phase.as_str().into(),
+            dev_role: t.dev_role.as_str().into(),
+            depends_on: t.depends_on,
+            status: t.status.as_str().into(),
+            acceptance_criteria: t.acceptance_criteria,
+            trigger_source: t.trigger_source,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+        })
+        .collect())
+}
+
+fn parse_dev_role_kind(s: &str) -> Result<nuomi_core::domain::DevRoleKind, IpcError> {
+    nuomi_core::domain::DevRoleKind::parse(s).ok_or_else(|| {
+        IpcError::new(
+            "steward.invalid_role_kind",
+            format!("unknown role_kind: {s}"),
+        )
+    })
+}
+
+fn parse_agent_ref_kind(s: &str) -> Result<nuomi_core::domain::AgentRefKind, IpcError> {
+    match s {
+        "cli" => Ok(nuomi_core::domain::AgentRefKind::Cli),
+        "role" => Ok(nuomi_core::domain::AgentRefKind::Role),
+        _ => Err(IpcError::new(
+            "steward.invalid_agent_kind",
+            format!("unknown agent_kind: {s}"),
+        )),
+    }
+}
+
+// ---------- steward cleanse ----------
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanseScopeInput {
+    pub time_range: [i64; 2],
+    #[serde(default)]
+    pub include_kinds: Vec<String>,
+    #[serde(default)]
+    pub include_memory_kinds: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanseRulesInput {
+    pub redact_patterns: Vec<RedactPatternInput>,
+    pub aggregation: AggregationConfigInput,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactPatternInput {
+    pub pattern: String,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AggregationConfigInput {
+    #[serde(default = "default_batch_size_ts")]
+    pub batch_size: usize,
+    #[serde(default = "default_true_ts")]
+    pub by_session: bool,
+    #[serde(default = "default_true_ts")]
+    pub by_behavior: bool,
+    #[serde(default = "default_true_ts")]
+    pub by_time_window: bool,
+}
+
+fn default_batch_size_ts() -> usize {
+    5000
+}
+fn default_true_ts() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanseReportDto {
+    pub pool_id: String,
+    pub input_count: usize,
+    pub output_count: usize,
+    pub duration_ms: i64,
+    pub uncovered_kinds: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionDataPoolDto {
+    pub id: String,
+    pub created_at: i64,
+}
+
+pub async fn impl_steward_cleanse_data(
+    state: &AppState,
+    scope: CleanseScopeInput,
+    rules: CleanseRulesInput,
+) -> Result<CleanseReportDto, IpcError> {
+    let scope = nuomi_core::steward::cleanse::CleanseScope {
+        time_range: (scope.time_range[0], scope.time_range[1]),
+        include_kinds: scope.include_kinds,
+        include_memory_kinds: scope.include_memory_kinds,
+    };
+    let rules = nuomi_core::steward::cleanse::CleanseRules {
+        redact_patterns: rules
+            .redact_patterns
+            .into_iter()
+            .map(|p| nuomi_core::steward::cleanse::RedactPattern {
+                pattern: p.pattern,
+                replacement: p.replacement,
+            })
+            .collect(),
+        aggregation: nuomi_core::steward::cleanse::AggregationConfig {
+            batch_size: rules.aggregation.batch_size,
+            by_session: rules.aggregation.by_session,
+            by_behavior: rules.aggregation.by_behavior,
+            by_time_window: rules.aggregation.by_time_window,
+        },
+    };
+    let cleanser = nuomi_core::steward::cleanse::DefaultCleanser;
+    let report = nuomi_core::steward::cleanse::DataCleanser::cleanse(
+        &cleanser,
+        state.db_path.clone(),
+        &scope,
+        &rules,
+    )
+    .await
+    .map_err(|e| IpcError::new("steward.cleanse_failed", e.to_string()))?;
+    Ok(CleanseReportDto {
+        pool_id: report.pool_id,
+        input_count: report.input_count,
+        output_count: report.output_count,
+        duration_ms: report.duration_ms,
+        uncovered_kinds: report.uncovered_kinds,
+    })
+}
+
+pub async fn impl_steward_list_data_pools(
+    state: &AppState,
+) -> Result<Vec<EvolutionDataPoolDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let pools = tokio::task::spawn_blocking(
+        move || -> Result<Vec<nuomi_core::domain::EvolutionDataPool>, IpcError> {
+            let db = Db::open(&db_path)?;
+            migrations::run(&db.0)?;
+            let pools = repos::steward::list_data_pools(&db.0, 100)?;
+            Ok(pools)
+        },
+    )
+    .await??;
+    Ok(pools
+        .into_iter()
+        .map(|p| EvolutionDataPoolDto {
+            id: p.id,
+            created_at: p.created_at,
+        })
+        .collect())
+}
+
+// ---------- steward evolution cycle ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionCycleDto {
+    pub id: String,
+    pub trigger_source: String,
+    pub trigger_context: String,
+    pub phase: String,
+    pub status: String,
+    pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+}
+
+impl From<nuomi_core::domain::EvolutionCycle> for EvolutionCycleDto {
+    fn from(c: nuomi_core::domain::EvolutionCycle) -> Self {
+        Self {
+            id: c.id,
+            trigger_source: c.trigger_source.as_str().into(),
+            trigger_context: c.trigger_context,
+            phase: c.phase.as_str().into(),
+            status: c.status.as_str().into(),
+            created_at: c.created_at,
+            ended_at: c.ended_at,
+        }
+    }
+}
+
+impl From<nuomi_core::domain::EvolutionTask> for EvolutionTaskDto {
+    fn from(t: nuomi_core::domain::EvolutionTask) -> Self {
+        Self {
+            id: t.id,
+            cycle_id: t.cycle_id,
+            phase: t.phase.as_str().into(),
+            dev_role: t.dev_role.as_str().into(),
+            depends_on: t.depends_on,
+            status: t.status.as_str().into(),
+            acceptance_criteria: t.acceptance_criteria,
+            trigger_source: t.trigger_source,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionArtifactDto {
+    pub id: String,
+    pub task_id: String,
+    pub produced_by_role: String,
+    pub artifact_type: String,
+    pub content: serde_json::Value,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_plan: Option<serde_json::Value>,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::domain::EvolutionArtifact> for EvolutionArtifactDto {
+    fn from(a: nuomi_core::domain::EvolutionArtifact) -> Self {
+        Self {
+            id: a.id,
+            task_id: a.task_id,
+            produced_by_role: a.produced_by_role,
+            artifact_type: a.artifact_type.as_str().into(),
+            content: a.content,
+            status: a.status.as_str().into(),
+            diff_preview: a.diff_preview,
+            rollback_plan: a.rollback_plan,
+            created_at: a.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CycleDetailDto {
+    pub cycle: EvolutionCycleDto,
+    pub tasks: Vec<EvolutionTaskDto>,
+    pub artifacts: Vec<EvolutionArtifactDto>,
+}
+
+impl From<nuomi_core::steward::cycle::CycleDetail> for CycleDetailDto {
+    fn from(d: nuomi_core::steward::cycle::CycleDetail) -> Self {
+        Self {
+            cycle: d.cycle.into(),
+            tasks: d.tasks.into_iter().map(Into::into).collect(),
+            artifacts: d.artifacts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+pub async fn impl_steward_trigger_evolution(
+    state: &AppState,
+    instruction: String,
+) -> Result<EvolutionCycleDto, IpcError> {
+    let bus = state.kernel.context().bus();
+    let trigger = nuomi_core::steward::cycle::EvolutionTrigger::UserExplicit {
+        session_id: String::new(),
+        instruction,
+    };
+    let cycle = nuomi_core::steward::cycle::trigger_evolution(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        trigger,
+        Some(bus),
+    )
+    .await?;
+    Ok(cycle.into())
+}
+
+pub async fn impl_steward_list_cycles(
+    state: &AppState,
+    status: Option<String>,
+) -> Result<Vec<EvolutionCycleDto>, IpcError> {
+    let status_filter = match status.as_deref() {
+        Some("running") => Some(nuomi_core::domain::CycleStatus::Running),
+        Some("completed") => Some(nuomi_core::domain::CycleStatus::Completed),
+        Some("cancelled") => Some(nuomi_core::domain::CycleStatus::Cancelled),
+        Some("failed") => Some(nuomi_core::domain::CycleStatus::Failed),
+        _ => None,
+    };
+    let cycles =
+        nuomi_core::steward::cycle::list_cycles(state.db_path.clone(), status_filter, 100).await?;
+    Ok(cycles.into_iter().map(Into::into).collect())
+}
+
+pub async fn impl_steward_get_cycle(
+    state: &AppState,
+    cycle_id: String,
+) -> Result<CycleDetailDto, IpcError> {
+    let detail = nuomi_core::steward::cycle::get_cycle(state.db_path.clone(), &cycle_id).await?;
+    Ok(detail.into())
+}
+
+pub async fn impl_steward_cancel_cycle(state: &AppState, cycle_id: String) -> Result<(), IpcError> {
+    nuomi_core::steward::cycle::cancel_cycle(state.db_path.clone(), &cycle_id).await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GateDecisionDto {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveOutcomeDto {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl From<nuomi_core::steward::gate::ResolveOutcome> for ResolveOutcomeDto {
+    fn from(o: nuomi_core::steward::gate::ResolveOutcome) -> Self {
+        match o {
+            nuomi_core::steward::gate::ResolveOutcome::Merged { rollback_handle } => Self {
+                kind: "merged".into(),
+                rollback_handle: Some(rollback_handle),
+                new_task_id: None,
+                detail: None,
+            },
+            nuomi_core::steward::gate::ResolveOutcome::Rejected => Self {
+                kind: "rejected".into(),
+                rollback_handle: None,
+                new_task_id: None,
+                detail: None,
+            },
+            nuomi_core::steward::gate::ResolveOutcome::ReturnedForRevision { new_task_id } => {
+                Self {
+                    kind: "returned_for_revision".into(),
+                    rollback_handle: None,
+                    new_task_id: Some(new_task_id),
+                    detail: None,
+                }
+            }
+            nuomi_core::steward::gate::ResolveOutcome::Conflict { detail } => Self {
+                kind: "conflict".into(),
+                rollback_handle: None,
+                new_task_id: None,
+                detail: Some(detail),
+            },
+        }
+    }
+}
+
+fn parse_gate_decision(
+    dto: &GateDecisionDto,
+) -> Result<nuomi_core::steward::gate::GateDecision, IpcError> {
+    match dto.kind.as_str() {
+        "approve" => Ok(nuomi_core::steward::gate::GateDecision::Approve),
+        "reject" => Ok(nuomi_core::steward::gate::GateDecision::Reject),
+        "request_changes" => Ok(nuomi_core::steward::gate::GateDecision::RequestChanges {
+            feedback: dto.feedback.clone().unwrap_or_default(),
+        }),
+        other => Err(IpcError::new(
+            "invalid_argument",
+            format!("unknown gate decision: {other}"),
+        )),
+    }
+}
+
+pub async fn impl_steward_list_artifacts(
+    state: &AppState,
+    cycle_id: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<EvolutionArtifactDto>, IpcError> {
+    if let Some(cid) = cycle_id {
+        let artifacts = nuomi_core::steward::artifact::ArtifactRepository::list_by_cycle(
+            state.db_path.clone(),
+            &cid,
+        )
+        .await?;
+        return Ok(artifacts.into_iter().map(Into::into).collect());
+    }
+    if let Some(s) = status {
+        let status_filter = match s.as_str() {
+            "pending_review" => nuomi_core::domain::ArtifactStatus::PendingReview,
+            "approved" => nuomi_core::domain::ArtifactStatus::Approved,
+            "rejected" => nuomi_core::domain::ArtifactStatus::Rejected,
+            "needs_revision" => nuomi_core::domain::ArtifactStatus::NeedsRevision,
+            _ => {
+                return Err(IpcError::new(
+                    "invalid_argument",
+                    format!("unknown artifact status: {s}"),
+                ))
+            }
+        };
+        let artifacts = nuomi_core::steward::artifact::ArtifactRepository::list_by_status(
+            state.db_path.clone(),
+            status_filter,
+        )
+        .await?;
+        return Ok(artifacts.into_iter().map(Into::into).collect());
+    }
+    let artifacts = nuomi_core::steward::artifact::ArtifactRepository::list_by_status(
+        state.db_path.clone(),
+        nuomi_core::domain::ArtifactStatus::PendingReview,
+    )
+    .await?;
+    Ok(artifacts.into_iter().map(Into::into).collect())
+}
+
+pub async fn impl_steward_get_artifact(
+    state: &AppState,
+    artifact_id: String,
+) -> Result<EvolutionArtifactDto, IpcError> {
+    let artifact =
+        nuomi_core::steward::artifact::ArtifactRepository::get(state.db_path.clone(), &artifact_id)
+            .await?;
+    Ok(artifact.into())
+}
+
+pub async fn impl_steward_resolve_gate(
+    state: &AppState,
+    artifact_id: String,
+    decision: GateDecisionDto,
+) -> Result<ResolveOutcomeDto, IpcError> {
+    use nuomi_core::steward::gate::EvolutionGate;
+    let gate = nuomi_core::steward::gate::DefaultEvolutionGate;
+    let outcome = gate
+        .resolve(
+            state.db_path.clone(),
+            &artifact_id,
+            parse_gate_decision(&decision)?,
+            decision.feedback.as_deref(),
+        )
+        .await?;
+    Ok(outcome.into())
+}
+
+pub async fn impl_steward_resolve_gate_batch(
+    state: &AppState,
+    cycle_id: String,
+    decision: GateDecisionDto,
+) -> Result<Vec<ResolveOutcomeDto>, IpcError> {
+    use nuomi_core::steward::gate::EvolutionGate;
+    let gate = nuomi_core::steward::gate::DefaultEvolutionGate;
+    let outcomes = gate
+        .resolve_batch(
+            state.db_path.clone(),
+            &cycle_id,
+            parse_gate_decision(&decision)?,
+        )
+        .await?;
+    Ok(outcomes.into_iter().map(Into::into).collect())
+}
+
+pub async fn impl_steward_list_gate_pending(
+    state: &AppState,
+) -> Result<Vec<EvolutionArtifactDto>, IpcError> {
+    let artifacts = nuomi_core::steward::artifact::ArtifactRepository::list_by_status(
+        state.db_path.clone(),
+        nuomi_core::domain::ArtifactStatus::PendingReview,
+    )
+    .await?;
+    Ok(artifacts.into_iter().map(Into::into).collect())
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardEventDto {
+    pub id: i64,
+    pub aggregate_id: String,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub seq: i64,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::domain::EventRecord> for StewardEventDto {
+    fn from(e: nuomi_core::domain::EventRecord) -> Self {
+        Self {
+            id: e.id,
+            aggregate_id: e.aggregate_id,
+            kind: e.kind,
+            payload: e.payload,
+            seq: e.seq,
+            created_at: e.created_at,
+        }
+    }
+}
+
+pub async fn impl_steward_list_events(
+    state: &AppState,
+    aggregate_id: Option<String>,
+    kind_prefix: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<StewardEventDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let limit = limit.unwrap_or(100).min(1000);
+    let events = tokio::task::spawn_blocking(move || {
+        let db = nuomi_core::store::Db::open(&db_path)?;
+        nuomi_core::steward::events::list(
+            &db.0,
+            aggregate_id.as_deref(),
+            kind_prefix.as_deref(),
+            limit,
+        )
+    })
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+    Ok(events.into_iter().map(Into::into).collect())
+}
+
+pub async fn impl_steward_set_online_authorization(
+    state: &AppState,
+    authorized: bool,
+) -> Result<(), IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut db = nuomi_core::store::Db::open(&db_path)?;
+        nuomi_core::store::repos::settings::set(
+            &mut db.0,
+            "steward.online_authorized",
+            if authorized { "true" } else { "false" },
+        )
+    })
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+    Ok(())
 }
 
 #[cfg(test)]

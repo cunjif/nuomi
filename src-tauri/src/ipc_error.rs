@@ -169,6 +169,43 @@ impl From<tokio::task::JoinError> for IpcError {
     }
 }
 
+impl From<nuomi_core::steward::gate::GateError> for IpcError {
+    fn from(e: nuomi_core::steward::gate::GateError) -> Self {
+        use nuomi_core::steward::gate::GateError as E;
+        match e {
+            E::NotFound(id) => Self::new("steward.not_found", format!("artifact {id} not found")),
+            E::AlreadyResolved(id) => Self::new(
+                "steward.already_resolved",
+                format!("artifact {id} already resolved"),
+            ),
+            E::Conflict(detail) => Self::new("steward.conflict", detail),
+            E::Merge(msg) => Self::new("steward.merge_failed", msg),
+            E::Store(msg) => Self::new("steward.store_failed", msg),
+        }
+    }
+}
+
+impl From<nuomi_core::steward::StewardError> for IpcError {
+    fn from(e: nuomi_core::steward::StewardError) -> Self {
+        use nuomi_core::steward::StewardError as E;
+        match e {
+            E::NotFound { entity, id } => {
+                Self::new("steward.not_found", format!("{entity}#{id} not found"))
+            }
+            E::Conflict { entity, id, reason } => Self::with_details(
+                "steward.conflict",
+                format!("conflict on {entity}#{id}"),
+                serde_json::json!({ "entity": entity, "id": id, "reason": reason }),
+            ),
+            E::NotAuthorized(msg) => Self::new("steward.forbidden", msg),
+            E::DevTeamNotReady(msg) => Self::new("steward.precondition_failed", msg),
+            E::Store(msg) => Self::new("steward.store_failed", msg),
+            E::Provider(msg) => Self::new("steward.provider_failed", msg),
+            E::Intent(msg) => Self::new("steward.intent_failed", msg),
+        }
+    }
+}
+
 /// Stable code constants (frontend i18n keys reference these).
 pub mod codes {
     pub const STORE_NOT_FOUND: &str = "store.not_found";

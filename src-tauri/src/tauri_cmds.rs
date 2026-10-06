@@ -1241,6 +1241,218 @@ pub async fn list_asr_models(
     commands::impl_list_asr_models(&state).await
 }
 
+// ---------- steward ----------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_create_session(
+    state: tauri::State<'_, AppState>,
+    title: String,
+) -> Result<commands::StewardSessionDto, IpcError> {
+    commands::impl_steward_create_session(&state, title).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::StewardSessionDto>, IpcError> {
+    commands::impl_steward_list_sessions(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_send_message(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    text: String,
+) -> Result<commands::StewardReplyDto, IpcError> {
+    commands::impl_steward_send_message(&state, session_id, text).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_app_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::AppStateSnapshotDto, IpcError> {
+    commands::impl_steward_get_app_snapshot(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_propose_config_change(
+    state: tauri::State<'_, AppState>,
+    target: commands::ConfigTargetInput,
+    intent: String,
+) -> Result<commands::ConfigProposalDto, IpcError> {
+    commands::impl_steward_propose_config_change(&state, target, intent).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_confirm_config_change(
+    state: tauri::State<'_, AppState>,
+    proposal_id: String,
+) -> Result<commands::ConfigChangeResultDto, IpcError> {
+    commands::impl_steward_confirm_config_change(&state, proposal_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_rollback_config_change(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_steward_rollback_config_change(&state, snapshot_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_dev_team(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::DevTeamDto, IpcError> {
+    commands::impl_steward_get_dev_team(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_set_dev_role_binding(
+    state: tauri::State<'_, AppState>,
+    binding: commands::DevRoleBindingInput,
+) -> Result<(), IpcError> {
+    commands::impl_steward_set_dev_role_binding(&state, binding).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_cycle_tasks(
+    state: tauri::State<'_, AppState>,
+    cycle_id: String,
+) -> Result<Vec<commands::EvolutionTaskDto>, IpcError> {
+    commands::impl_steward_list_cycle_tasks(&state, cycle_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_cleanse_data(
+    state: tauri::State<'_, AppState>,
+    scope: commands::CleanseScopeInput,
+    rules: commands::CleanseRulesInput,
+) -> Result<commands::CleanseReportDto, IpcError> {
+    commands::impl_steward_cleanse_data(&state, scope, rules).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_data_pools(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::EvolutionDataPoolDto>, IpcError> {
+    commands::impl_steward_list_data_pools(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_trigger_evolution(
+    state: tauri::State<'_, AppState>,
+    instruction: String,
+) -> Result<commands::EvolutionCycleDto, IpcError> {
+    commands::impl_steward_trigger_evolution(&state, instruction).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_cycles(
+    state: tauri::State<'_, AppState>,
+    status: Option<String>,
+) -> Result<Vec<commands::EvolutionCycleDto>, IpcError> {
+    commands::impl_steward_list_cycles(&state, status).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_cycle(
+    state: tauri::State<'_, AppState>,
+    cycle_id: String,
+) -> Result<commands::CycleDetailDto, IpcError> {
+    commands::impl_steward_get_cycle(&state, cycle_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_cancel_cycle(
+    state: tauri::State<'_, AppState>,
+    cycle_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_steward_cancel_cycle(&state, cycle_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_artifacts(
+    state: tauri::State<'_, AppState>,
+    cycle_id: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<commands::EvolutionArtifactDto>, IpcError> {
+    commands::impl_steward_list_artifacts(&state, cycle_id, status).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_artifact(
+    state: tauri::State<'_, AppState>,
+    artifact_id: String,
+) -> Result<commands::EvolutionArtifactDto, IpcError> {
+    commands::impl_steward_get_artifact(&state, artifact_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_resolve_gate(
+    state: tauri::State<'_, AppState>,
+    artifact_id: String,
+    decision: commands::GateDecisionDto,
+) -> Result<commands::ResolveOutcomeDto, IpcError> {
+    commands::impl_steward_resolve_gate(&state, artifact_id, decision).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_resolve_gate_batch(
+    state: tauri::State<'_, AppState>,
+    cycle_id: String,
+    decision: commands::GateDecisionDto,
+) -> Result<Vec<commands::ResolveOutcomeDto>, IpcError> {
+    commands::impl_steward_resolve_gate_batch(&state, cycle_id, decision).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_gate_pending(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::EvolutionArtifactDto>, IpcError> {
+    commands::impl_steward_list_gate_pending(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_events(
+    state: tauri::State<'_, AppState>,
+    aggregate_id: Option<String>,
+    kind_prefix: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<commands::StewardEventDto>, IpcError> {
+    commands::impl_steward_list_events(&state, aggregate_id, kind_prefix, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_set_online_authorization(
+    state: tauri::State<'_, AppState>,
+    authorized: bool,
+) -> Result<(), IpcError> {
+    commands::impl_steward_set_online_authorization(&state, authorized).await
+}
+
 /// Frontend heartbeat: called once after the React root mounts to signal that
 /// the webview is alive. If this never arrives within the watchdog grace
 /// period, the shell auto-reloads the webview (see `shell_resilience`).

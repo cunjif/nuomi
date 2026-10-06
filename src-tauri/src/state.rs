@@ -348,7 +348,11 @@ impl AppState {
                 let entry = self
                     .workspace_registry
                     .find_by_id(id)
-                    .map_err(|e| CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(e.to_string())))?
+                    .map_err(|e| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            e.to_string(),
+                        ))
+                    })?
                     .ok_or_else(|| {
                         CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
                             id.to_string(),
@@ -367,7 +371,11 @@ impl AppState {
                 let entry = self
                     .workspace_registry
                     .find_by_id(id)
-                    .map_err(|e| CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(e.to_string())))?
+                    .map_err(|e| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            e.to_string(),
+                        ))
+                    })?
                     .ok_or_else(|| {
                         CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
                             id.to_string(),
