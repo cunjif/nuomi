@@ -1,14 +1,21 @@
+import { useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc/client";
-import { useStewardSessions } from "../../lib/store/useStewardSessions";
 import { toast } from "../../lib/store/toastStore";
-import { ConfigConfirm } from "./ConfigConfirm";
+import type { StewardReplyDto } from "../../lib/ipc/bindings.gen";
+
+interface ChatMessage {
+  role: "user" | "steward";
+  text: string;
+  reply?: StewardReplyDto;
+}
 
 export function StewardChat(): ReactNode {
   const qc = useQueryClient();
-  const { sessions, currentSessionId, setSessions, setCurrentSessionId, addSession } =
-    useStewardSessions();
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const sessionsQuery = useQuery({
     queryKey: ["steward", "sessions"],
@@ -16,15 +23,12 @@ export function StewardChat(): ReactNode {
     staleTime: 5000,
   });
 
-  if (sessionsQuery.data && sessionsQuery.data !== sessions) {
-    setSessions(sessionsQuery.data);
-  }
-
   const createMut = useMutation({
     mutationFn: (title: string) => ipc.stewardCreateSession(title),
     onSuccess: (session) => {
-      addSession(session);
       void qc.invalidateQueries({ queryKey: ["steward", "sessions"] });
+      setCurrentSessionId(session.id);
+      setMessages([]);
     },
     onError: (e) => toast.error(`创建会话失败: ${e}`),
   });
@@ -32,28 +36,51 @@ export function StewardChat(): ReactNode {
   const sendMut = useMutation({
     mutationFn: ({ sessionId, text }: { sessionId: string; text: string }) =>
       ipc.stewardSendMessage(sessionId, text),
-    onError: (e) => toast.error(`发送失败: ${e}`),
+    onSuccess: (reply, vars) => {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: vars.text },
+        { role: "steward", text: replyText(reply), reply },
+      ]);
+    },
+    onError: (e, vars) => {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: vars.text },
+        { role: "steward", text: `发送失败: ${e}` },
+      ]);
+    },
   });
+
+  const handleSend = useCallback(() => {
+    const trimmed = input.trim();
+    if (!trimmed || !currentSessionId || sendMut.isPending) return;
+    setInput("");
+    sendMut.mutate({ sessionId: currentSessionId, text: trimmed });
+  }, [input, currentSessionId, sendMut]);
 
   return (
     <div className="flex h-full">
-      <div className="w-64 border-r border-zinc-800 overflow-y-auto p-2">
+      <div className="w-56 shrink-0 overflow-y-auto border-r border-ink-muted/30 p-2">
         <button
-          className="w-full rounded bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
-          onClick={() => createMut.mutate("新会话")}
+          className="w-full rounded-[12px_255px_15px_225px/225px_15px_255px_12px] bg-surface-overlay px-3 py-1.5 text-left font-note-hand text-sm hover:bg-surface-raised"
+          onClick={() => createMut.mutate("新管家会话")}
         >
           + 新建会话
         </button>
         <ul className="mt-2 space-y-1">
-          {sessions.map((s) => (
+          {(sessionsQuery.data ?? []).map((s) => (
             <li key={s.id}>
               <button
-                className={`w-full rounded px-3 py-1.5 text-left text-sm ${
+                className={`w-full rounded-[12px_255px_15px_225px/225px_15px_255px_12px] px-3 py-1.5 text-left font-note-hand text-sm ${
                   currentSessionId === s.id
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-900"
+                    ? "bg-surface-overlay text-ink-accent"
+                    : "text-ink-muted hover:bg-surface-overlay"
                 }`}
-                onClick={() => setCurrentSessionId(s.id)}
+                onClick={() => {
+                  setCurrentSessionId(s.id);
+                  setMessages([]);
+                }}
               >
                 {s.title}
               </button>
@@ -61,16 +88,50 @@ export function StewardChat(): ReactNode {
           ))}
         </ul>
       </div>
-      <div className="flex-1 flex flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         {currentSessionId ? (
-          <StewardChatMain
-            onSend={(text) => sendMut.mutate({ sessionId: currentSessionId, text })}
-            sending={sendMut.isPending}
-            reply={sendMut.data}
-          />
+          <>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {messages.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-ink-muted">
+                  向管家发送消息，例如"诊断应用状态"、"触发进化"等
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((msg, i) => (
+                    <MessageBubble key={i} msg={msg} />
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 border-t border-ink-muted/30 p-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSend();
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  className="flex-1 rounded border border-ink-muted/30 bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-ink-accent"
+                  placeholder="向管家发送消息..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  disabled={sendMut.isPending}
+                />
+                <button
+                  type="submit"
+                  className="rounded bg-ink-accent px-4 py-1.5 text-sm text-surface disabled:opacity-50"
+                  disabled={sendMut.isPending || !input.trim()}
+                >
+                  发送
+                </button>
+              </form>
+            </div>
+          </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-zinc-500">
-            选择或创建一个会话
+          <div className="flex flex-1 items-center justify-center text-sm text-ink-muted">
+            选择或创建一个管家会话
           </div>
         )}
       </div>
@@ -78,85 +139,68 @@ export function StewardChat(): ReactNode {
   );
 }
 
-function StewardChatMain({
-  onSend,
-  sending,
-  reply,
-}: {
-  onSend: (text: string) => void;
-  sending: boolean;
-  reply: Awaited<ReturnType<typeof ipc.stewardSendMessage>> | undefined;
-}): ReactNode {
-  let input = "";
-  return (
-    <div className="flex-1 flex flex-col">
-      <div className="flex-1 overflow-y-auto p-4">
-        {reply && <StewardReplyView reply={reply} />}
+function replyText(reply: StewardReplyDto): string {
+  switch (reply.type) {
+    case "text":
+      return reply.content;
+    case "config_proposal":
+      return `配置变更建议（${reply.proposal_id}）：\n${reply.diff}`;
+    case "evolution_accepted":
+      return `进化周期已受理，周期 ID: ${reply.cycle_id}`;
+    case "clarify":
+      return `请明确您的意图：${reply.candidates.map((c) => c.kind).join(", ")}`;
+    case "refused":
+      return `拒绝: ${reply.reason}`;
+  }
+}
+
+function MessageBubble({ msg }: { msg: ChatMessage }): ReactNode {
+  if (msg.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded bg-surface-overlay px-3 py-2 text-sm text-ink">
+          {msg.text}
+        </div>
       </div>
-      <div className="border-t border-zinc-800 p-3">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (input.trim()) {
-              onSend(input.trim());
-              input = "";
-            }
-          }}
-          className="flex gap-2"
-        >
-          <input
-            className="flex-1 rounded bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none border border-zinc-800 focus:border-zinc-600"
-            placeholder="向管家发送消息..."
-            onChange={(e) => {
-              input = e.target.value;
-            }}
-            disabled={sending}
-          />
-          <button
-            type="submit"
-            className="rounded bg-zinc-700 px-4 py-1.5 text-sm hover:bg-zinc-600 disabled:opacity-50"
-            disabled={sending}
-          >
-            发送
-          </button>
-        </form>
+    );
+  }
+  const reply = msg.reply;
+  if (reply && reply.type === "config_proposal") {
+    return <ConfigProposalBubble reply={reply} />;
+  }  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] whitespace-pre-wrap rounded bg-surface-raised px-3 py-2 text-sm text-ink">
+        {msg.text}
       </div>
     </div>
   );
 }
 
-function StewardReplyView({
-  reply,
-}: {
-  reply: Awaited<ReturnType<typeof ipc.stewardSendMessage>>;
-}): ReactNode {
-  switch (reply.type) {
-    case "text":
-      return <div className="rounded bg-zinc-900 p-3 text-sm text-zinc-200">{reply.content}</div>;
-    case "config_proposal":
-      return <ConfigConfirm proposalId={reply.proposal_id} diff={reply.diff} />;
-    case "evolution_accepted":
-      return (
-        <div className="rounded bg-zinc-900 p-3 text-sm text-zinc-200">
-          进化周期已受理，周期 ID: {reply.cycle_id}
-        </div>
-      );
-    case "clarify":
-      return (
-        <div className="rounded bg-zinc-900 p-3 text-sm text-zinc-200">
-          <p>请明确您的意图：</p>
-          <ul className="mt-2 list-disc pl-5">
-            {reply.candidates.map((c, i) => (
-              <li key={i}>{c.kind}</li>
-            ))}
-          </ul>
-        </div>
-      );
-    case "refused":
-      return (
-        <div className="rounded bg-red-950 p-3 text-sm text-red-200">
-          拒绝: {reply.reason}
-        </div>
-      );
-  }
+function ConfigProposalBubble({ reply }: { reply: Extract<StewardReplyDto, { type: "config_proposal" }> }): ReactNode {
+  const qc = useQueryClient();
+  const confirmMut = useMutation({
+    mutationFn: () => ipc.stewardConfirmConfigChange(reply.proposal_id),
+    onSuccess: () => {
+      toast.success("配置变更已确认");
+      void qc.invalidateQueries({ queryKey: ["steward"] });
+    },
+    onError: (e) => toast.error(`确认失败: ${e}`),
+  });
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] rounded bg-surface-raised p-3">
+        <p className="mb-2 text-sm font-medium text-ink">配置变更建议</p>
+        <pre className="mb-3 max-h-60 overflow-auto rounded bg-surface px-2 py-1 text-xs text-ink-muted">
+          {reply.diff}
+        </pre>
+        <button
+          className="rounded bg-ink-accent px-3 py-1 text-xs text-surface disabled:opacity-50"
+          onClick={() => confirmMut.mutate()}
+          disabled={confirmMut.isPending}
+        >
+          {confirmMut.isPending ? "确认中..." : "确认变更"}
+        </button>
+      </div>
+    </div>
+  );
 }

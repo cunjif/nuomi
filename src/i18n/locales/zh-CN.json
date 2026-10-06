@@ -989,12 +989,5 @@
     "openFromHint": "在当前工作区打开（来自 {{name}}）",
     "selectWorkspaceHint": "请先选择一个工作区",
     "pullToCurrent": "↗ 拉到当前"
-  },
-  "steward": {
-    "tabChat": "会话",
-    "tabCycles": "进化周期",
-    "tabGate": "验收门",
-    "tabTeam": "研发团队",
-    "tabSettings": "设置"
   }
 }
