@@ -23,6 +23,7 @@ pub mod orchestrator;
 pub mod plugins;
 pub mod providers;
 pub mod services;
+pub mod steward;
 pub mod store;
 
 pub use error::{CoreError, CoreResult};

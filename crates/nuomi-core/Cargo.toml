@@ -31,6 +31,8 @@ toml = "0.8"
 dirs = "5"
 # Zip install source for the plugin panel (ADR 0009 §4 addendum): deflate only.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Regex for steward data cleansing redaction patterns (K-Steward-5).
+regex = "1"
 
 [dev-dependencies]
 tempfile.workspace = true
