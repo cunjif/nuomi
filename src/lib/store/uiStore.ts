@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { measureAsync } from "../perf/metrics";
 
-export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins";
+export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins" | "steward";
 
 /**
  * Which surface owns the main content area: the conversation view (whatever

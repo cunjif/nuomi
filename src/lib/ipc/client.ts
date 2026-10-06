@@ -39,6 +39,11 @@ import {
   type ScheduleInput,
   type TodoItemDto,
   type WorkspaceEntryDto,
+  type CleanseRulesInput,
+  type CleanseScopeInput,
+  type ConfigTargetInput,
+  type DevRoleBindingInput,
+  type GateDecisionDto,
 } from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
@@ -291,6 +296,30 @@ export const ipc = {
     fileB: string,
   ) => unwrap(current.crossWorkspaceCompare(workspaceA, fileA, workspaceB, fileB)),
   detectIsolationViolations: () => unwrap(current.detectIsolationViolations()),
+
+  stewardCreateSession: (title: string) => unwrap(current.stewardCreateSession(title)),
+  stewardListSessions: () => unwrap(current.stewardListSessions()),
+  stewardSendMessage: (sessionId: string, text: string) => unwrap(current.stewardSendMessage(sessionId, text)),
+  stewardGetAppSnapshot: () => unwrap(current.stewardGetAppSnapshot()),
+  stewardProposeConfigChange: (target: ConfigTargetInput, intent: string) => unwrap(current.stewardProposeConfigChange(target, intent)),
+  stewardConfirmConfigChange: (proposalId: string) => unwrap(current.stewardConfirmConfigChange(proposalId)),
+  stewardRollbackConfigChange: (snapshotId: string) => unwrap(current.stewardRollbackConfigChange(snapshotId)),
+  stewardGetDevTeam: () => unwrap(current.stewardGetDevTeam()),
+  stewardSetDevRoleBinding: (binding: DevRoleBindingInput) => unwrap(current.stewardSetDevRoleBinding(binding)),
+  stewardListCycleTasks: (cycleId: string) => unwrap(current.stewardListCycleTasks(cycleId)),
+  stewardCleanseData: (scope: CleanseScopeInput, rules: CleanseRulesInput) => unwrap(current.stewardCleanseData(scope, rules)),
+  stewardListDataPools: () => unwrap(current.stewardListDataPools()),
+  stewardTriggerEvolution: (instruction: string) => unwrap(current.stewardTriggerEvolution(instruction)),
+  stewardListCycles: (status: string | null) => unwrap(current.stewardListCycles(status)),
+  stewardGetCycle: (cycleId: string) => unwrap(current.stewardGetCycle(cycleId)),
+  stewardCancelCycle: (cycleId: string) => unwrap(current.stewardCancelCycle(cycleId)),
+  stewardListArtifacts: (cycleId: string | null, status: string | null) => unwrap(current.stewardListArtifacts(cycleId, status)),
+  stewardGetArtifact: (artifactId: string) => unwrap(current.stewardGetArtifact(artifactId)),
+  stewardResolveGate: (artifactId: string, decision: GateDecisionDto) => unwrap(current.stewardResolveGate(artifactId, decision)),
+  stewardResolveGateBatch: (cycleId: string, decision: GateDecisionDto) => unwrap(current.stewardResolveGateBatch(cycleId, decision)),
+  stewardListGatePending: () => unwrap(current.stewardListGatePending()),
+  stewardListEvents: (aggregateId: string | null, kindPrefix: string | null, limit: number | null) => unwrap(current.stewardListEvents(aggregateId, kindPrefix, limit)),
+  stewardSetOnlineAuthorization: (authorized: boolean) => unwrap(current.stewardSetOnlineAuthorization(authorized)),
 };
 
 export type Ipc = typeof ipc;

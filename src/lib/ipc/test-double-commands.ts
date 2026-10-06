@@ -6,7 +6,24 @@
 import type {
   AgentDetailDto,
   AgentProfileInput,
+  AppStateSnapshotDto,
   AsrModelDto,
+  ConfigChangeResultDto,
+  ConfigProposalDto,
+  ConfigTargetInput,
+  CleanseReportDto,
+  CleanseRulesInput,
+  CleanseScopeInput,
+  DevRoleBindingInput,
+  DevTeamDto,
+  EvolutionDataPoolDto,
+  EvolutionTaskDto,
+  EvolutionCycleDto,
+  EvolutionArtifactDto,
+  CycleDetailDto,
+  GateDecisionDto,
+  ResolveOutcomeDto,
+  StewardEventDto,
   CloseWorkspaceResult,
   ContextInjectionDto,
   ContextInjectionInput,
@@ -37,6 +54,7 @@ import type {
   RoleInput,
   RunDto,
   ScheduleDto,
+  StewardSessionDto,
   TaskDto,
   TeamDto,
   TeamInput,
@@ -1211,6 +1229,158 @@ export function testDoubleCommands(): CommandSet {
     },
     async nuomiHeartbeat() {
       return;
+    },
+
+    async stewardCreateSession(title) {
+      const now = Date.now();
+      const s: StewardSessionDto = {
+        id: nextId("ss"),
+        stewardId: "steward",
+        title,
+        goal: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return ok(s);
+    },
+    async stewardListSessions() {
+      return ok([]);
+    },
+    async stewardSendMessage(_sessionId, _text) {
+      return ok({ type: "text" as const, content: "test double" });
+    },
+    async stewardGetAppSnapshot() {
+      const snap: AppStateSnapshotDto = {
+        providers: [],
+        roles: [],
+        teams: [],
+        agentProfiles: [],
+        sessions: [],
+        recentEvents: [],
+        memoryEntries: [],
+        promptVersions: [],
+        evolutionCycles: [],
+      };
+      return ok(snap);
+    },
+
+    async stewardProposeConfigChange(_target: ConfigTargetInput, _intent: string) {
+      const proposal: ConfigProposalDto = {
+        proposalId: nextId("proposal"),
+        targetType: "role",
+        targetId: "td",
+        diffPreview: "--- before\n+++ after\n",
+        createdAt: Date.now(),
+      };
+      return ok(proposal);
+    },
+    async stewardConfirmConfigChange(_proposalId: string) {
+      const result: ConfigChangeResultDto = {
+        proposalId: "td",
+        snapshotId: nextId("snapshot"),
+        targetType: "role",
+        targetId: "td",
+      };
+      return ok(result);
+    },
+    async stewardRollbackConfigChange(_snapshotId: string) {
+      return ok(null);
+    },
+
+    async stewardGetDevTeam() {
+      const team: DevTeamDto = {
+        teamId: "steward_dev_team",
+        stewardId: "steward",
+        createdAt: Date.now(),
+        bindings: [],
+      };
+      return ok(team);
+    },
+    async stewardSetDevRoleBinding(_binding: DevRoleBindingInput) {
+      return ok(null);
+    },
+    async stewardListCycleTasks(_cycleId: string) {
+      return ok([] as EvolutionTaskDto[]);
+    },
+
+    async stewardCleanseData(_scope: CleanseScopeInput, _rules: CleanseRulesInput) {
+      const report: CleanseReportDto = {
+        poolId: nextId("pool"),
+        inputCount: 0,
+        outputCount: 0,
+        durationMs: 0,
+        uncoveredKinds: [],
+      };
+      return ok(report);
+    },
+    async stewardListDataPools() {
+      return ok([] as EvolutionDataPoolDto[]);
+    },
+    async stewardTriggerEvolution(_instruction: string) {
+      return ok({
+        id: 'cycle-test',
+        triggerSource: 'user',
+        triggerContext: '',
+        phase: 'cleanse',
+        status: 'running',
+        createdAt: 0,
+      } as EvolutionCycleDto);
+    },
+    async stewardListCycles(_status: string | null) {
+      return ok([] as EvolutionCycleDto[]);
+    },
+    async stewardGetCycle(_cycleId: string) {
+      return ok({
+        cycle: {
+          id: 'cycle-test',
+          triggerSource: 'user',
+          triggerContext: '',
+          phase: 'cleanse',
+          status: 'running',
+          createdAt: 0,
+        },
+        tasks: [],
+        artifacts: [],
+      } as CycleDetailDto);
+    },
+    async stewardCancelCycle(_cycleId: string) {
+      return ok(null);
+    },
+    async stewardListArtifacts(_cycleId: string | null, _status: string | null) {
+      return ok([] as EvolutionArtifactDto[]);
+    },
+    async stewardGetArtifact(_artifactId: string) {
+      return ok({
+        id: 'artifact-test',
+        taskId: 'task-test',
+        producedByRole: 'steward',
+        artifactType: 'research_report',
+        content: {},
+        status: 'pending_review',
+        createdAt: 0,
+      } as EvolutionArtifactDto);
+    },
+    async stewardResolveGate(_artifactId: string, _decision: GateDecisionDto) {
+      return ok({
+        kind: 'merged',
+        rollbackHandle: 'config:test',
+      } as ResolveOutcomeDto);
+    },
+    async stewardResolveGateBatch(_cycleId: string, _decision: GateDecisionDto) {
+      return ok([] as ResolveOutcomeDto[]);
+    },
+    async stewardListGatePending() {
+      return ok([] as EvolutionArtifactDto[]);
+    },
+    async stewardListEvents(
+      _aggregateId: string | null,
+      _kindPrefix: string | null,
+      _limit: number | null,
+    ) {
+      return ok([] as StewardEventDto[]);
+    },
+    async stewardSetOnlineAuthorization(_authorized: boolean) {
+      return ok(null);
     },
   };
   return cmds;

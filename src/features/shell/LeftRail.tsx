@@ -13,6 +13,7 @@ const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
   { view: "approvals", labelKey: "shell.navApprovals", icon: "approvals" },
   { view: "scheduler", labelKey: "shell.navScheduler", icon: "scheduler" },
   { view: "plugins", labelKey: "shell.navPlugins", icon: "plugins" },
+  { view: "steward", labelKey: "shell.navSteward", icon: "sparkles" },
   { view: "settings", labelKey: "shell.navSettings", icon: "settings" },
 ];
 

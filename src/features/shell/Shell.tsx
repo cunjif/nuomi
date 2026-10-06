@@ -15,6 +15,7 @@ import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
+import { StewardView } from "../steward/StewardView";
 import { AreaNav } from "./AreaNav";
 import { ChatTabBar } from "./ChatTabBar";
 import { isChatPanelActive } from "./isChatPanelActive";
@@ -367,5 +368,7 @@ function renderView(view: View, workspaceId: string | null): ReactNode {
       return <SettingsView />;
     case "plugins":
       return <PluginsView />;
+    case "steward":
+      return <StewardView />;
   }
 }

@@ -1078,6 +1078,190 @@ async listAsrModels() : Promise<Result<AsrModelDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async stewardCreateSession(title: string) : Promise<Result<StewardSessionDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_create_session", { title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListSessions() : Promise<Result<StewardSessionDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_sessions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardSendMessage(sessionId: string, text: string) : Promise<Result<StewardReplyDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_send_message", { sessionId, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardGetAppSnapshot() : Promise<Result<AppStateSnapshotDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_get_app_snapshot") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardProposeConfigChange(target: ConfigTargetInput, intent: string) : Promise<Result<ConfigProposalDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_propose_config_change", { target, intent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardConfirmConfigChange(proposalId: string) : Promise<Result<ConfigChangeResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_confirm_config_change", { proposalId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardRollbackConfigChange(snapshotId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_rollback_config_change", { snapshotId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardGetDevTeam() : Promise<Result<DevTeamDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_get_dev_team") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardSetDevRoleBinding(binding: DevRoleBindingInput) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_set_dev_role_binding", { binding }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListCycleTasks(cycleId: string) : Promise<Result<EvolutionTaskDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_cycle_tasks", { cycleId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardCleanseData(scope: CleanseScopeInput, rules: CleanseRulesInput) : Promise<Result<CleanseReportDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_cleanse_data", { scope, rules }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListDataPools() : Promise<Result<EvolutionDataPoolDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_data_pools") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardTriggerEvolution(instruction: string) : Promise<Result<EvolutionCycleDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_trigger_evolution", { instruction }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListCycles(status: string | null) : Promise<Result<EvolutionCycleDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_cycles", { status }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardGetCycle(cycleId: string) : Promise<Result<CycleDetailDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_get_cycle", { cycleId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardCancelCycle(cycleId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_cancel_cycle", { cycleId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListArtifacts(cycleId: string | null, status: string | null) : Promise<Result<EvolutionArtifactDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_artifacts", { cycleId, status }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardGetArtifact(artifactId: string) : Promise<Result<EvolutionArtifactDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_get_artifact", { artifactId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardResolveGate(artifactId: string, decision: GateDecisionDto) : Promise<Result<ResolveOutcomeDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_resolve_gate", { artifactId, decision }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardResolveGateBatch(cycleId: string, decision: GateDecisionDto) : Promise<Result<ResolveOutcomeDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_resolve_gate_batch", { cycleId, decision }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListGatePending() : Promise<Result<EvolutionArtifactDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_gate_pending") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardListEvents(aggregateId: string | null, kindPrefix: string | null, limit: number | null) : Promise<Result<StewardEventDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_list_events", { aggregateId, kindPrefix, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stewardSetOnlineAuthorization(authorized: boolean) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_set_online_authorization", { authorized }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Frontend heartbeat: called once after the React root mounts to signal that
  * the webview is alive. If this never arrives within the watchdog grace
@@ -1126,9 +1310,12 @@ export type AgentProfileInput = { name: string; flavor: CliFlavorDto; command: s
  * CLI 会话保持参数模板（ADR 0012 D6）。如 `--resume {session_id}`。
  */
 resumeArgs?: string | null }
+export type AgentProfileSummaryDto = { id: string; name: string; kind: string }
 export type AgentRefDto = { kind: string; id: string; name: string }
 export type AgentRefInput = { kind: string; id: string }
+export type AggregationConfigInput = { batchSize?: number; bySession?: boolean; byBehavior?: boolean; byTimeWindow?: boolean }
 export type AiCommitResultDto = { message: string; truncated: boolean; agentName: string; elapsedMs: number }
+export type AppStateSnapshotDto = { providers: ProviderSummaryDto[]; roles: RoleSummaryDto[]; teams: TeamSummaryDto[]; agentProfiles: AgentProfileSummaryDto[]; sessions: SessionSummaryDto[]; recentEvents: EventSummaryDto[]; memoryEntries: MemorySummaryDto[]; promptVersions: PromptVersionSummaryDto[]; evolutionCycles: CycleSummaryDto[] }
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceRootPath: string | null }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
@@ -1136,6 +1323,9 @@ export type AttachmentDto = { id: string; sessionId: string; seq: number | null;
  * System modality capability (mirrors `nuomi_core::domain::Capability`).
  */
 export type CapabilityDto = "reasoning" | "image" | "voice" | "video"
+export type CleanseReportDto = { poolId: string; inputCount: number; outputCount: number; durationMs: number; uncoveredKinds: string[] }
+export type CleanseRulesInput = { redactPatterns: RedactPatternInput[]; aggregation: AggregationConfigInput }
+export type CleanseScopeInput = { timeRange: [number, number]; includeKinds?: string[]; includeMemoryKinds?: string[] }
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
 /**
@@ -1143,6 +1333,9 @@ export type CliFlavorDto = "claude_code" | "codex" | "plain"
  */
 export type CloseWorkspaceResult = { closedId: string; newFocusedId: string | null }
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
+export type ConfigChangeResultDto = { proposalId: string; snapshotId: string; targetType: string; targetId: string }
+export type ConfigProposalDto = { proposalId: string; targetType: string; targetId: string; diffPreview: string; createdAt: number }
+export type ConfigTargetInput = { targetType: string; targetId: string }
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
 export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[]; workspaceId: string }
@@ -1156,6 +1349,11 @@ export type CrossSearchGroupDto = { workspaceId: string; workspaceName: string; 
  * Cross-workspace search outcome.
  */
 export type CrossSearchOutcomeDto = { groups: CrossSearchGroupDto[]; skippedWorkspaceIds: string[] }
+export type CycleDetailDto = { cycle: EvolutionCycleDto; tasks: EvolutionTaskDto[]; artifacts: EvolutionArtifactDto[] }
+export type CycleSummaryDto = { id: string; phase: string; status: string }
+export type DevRoleBindingDto = { roleKind: string; agentKind: string; agentRefId: string; updatedAt: number }
+export type DevRoleBindingInput = { roleKind: string; agentKind: string; agentRefId: string }
+export type DevTeamDto = { teamId: string; stewardId: string; createdAt: number; bindings: DevRoleBindingDto[] }
 /**
  * Diff result DTO for cross-workspace file comparison.
  */
@@ -1187,7 +1385,12 @@ symbols: boolean; commands: EditorCommandDto[]; overlays: EditorOverlayDto[] }
  */
 export type EditorOverlayDto = { id: string; title: string; url: string; width: number; height: number }
 export type EventDto = { seq: number; kind: string; payload: JsonValue; createdAt: number }
+export type EventSummaryDto = { id: number; kind: string; aggregateType: string }
+export type EvolutionArtifactDto = { id: string; taskId: string; producedByRole: string; artifactType: string; content: JsonValue; status: string; diffPreview?: string | null; rollbackPlan?: JsonValue | null; createdAt: number }
+export type EvolutionCycleDto = { id: string; triggerSource: string; triggerContext: string; phase: string; status: string; createdAt: number; endedAt?: number | null }
+export type EvolutionDataPoolDto = { id: string; createdAt: number }
 export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto }
+export type EvolutionTaskDto = { id: string; cycleId: string; phase: string; devRole: string; dependsOn: string[]; status: string; acceptanceCriteria: string; triggerSource: string; createdAt: number; updatedAt: number }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
 /**
  * A single file match.
@@ -1201,6 +1404,7 @@ export type FileReferenceDto = { sourceWorkspaceId: string; sourceRelativePath: 
  * Result of focusing a workspace.
  */
 export type FocusWorkspaceResult = { workspaceId: string }
+export type GateDecisionDto = { kind: string; feedback?: string | null }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
 export type GitWorktreeDto = { path: string; head: string | null; branch: string | null; isCurrent: boolean }
@@ -1261,6 +1465,7 @@ providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKe
  */
 proxy: string | null }
 export type MemoryPolicyDto = { retentionDays: number; retrieval: RetrievalStrategyDto }
+export type MemorySummaryDto = { id: string; content: string }
 export type MessageQueueItemDto = { id: string; text: string; seq: number; createdAt: number }
 /**
  * One model exposed by a provider endpoint plus its capability tags
@@ -1311,6 +1516,7 @@ export type PluginListResultDto = { plugins: PluginInfoDto[]; skipped: string[];
  * Declared permission surface of one plugin (panel display only, v1).
  */
 export type PluginPermissionsDto = { fsRead: string[]; fsWrite: string[]; network: string[]; shell: boolean }
+export type PromptVersionSummaryDto = { id: string; status: string }
 export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean; settings: ProviderSettingsDto }
 export type ProviderInput = { 
 /**
@@ -1342,10 +1548,12 @@ models?: ModelEntryDto[]; defaultModel?: string | null; temperature?: number | n
  * Per-provider local network proxy (`http://host:port`); `None` = direct.
  */
 proxy?: string | null; enabled?: boolean }
+export type ProviderSummaryDto = { id: string; name: string; protocol: string }
 /**
  * A recent workspace entry.
  */
 export type RecentWorkspaceDto = { workspaceId: string; lastUsedAt: number; isPinned: boolean }
+export type RedactPatternInput = { pattern: string; replacement: string }
 export type RefineConfigDto = { triggerFailures: number; minEditStrategy: RefineStrategyDto; evidenceThreshold: number; rollbackEnabled: boolean }
 export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_spec"
 /**
@@ -1353,6 +1561,7 @@ export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_
  * (None when the registry is now empty).
  */
 export type RemoveWorkspaceResult = { removedId: string; newActiveId: string | null }
+export type ResolveOutcomeDto = { kind: string; rollbackHandle?: string | null; newTaskId?: string | null; detail?: string | null }
 export type RetrievalStrategyDto = "keyword" | "semantic" | "hybrid"
 /**
  * Self-binding of the role director (the model it uses to orchestrate).
@@ -1375,6 +1584,7 @@ providerIds?: string[]; systemPromptOverride: string | null; toolAllowlist: stri
  * profile (SPEC team-shell-m1 D2b).
  */
 params: JsonValue }
+export type RoleSummaryDto = { id: string; name: string; builtin: boolean }
 /**
  * A capability-routing probe: resolves a role for the required capability
  * set (optionally creating + immediately cleaning an ephemeral temp role
@@ -1400,8 +1610,13 @@ export type ScheduleInput = { name: string; cronExpr: string; targetKind: string
  */
 export type SeedRolesDto = { inserted: number; updated: number; skipped: number }
 export type SessionDto = { id: string; title: string; createdAt: number; updatedAt: number }
+export type SessionSummaryDto = { id: string; title: string; kind: string }
 export type SkillCreationConfigDto = { enabled: boolean; format: SkillFormatDto }
 export type SkillFormatDto = "skill_md"
+export type StewardEventDto = { id: number; aggregateId: string; kind: string; payload: JsonValue; seq: number; createdAt: number }
+export type StewardIntentDto = { kind: "config_change"; target?: string | null; description: string } | { kind: "evolution"; instruction: string } | { kind: "scheduling"; description: string } | { kind: "diagnosis"; question: string } | { kind: "freeform"; message: string }
+export type StewardReplyDto = { type: "text"; content: string } | { type: "config_proposal"; proposal_id: string; diff: string; confirm_handle: string } | { type: "evolution_accepted"; cycle_id: string; progress_subscribe_handle: string } | { type: "clarify"; candidates: StewardIntentDto[] } | { type: "refused"; reason: string }
+export type StewardSessionDto = { id: string; stewardId: string; title: string; goal?: string | null; createdAt: number; updatedAt: number }
 export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceRootPath: string | null }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
 export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 
@@ -1416,6 +1631,7 @@ config: JsonValue }
 export type TeamPlanDto = { topology: TeamTopologyDto; members: TeamPlanMemberDto[]; maxRounds: number | null; required: string[]; rationale: string }
 export type TeamPlanMemberDto = { kind: string; refId: string; name: string; willCreateRole: boolean }
 export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
+export type TeamSummaryDto = { id: string; name: string; topology: string }
 export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
 export type TestIntegrationDto = { ok: boolean; error: string | null }
 export type TestProviderConnectionDto = { ok: boolean; latencyMs: number | null; error: string | null }

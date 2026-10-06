@@ -71,6 +71,7 @@
     "navScheduler": "Scheduler",
     "navSettings": "Settings",
     "navPlugins": "Plugins",
+    "navSteward": "Steward",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "checking": "Connecting…",
@@ -988,5 +989,12 @@
     "openFromHint": "Open in current workspace (from {{name}})",
     "selectWorkspaceHint": "Select a workspace first",
     "pullToCurrent": "↗ pull to current"
+  },
+  "steward": {
+    "tabChat": "Chat",
+    "tabCycles": "Cycles",
+    "tabGate": "Gate",
+    "tabTeam": "Team",
+    "tabSettings": "Settings"
   }
 }
