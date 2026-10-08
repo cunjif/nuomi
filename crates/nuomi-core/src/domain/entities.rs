@@ -194,6 +194,24 @@ pub struct EventRecord {
     pub created_at: i64,
 }
 
+/// Soft-hide marker for rolled-back events (`event_rollbacks` table).
+/// Events remain physically in `events` (append-only); this record marks a
+/// `[from_seq, to_seq]` range as rolled back so `list_by_aggregate` filters them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventRollback {
+    /// Database-assigned monotonic row id.
+    pub id: i64,
+    pub aggregate_type: String,
+    pub aggregate_id: String,
+    /// First seq in the rolled-back range (inclusive).
+    pub from_seq: i64,
+    /// Last seq in the rolled-back range (inclusive).
+    pub to_seq: i64,
+    pub rolled_back_at: i64,
+    /// Optional human-readable reason for the rollback.
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderProtocol {
@@ -582,6 +600,8 @@ pub struct MemoryEntry {
     pub user_profile: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Per-agent isolation: NULL = global memory, Some(id) = private to that role.
+    pub role_id: Option<String>,
 }
 
 /// Shared group-chat blackboard entry (append-only).
@@ -1040,6 +1060,24 @@ impl Default for RefineConfig {
 pub struct SkillCreationConfig {
     pub enabled: bool,
     pub format: SkillFormat,
+}
+
+/// Per-role memory configuration stored in `Role.params["memory"]`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleMemoryConfig {
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub auto_remember: AutoRemember,
+}
+
+/// Auto-remember strategy for turn-end memory writing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoRemember {
+    #[default]
+    Off,
+    UserInputOnly,
 }
 
 /// Dimension (4): persistent memory policy.

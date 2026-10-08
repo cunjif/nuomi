@@ -75,6 +75,13 @@ pub struct EventSummary {
 pub struct MemorySummary {
     pub id: String,
     pub content: String,
+    pub tags: Vec<String>,
+    pub kind: String,
+    pub user_profile: bool,
+    pub role_id: Option<String>,
+    pub source_session_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +153,13 @@ pub async fn read(db_path: Arc<str>, workspace_id: &str) -> Result<AppStateSnaps
             .map(|m| MemorySummary {
                 id: m.id,
                 content: m.content,
+                tags: m.tags,
+                kind: m.kind,
+                user_profile: m.user_profile,
+                role_id: m.role_id,
+                source_session_id: m.source_session_id,
+                created_at: m.created_at,
+                updated_at: m.updated_at,
             })
             .collect();
         let prompt_versions = query_prompt_versions(conn)?;

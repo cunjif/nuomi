@@ -28,6 +28,8 @@ pub struct LoopConfig {
     pub max_steps: usize,
     /// Memory keywords injected at session start (tag filter).
     pub memory_tag: Option<String>,
+    /// Per-agent memory isolation: filters recall to role_id + global entries.
+    pub role_id: Option<String>,
     /// Cache-lineage scope (session lineage root) forwarded to providers
     /// that route their prompt cache by key (OpenAI `prompt_cache_key`).
     pub cache_scope: Option<String>,
@@ -42,6 +44,7 @@ impl Default for LoopConfig {
             model: "default".into(),
             max_steps: 16,
             memory_tag: None,
+            role_id: None,
             cache_scope: None,
             external_session_id: None,
         }
@@ -267,7 +270,7 @@ impl LoopEngine {
         // Memory injection: recall by tag / first words of the task.
         if let Some(mem) = memory {
             let keyword = user_task.split_whitespace().next().map(str::to_string);
-            if let Ok(hits) = mem.recall(keyword, self.config.memory_tag.clone(), 5).await {
+            if let Ok(hits) = mem.recall(keyword, self.config.memory_tag.clone(), self.config.role_id.clone(), 5).await {
                 if !hits.is_empty() {
                     let digest = hits
                         .iter()
@@ -587,6 +590,7 @@ mod tests {
                 model: "m".into(),
                 max_steps: 3,
                 memory_tag: None,
+                role_id: None,
                 cache_scope: None,
                 external_session_id: None,
             },
@@ -604,7 +608,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path: Arc<str> = Arc::from(dir.path().join("t.db").to_string_lossy().to_string());
         let mem = MemoryService::new(db_path.clone());
-        mem.remember("user prefers rust".into(), None, vec![], "note", false)
+        mem.remember("user prefers rust".into(), None, vec![], "note", false, None)
             .await
             .unwrap();
 
@@ -696,6 +700,7 @@ mod tests {
                 vec![],
                 "note",
                 false,
+                None,
             )
             .await
             .unwrap();

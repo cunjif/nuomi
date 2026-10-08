@@ -34,6 +34,12 @@ pub struct ChatMessage {
     /// For `Tool` role: the id of the call this message answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Quoted/referenced event seq for user messages (message quote/reply).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quoted_event_seq: Option<i64>,
+    /// Excerpt of the quoted message (auto-extracted by backend).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quoted_excerpt: Option<String>,
 }
 
 impl ChatMessage {
@@ -43,6 +49,8 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            quoted_event_seq: None,
+            quoted_excerpt: None,
         }
     }
     pub fn user(content: impl Into<String>) -> Self {
@@ -51,6 +59,22 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            quoted_event_seq: None,
+            quoted_excerpt: None,
+        }
+    }
+    pub fn user_with_quote(
+        content: impl Into<String>,
+        quoted_event_seq: i64,
+        quoted_excerpt: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: MessageRole::User,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            quoted_event_seq: Some(quoted_event_seq),
+            quoted_excerpt: Some(quoted_excerpt.into()),
         }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
@@ -59,6 +83,8 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            quoted_event_seq: None,
+            quoted_excerpt: None,
         }
     }
     pub fn tool_result(call_id: impl Into<String>, content: impl Into<String>) -> Self {
@@ -67,6 +93,8 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: Some(call_id.into()),
+            quoted_event_seq: None,
+            quoted_excerpt: None,
         }
     }
 }

@@ -195,6 +195,8 @@ mod tests {
                 content: "hi".into(),
                 tool_calls: vec![],
                 tool_call_id: None,
+                quoted_event_seq: None,
+                quoted_excerpt: None,
             }],
             tools: vec![],
             temperature: None,

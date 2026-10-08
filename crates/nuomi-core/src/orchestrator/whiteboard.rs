@@ -141,6 +141,8 @@ pub(crate) async fn record_turn(
     role: &crate::domain::Role,
     note_type: &str,
     body: &str,
+    quoted_event_seq: Option<i64>,
+    quoted_excerpt: Option<&str>,
 ) -> Result<(), super::OrchestratorError> {
     wb.post(
         session_id,
@@ -152,11 +154,17 @@ pub(crate) async fn record_turn(
     .await
     .map_err(|e| super::OrchestratorError::Store(e.to_string()))?;
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "role_id": role.id,
         "role_name": role.name,
         "content": body,
     });
+    if let Some(seq) = quoted_event_seq {
+        payload["quoted_event_seq"] = serde_json::json!(seq);
+        if let Some(excerpt) = quoted_excerpt {
+            payload["quoted_excerpt"] = serde_json::json!(excerpt);
+        }
+    }
     let sid = session_id.to_string();
     wb.with_db(move |c| repos::events::append(c, "session", &sid, "message", &payload, now_ms()))
         .await

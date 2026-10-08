@@ -143,7 +143,7 @@ impl GroupChatExecutor {
                 .map_err(|e| OrchestratorError::Provider(e.to_string()))?;
 
             state.push_turn(speaker, response.content.clone());
-            record_turn(wb, &input.session_id, role, "message", &response.content).await?;
+            record_turn(wb, &input.session_id, role, "message", &response.content, None, None).await?;
 
             // ---- handoff protocol -----------------------------------------
             if let Some(call) = response

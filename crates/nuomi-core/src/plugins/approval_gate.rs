@@ -66,6 +66,7 @@ pub async fn set_sensitive_tools(
         vec![POLICY_TAG.to_string()],
         "setting",
         false,
+        None,
     )
     .await
     .map(|_| ())
@@ -79,6 +80,7 @@ pub async fn read_sensitive_tools(
         .recall(
             Some(SENSITIVE_TOOLS_MARKER.to_string()),
             Some(POLICY_TAG.to_string()),
+            None,
             10,
         )
         .await?;

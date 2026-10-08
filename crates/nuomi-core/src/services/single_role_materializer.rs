@@ -20,6 +20,8 @@ pub struct RoleOverlay {
     pub system_prompt: Option<String>,
     pub temperature: Option<f64>,
     pub tool_allowlist: Vec<String>,
+    pub role_id: Option<String>,
+    pub memory_config: Option<crate::domain::RoleMemoryConfig>,
 }
 
 /// The execution context for a single-role turn: either a materialized
@@ -148,10 +150,17 @@ async fn select_for_role(
         "select_for_role",
     );
 
+    let memory_config = role
+        .params
+        .get("memory")
+        .and_then(|v| serde_json::from_value::<crate::domain::RoleMemoryConfig>(v.clone()).ok());
+
     let overlay = RoleOverlay {
         system_prompt: role.system_prompt_override.clone(),
         temperature: role.temperature,
         tool_allowlist: role.tool_allowlist.clone(),
+        role_id: Some(role_id.to_string()),
+        memory_config,
     };
 
     Ok((provider, Some(overlay)))

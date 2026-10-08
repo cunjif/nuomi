@@ -426,6 +426,8 @@ mod tests {
             system_prompt: Some("You are a senior Rust engineer.".into()),
             temperature: None,
             tool_allowlist: Vec::new(),
+            role_id: None,
+            memory_config: None,
         };
         let prompt = build_system_prompt(Some(&overlay));
         assert!(prompt.starts_with("You are a senior Rust engineer."));

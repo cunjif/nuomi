@@ -236,6 +236,7 @@ pub async fn set_online_authorized(
         vec![AUTH_TAG.to_string()],
         "setting",
         false,
+        None,
     )
     .await
     .map(|_| ())
@@ -243,7 +244,7 @@ pub async fn set_online_authorized(
 
 /// Reads the persisted authorization switch (defaults to `false`).
 pub async fn online_authorized(mem: &MemoryService) -> bool {
-    match mem.recall(None, Some(AUTH_TAG.to_string()), 10).await {
+    match mem.recall(None, Some(AUTH_TAG.to_string()), None, 10).await {
         Ok(entries) => entries
             .into_iter()
             .find_map(|m| {

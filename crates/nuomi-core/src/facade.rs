@@ -13,7 +13,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::{new_id, now_ms, EventRecord, ProviderProtocol, Session};
+use crate::domain::{new_id, now_ms, AutoRemember, EventRecord, ProviderProtocol, Session};
 use crate::harness::sideload::{
     apply_to_report, scan, BootReport, LoadOutcome, SideloadedPlugin, Tolerant,
 };
@@ -389,6 +389,8 @@ impl NuomiKernel {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await?;
         state.history = result.transcript.clone();
@@ -424,6 +426,8 @@ impl NuomiKernel {
         overlay: Option<RoleOverlay>,
         external_session_id: Option<String>,
         max_history_chars: Option<usize>,
+        quoted_event_seq: Option<i64>,
+        quoted_excerpt: Option<String>,
     ) -> CoreResult<LoopRunResult> {
         let session_id = session_id.to_string();
         let task = task.to_string();
@@ -457,6 +461,8 @@ impl NuomiKernel {
             model,
             overlay,
             external_session_id,
+            quoted_event_seq,
+            quoted_excerpt,
         )
         .await
     }
@@ -476,6 +482,8 @@ impl NuomiKernel {
         model: Option<String>,
         overlay: Option<RoleOverlay>,
         external_session_id: Option<String>,
+        quoted_event_seq: Option<i64>,
+        quoted_excerpt: Option<String>,
     ) -> CoreResult<LoopRunResult> {
         let history_len = history.len();
         // Bridge streaming deltas onto the kernel bus so the shell's event
@@ -502,11 +510,14 @@ impl NuomiKernel {
 
         let effective_provider = provider.unwrap_or_else(|| self.provider.clone());
         let effective_model = model.unwrap_or_else(|| self.model.clone());
+        let overlay_role_id = overlay.as_ref().and_then(|ov| ov.role_id.clone());
+        let overlay_memory_config = overlay.as_ref().and_then(|ov| ov.memory_config.clone());
         let engine = LoopEngine::new(
             effective_provider,
             LoopConfig {
                 model: effective_model,
                 external_session_id: external_session_id.clone(),
+                role_id: overlay_role_id.clone(),
                 ..LoopConfig::default()
             },
         )
@@ -560,9 +571,19 @@ impl NuomiKernel {
         // same persistence phase: one spawn_blocking round-trip,
         // check-then-update so the derived name is written exactly once.
         let auto_title = derive_title(task);
-        let fresh = result.transcript.get(history_len..).unwrap_or_default();
+        let mut fresh: Vec<ChatMessage> =
+            result.transcript.get(history_len..).unwrap_or_default().to_vec();
+        if let (Some(seq), Some(ref excerpt)) = (quoted_event_seq, &quoted_excerpt) {
+            for msg in fresh.iter_mut() {
+                if msg.role == MessageRole::User && msg.quoted_event_seq.is_none() {
+                    msg.quoted_event_seq = Some(seq);
+                    msg.quoted_excerpt = Some(excerpt.clone());
+                    break;
+                }
+            }
+        }
         let appended = self
-            .persist_transcript(session_id, fresh, &auto_title)
+            .persist_transcript(session_id, &fresh, &auto_title)
             .await?;
 
         // Publish what was just persisted (iron rule: persist first, then
@@ -586,6 +607,24 @@ impl NuomiKernel {
             self.ctx
                 .publish(crate::harness::Event::new("session.message", body));
         }
+
+        // Auto-write hook: if the role has memory enabled with auto_remember =
+        // user_input_only, persist the user's input as a per-agent memory entry.
+        if let Some(ref mc) = overlay_memory_config {
+            if mc.enabled && matches!(mc.auto_remember, AutoRemember::UserInputOnly) {
+                let mem = self.memory.clone();
+                let sid = session_id.to_string();
+                let tags = mc.tags.clone();
+                let rid = overlay_role_id.clone();
+                let task_text = task.to_string();
+                tokio::spawn(async move {
+                    let _ = mem
+                        .remember(task_text, Some(sid), tags, "turn_user_input", false, rid)
+                        .await;
+                });
+            }
+        }
+
         Ok(result)
     }
 
@@ -700,12 +739,19 @@ impl NuomiKernel {
             for m in &messages {
                 match m.role {
                     MessageRole::User => {
+                        let mut payload = json!({ "role": "user", "content": m.content });
+                        if let Some(seq) = m.quoted_event_seq {
+                            payload["quoted_event_seq"] = json!(seq);
+                            if let Some(excerpt) = &m.quoted_excerpt {
+                                payload["quoted_excerpt"] = json!(excerpt);
+                            }
+                        }
                         appended.push(repos::events::append(
                             conn,
                             "session",
                             &sid,
                             "message",
-                            &json!({ "role": "user", "content": m.content }),
+                            &payload,
                             now,
                         )?);
                     }

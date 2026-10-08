@@ -291,6 +291,7 @@ mod tests {
             vec!["style".into()],
             "preference",
             true, // user_profile
+            None,
         )
         .await
         .unwrap();
@@ -301,6 +302,7 @@ mod tests {
             vec!["workflow".into()],
             "note",
             false,
+            None,
         )
         .await
         .unwrap();
@@ -313,7 +315,7 @@ mod tests {
             .map(|m| m.content)
             .collect();
         let memories: Vec<String> = mem
-            .recall(None, None, 10)
+            .recall(None, None, None, 10)
             .await
             .unwrap()
             .into_iter()

@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::domain::{MemoryEntry, MemoryPolicy};
+use crate::domain::{MemoryEntry, MemoryPolicy, RetrievalStrategy};
 use crate::harness::{Context, HarnessError, Plugin};
 use crate::store::repos;
 use crate::store::StoreError;
 use async_trait::async_trait;
+use rusqlite::params;
 
 use super::super::domain;
 
@@ -14,9 +15,7 @@ use super::super::domain;
 #[derive(Clone)]
 pub struct MemoryService {
     db_path: Arc<str>,
-    /// Reserved persistent-memory policy (retention + retrieval strategy).
-    /// Stored but not yet consumed — retention enforcement and semantic
-    /// retrieval are future milestones.
+    /// Persistent-memory policy (retention + retrieval strategy).
     memory_policy: Option<MemoryPolicy>,
 }
 
@@ -28,9 +27,8 @@ impl MemoryService {
         }
     }
 
-    /// Attaches a persistent-memory policy. The policy is stored for
-    /// downstream consumption (retention enforcement, retrieval strategy);
-    /// current methods do not yet use it.
+    /// Attaches a persistent-memory policy. The policy controls retrieval
+    /// strategy (keyword vs FTS5) and retention enforcement.
     pub fn with_memory_policy(mut self, policy: MemoryPolicy) -> Self {
         self.memory_policy = Some(policy);
         self
@@ -63,6 +61,7 @@ impl MemoryService {
         tags: Vec<String>,
         kind: &str,
         user_profile: bool,
+        role_id: Option<String>,
     ) -> Result<MemoryEntry, StoreError> {
         let now = domain::now_ms();
         let entry = MemoryEntry {
@@ -74,28 +73,90 @@ impl MemoryService {
             user_profile,
             created_at: now,
             updated_at: now,
+            role_id,
         };
         self.with_db({
             let entry = entry.clone();
             move |c| repos::memory::insert(c, &entry)
         })
         .await?;
+        // Trigger retention enforcement on write (low-frequency, acceptable).
+        if let Some(policy) = &self.memory_policy {
+            let _ = self.enforce_retention(policy.retention_days).await;
+        }
         Ok(entry)
     }
 
     /// Keyword + tag retrieval for context injection.
+    /// Dispatches based on `memory_policy.retrieval`:
+    /// - `Keyword` → LIKE-based `search`
+    /// - `Semantic`/`Hybrid` → FTS5 `search_fts` (falls back to LIKE for short queries)
     pub async fn recall(
         &self,
         keyword: Option<String>,
         tag: Option<String>,
+        role_id: Option<String>,
         limit: u32,
     ) -> Result<Vec<MemoryEntry>, StoreError> {
-        self.with_db(move |c| repos::memory::search(c, keyword.as_deref(), tag.as_deref(), limit))
-            .await
+        let retrieval = self
+            .memory_policy
+            .as_ref()
+            .map(|p| p.retrieval)
+            .unwrap_or(RetrievalStrategy::Keyword);
+        match retrieval {
+            RetrievalStrategy::Keyword => {
+                self.with_db(move |c| {
+                    repos::memory::search(c, keyword.as_deref(), tag.as_deref(), role_id.as_deref(), limit)
+                })
+                .await
+            }
+            RetrievalStrategy::Semantic | RetrievalStrategy::Hybrid => {
+                if let Some(query) = &keyword {
+                    let query = query.clone();
+                    let role_id = role_id.clone();
+                    self.with_db(move |c| {
+                        repos::memory::search_fts(c, &query, role_id.as_deref(), limit)
+                    })
+                    .await
+                    .map(|hits| hits.into_iter().map(|h| h.entry).collect())
+                } else {
+                    self.with_db(move |c| {
+                        repos::memory::search(c, None, tag.as_deref(), role_id.as_deref(), limit)
+                    })
+                    .await
+                }
+            }
+        }
     }
 
     pub async fn user_profile(&self) -> Result<Vec<MemoryEntry>, StoreError> {
         self.with_db(repos::memory::list_user_profile).await
+    }
+
+    /// Lists memory entries with optional role_id filter.
+    pub async fn list(
+        &self,
+        role_id: Option<String>,
+        limit: u32,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        self.with_db(move |c| repos::memory::list(c, role_id.as_deref(), limit))
+            .await
+    }
+
+    /// Deletes a memory entry by id.
+    pub async fn delete(&self, id: String) -> Result<bool, StoreError> {
+        self.with_db(move |c| repos::memory::delete(c, &id)).await
+    }
+
+    /// Deletes memory entries older than `retention_days`.
+    /// Returns the number of rows deleted.
+    pub async fn enforce_retention(&self, retention_days: u32) -> Result<u64, StoreError> {
+        let cutoff = domain::now_ms() - (retention_days as i64) * 86_400_000;
+        self.with_db(move |c| {
+            let n = c.execute("DELETE FROM memory_entries WHERE created_at < ?1", params![cutoff])?;
+            Ok(n as u64)
+        })
+        .await
     }
 }
 
