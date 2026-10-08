@@ -8,8 +8,8 @@ use crate::store::StoreError;
 pub fn insert(conn: &Connection, m: &MemoryEntry) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO memory_entries
-         (id, content, source_session_id, tags, kind, user_profile, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, content, source_session_id, tags, kind, user_profile, created_at, updated_at, role_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             m.id,
             m.content,
@@ -18,51 +18,44 @@ pub fn insert(conn: &Connection, m: &MemoryEntry) -> Result<(), StoreError> {
             m.kind,
             m.user_profile as i64,
             m.created_at,
-            m.updated_at
+            m.updated_at,
+            m.role_id
         ],
     )?;
     Ok(())
 }
 
-/// Keyword search across content with optional tag filter.
+/// Keyword search across content with optional tag + role_id filter.
 /// Matches are ranked by recency (newest first).
+/// When `role_id` is Some, includes both per-agent and global (NULL) memory.
 pub fn search(
     conn: &Connection,
     keyword: Option<&str>,
     tag: Option<&str>,
+    role_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<MemoryEntry>, StoreError> {
     let mut sql = String::from(
-        "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at
+        "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at, role_id
          FROM memory_entries WHERE 1=1",
     );
-    if keyword.is_some() {
-        sql.push_str(" AND content LIKE '%' || ?1 || '%'");
+    let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(rid) = role_id {
+        sql.push_str(" AND (role_id = ? OR role_id IS NULL)");
+        binds.push(Box::new(rid.to_string()));
     }
-    if tag.is_some() {
-        sql.push_str(if keyword.is_some() {
-            " AND tags LIKE '%' || ?2 || '%'"
-        } else {
-            " AND tags LIKE '%' || ?1 || '%'"
-        });
+    if let Some(kw) = keyword {
+        sql.push_str(" AND content LIKE '%' || ? || '%'");
+        binds.push(Box::new(kw.to_string()));
     }
-    sql.push_str(match (keyword.is_some(), tag.is_some()) {
-        (true, true) => " ORDER BY created_at DESC LIMIT ?3",
-        (true, false) | (false, true) => " ORDER BY created_at DESC LIMIT ?2",
-        (false, false) => " ORDER BY created_at DESC LIMIT ?1",
-    });
-
-    let kw = keyword.unwrap_or_default();
-    let tg = tag.unwrap_or_default();
+    if let Some(tg) = tag {
+        sql.push_str(" AND tags LIKE '%' || ? || '%'");
+        binds.push(Box::new(tg.to_string()));
+    }
+    sql.push_str(" ORDER BY created_at DESC LIMIT ?");
+    binds.push(Box::new(limit));
     let mut stmt = conn.prepare(&sql)?;
-    let map_rows =
-        |row: &rusqlite::Row<'_>| -> rusqlite::Result<MemoryEntry> { row_to_memory(row) };
-    let rows = match (keyword, tag) {
-        (Some(_), Some(_)) => stmt.query_map(params![kw, tg, limit], map_rows)?,
-        (Some(_), None) => stmt.query_map(params![kw, limit], map_rows)?,
-        (None, Some(_)) => stmt.query_map(params![tg, limit], map_rows)?,
-        (None, None) => stmt.query_map(params![limit], map_rows)?,
-    };
+    let rows = stmt.query_map(rusqlite::params_from_iter(binds.iter()), row_to_memory)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -77,38 +70,59 @@ pub struct MemorySearchHit {
 /// Queries shorter than 3 characters fall back to the LIKE-based `search`
 /// because the trigram tokenizer cannot index them. MATCH special characters
 /// are neutralized by double-quoting each token.
+/// When `role_id` is Some, includes both per-agent and global (NULL) memory.
 pub fn search_fts(
     conn: &Connection,
     query: &str,
+    role_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<MemorySearchHit>, StoreError> {
     let trimmed = query.trim();
     let Some(fts_query) = build_fts_query(trimmed) else {
-        return like_fallback(conn, trimmed, limit);
+        return like_fallback(conn, trimmed, role_id, limit);
     };
-    let mut stmt = conn.prepare(
-        "SELECT m.id, m.content, m.source_session_id, m.tags, m.kind, m.user_profile,
-                m.created_at, m.updated_at, memory_fts.rank
-         FROM memory_fts JOIN memory_entries m ON m.rowid = memory_fts.rowid
-         WHERE memory_fts MATCH ?1 ORDER BY memory_fts.rank LIMIT ?2",
-    )?;
-    let rows = stmt.query_map(params![fts_query, limit], |row| {
-        let entry = row_to_memory(row)?;
-        Ok(MemorySearchHit {
-            entry,
-            rank: row.get(8)?,
-        })
-    })?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    if let Some(rid) = role_id {
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.content, m.source_session_id, m.tags, m.kind, m.user_profile,
+                    m.created_at, m.updated_at, m.role_id, memory_fts.rank
+             FROM memory_fts JOIN memory_entries m ON m.rowid = memory_fts.rowid
+             WHERE memory_fts MATCH ?1 AND (m.role_id = ?2 OR m.role_id IS NULL)
+             ORDER BY memory_fts.rank LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![fts_query, rid, limit], |row| {
+            let entry = row_to_memory(row)?;
+            Ok(MemorySearchHit {
+                entry,
+                rank: row.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.content, m.source_session_id, m.tags, m.kind, m.user_profile,
+                    m.created_at, m.updated_at, m.role_id, memory_fts.rank
+             FROM memory_fts JOIN memory_entries m ON m.rowid = memory_fts.rowid
+             WHERE memory_fts MATCH ?1 ORDER BY memory_fts.rank LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![fts_query, limit], |row| {
+            let entry = row_to_memory(row)?;
+            Ok(MemorySearchHit {
+                entry,
+                rank: row.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 /// LIKE-based fallback ranked at 0.0 (used for sub-trigram queries).
 fn like_fallback(
     conn: &Connection,
     query: &str,
+    role_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<MemorySearchHit>, StoreError> {
-    Ok(search(conn, Some(query), None, limit)?
+    Ok(search(conn, Some(query), None, role_id, limit)?
         .into_iter()
         .map(|entry| MemorySearchHit { entry, rank: 0.0 })
         .collect())
@@ -135,11 +149,42 @@ fn build_fts_query(query: &str) -> Option<String> {
 /// All user-profile facts (always injected by evolution).
 pub fn list_user_profile(conn: &Connection) -> Result<Vec<MemoryEntry>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at
+        "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at, role_id
          FROM memory_entries WHERE user_profile = 1 ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map([], row_to_memory)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Lists memory entries with optional role_id filter and limit.
+/// When `role_id` is Some, includes both per-agent and global (NULL) memory.
+pub fn list(
+    conn: &Connection,
+    role_id: Option<&str>,
+    limit: u32,
+) -> Result<Vec<MemoryEntry>, StoreError> {
+    if let Some(rid) = role_id {
+        let mut stmt = conn.prepare(
+            "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at, role_id
+             FROM memory_entries WHERE role_id = ?1 OR role_id IS NULL
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![rid, limit], row_to_memory)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, content, source_session_id, tags, kind, user_profile, created_at, updated_at, role_id
+             FROM memory_entries ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], row_to_memory)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+/// Deletes a memory entry by id. Returns true if a row was deleted.
+pub fn delete(conn: &Connection, id: &str) -> Result<bool, StoreError> {
+    let n = conn.execute("DELETE FROM memory_entries WHERE id = ?1", params![id])?;
+    Ok(n > 0)
 }
 
 fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
@@ -153,6 +198,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
         user_profile: row.get::<_, i64>(5)? != 0,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        role_id: row.get(8)?,
     })
 }
 
@@ -177,6 +223,7 @@ mod tests {
             user_profile: profile,
             created_at: at,
             updated_at: at,
+            role_id: None,
         }
     }
 
@@ -190,7 +237,7 @@ mod tests {
             &entry("m3", "rust tags mention", &["python"], false, 3),
         )
         .unwrap();
-        let hits = search(&conn, Some("rust"), None, 10).unwrap();
+        let hits = search(&conn, Some("rust"), None, None, 10).unwrap();
         let ids: Vec<&str> = hits.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["m3", "m1"]); // recency order
     }
@@ -201,7 +248,7 @@ mod tests {
         insert(&conn, &entry("a", "x", &["work"], false, 1)).unwrap();
         insert(&conn, &entry("b", "name is james", &["me"], true, 2)).unwrap();
         insert(&conn, &entry("c", "y", &["work"], false, 3)).unwrap();
-        assert_eq!(search(&conn, None, Some("work"), 10).unwrap().len(), 2);
+        assert_eq!(search(&conn, None, Some("work"), None, 10).unwrap().len(), 2);
         let profile = list_user_profile(&conn).unwrap();
         assert_eq!(profile.len(), 1);
         assert_eq!(profile[0].id, "b");
@@ -213,7 +260,7 @@ mod tests {
         let conn = db();
         insert(&conn, &entry("old", "x", &[], false, 1)).unwrap();
         insert(&conn, &entry("new", "y", &[], false, 2)).unwrap();
-        let all = search(&conn, None, None, 10).unwrap();
+        let all = search(&conn, None, None, None, 10).unwrap();
         assert_eq!(
             all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             vec!["new", "old"]
@@ -234,13 +281,13 @@ mod tests {
         )
         .unwrap();
         insert(&conn, &entry("m2", "loves rust programming", &[], false, 2)).unwrap();
-        let cjk: Vec<String> = search_fts(&conn, "插件化", 10)
+        let cjk: Vec<String> = search_fts(&conn, "插件化", None, 10)
             .unwrap()
             .into_iter()
             .map(|h| h.entry.id)
             .collect();
         assert_eq!(cjk, vec!["m1"]);
-        let en: Vec<String> = search_fts(&conn, "rust", 10)
+        let en: Vec<String> = search_fts(&conn, "rust", None, 10)
             .unwrap()
             .into_iter()
             .map(|h| h.entry.id)
@@ -256,7 +303,7 @@ mod tests {
             &entry("m1", "糯米是插件化的Agent内核", &[], false, 1),
         )
         .unwrap();
-        let hits = search_fts(&conn, "糯米", 10).unwrap();
+        let hits = search_fts(&conn, "糯米", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.id, "m1");
         assert_eq!(hits[0].rank, 0.0);
@@ -267,13 +314,13 @@ mod tests {
         let conn = db_fts();
         insert(&conn, &entry("m1", "loves rust programming", &[], false, 1)).unwrap();
         // MATCH grammar metacharacters must be neutralized, not panic.
-        let hits = search_fts(&conn, "rust\" OR (1=1) NEAR --", 10).unwrap();
+        let hits = search_fts(&conn, "rust\" OR (1=1) NEAR --", None, 10).unwrap();
         assert!(hits.is_empty());
         // FTS keywords (AND/OR/NOT/NEAR) are matched literally, not parsed:
         // unquoted "programming NOT" would be a syntax error.
-        let hits = search_fts(&conn, "programming NOT", 10).unwrap();
+        let hits = search_fts(&conn, "programming NOT", None, 10).unwrap();
         assert!(hits.is_empty());
-        let hits = search_fts(&conn, "programming", 10).unwrap();
+        let hits = search_fts(&conn, "programming", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
     }
 
@@ -286,10 +333,44 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(search_fts(&conn, "alpha", 10).unwrap().is_empty());
-        assert_eq!(search_fts(&conn, "delta", 10).unwrap().len(), 1);
+        assert!(search_fts(&conn, "alpha", None, 10).unwrap().is_empty());
+        assert_eq!(search_fts(&conn, "delta", None, 10).unwrap().len(), 1);
         conn.execute("DELETE FROM memory_entries WHERE id = 'm1'", [])
             .unwrap();
-        assert!(search_fts(&conn, "delta", 10).unwrap().is_empty());
+        assert!(search_fts(&conn, "delta", None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn role_id_filter_includes_global_and_private() {
+        let conn = db();
+        let mut global = entry("g1", "global fact", &[], false, 1);
+        global.role_id = None;
+        let mut private_a = entry("a1", "private to role-a", &[], false, 2);
+        private_a.role_id = Some("role-a".into());
+        let mut private_b = entry("b1", "private to role-b", &[], false, 3);
+        private_b.role_id = Some("role-b".into());
+        insert(&conn, &global).unwrap();
+        insert(&conn, &private_a).unwrap();
+        insert(&conn, &private_b).unwrap();
+
+        // role-a sees global + private-a (2 entries)
+        let hits_a = search(&conn, None, None, Some("role-a"), 10).unwrap();
+        assert_eq!(hits_a.len(), 2);
+        let ids_a: Vec<&str> = hits_a.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids_a.contains(&"g1"));
+        assert!(ids_a.contains(&"a1"));
+        assert!(!ids_a.contains(&"b1"));
+
+        // role-b sees global + private-b (2 entries)
+        let hits_b = search(&conn, None, None, Some("role-b"), 10).unwrap();
+        assert_eq!(hits_b.len(), 2);
+        let ids_b: Vec<&str> = hits_b.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids_b.contains(&"g1"));
+        assert!(ids_b.contains(&"b1"));
+        assert!(!ids_b.contains(&"a1"));
+
+        // no filter sees all 3
+        let all = search(&conn, None, None, None, 10).unwrap();
+        assert_eq!(all.len(), 3);
     }
 }

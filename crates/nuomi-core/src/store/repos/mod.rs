@@ -3,6 +3,7 @@
 pub mod agent_profiles;
 pub mod attachments;
 pub mod change_log;
+pub mod event_rollbacks;
 pub mod events;
 pub mod integrations;
 pub mod journal;

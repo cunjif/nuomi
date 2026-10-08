@@ -45,6 +45,7 @@ pub fn append(
 }
 
 /// Lists events of an aggregate in seq order; `after_seq` enables gap recovery.
+/// Events within any `event_rollbacks` range are soft-hidden (NOT EXISTS filter).
 pub fn list_by_aggregate(
     conn: &Connection,
     aggregate_type: &str,
@@ -53,9 +54,15 @@ pub fn list_by_aggregate(
 ) -> Result<Vec<EventRecord>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, aggregate_type, aggregate_id, kind, payload, seq, created_at
-         FROM events
-         WHERE aggregate_type = ?1 AND aggregate_id = ?2 AND seq > ?3
-         ORDER BY seq ASC",
+         FROM events e
+         WHERE e.aggregate_type = ?1 AND e.aggregate_id = ?2 AND e.seq > ?3
+           AND NOT EXISTS (
+               SELECT 1 FROM event_rollbacks r
+               WHERE r.aggregate_type = e.aggregate_type
+                 AND r.aggregate_id = e.aggregate_id
+                 AND e.seq BETWEEN r.from_seq AND r.to_seq
+           )
+         ORDER BY e.seq ASC",
     )?;
     let rows = stmt.query_map(
         params![aggregate_type, aggregate_id, after_seq.unwrap_or(0)],
