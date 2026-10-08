@@ -8,12 +8,18 @@ import type { ChatEntry } from "./useSessionStream";
 interface MessageListProps {
   entries: ChatEntry[];
   streamingId: string | null;
+  /** Called when the user clicks the reply button on a message. */
+  onQuote?: (seq: number) => void;
+  /** Called when the user clicks a quote preview inside a message. */
+  onQuoteClick?: (seq: number) => void;
+  /** Called when the user clicks "rollback to here" on a user message. */
+  onRollback?: (seq: number) => void;
 }
 
 /** Plain list below the threshold; virtualized above it (AC11). */
 const VIRTUALIZE_THRESHOLD = 100;
 
-export function MessageList({ entries, streamingId }: MessageListProps): ReactNode {
+export function MessageList({ entries, streamingId, onQuote, onQuoteClick, onRollback }: MessageListProps): ReactNode {
   const virtualized = entries.length > VIRTUALIZE_THRESHOLD;
   const { scrollRef, scrollToBottomIfStuck } = useStickToBottom({ rebindKey: virtualized });
 
@@ -36,7 +42,9 @@ export function MessageList({ entries, streamingId }: MessageListProps): ReactNo
     return (
       <div ref={scrollRef} className="min-h-0 h-full overflow-y-auto py-2">
         {entries.map((entry) => (
-          <Bubble key={entry.id} entry={entry} streaming={entry.id === streamingId} />
+          <div key={entry.id} data-entry-id={entry.id}>
+            <Bubble entry={entry} streaming={entry.id === streamingId} onQuote={onQuote} onQuoteClick={onQuoteClick} onRollback={onRollback} />
+          </div>
         ))}
       </div>
     );
@@ -47,6 +55,7 @@ export function MessageList({ entries, streamingId }: MessageListProps): ReactNo
         {virtualizer.getVirtualItems().map((item) => (
           <div
             key={entries[item.index]?.id ?? item.key}
+            data-entry-id={entries[item.index]?.id}
             style={{
               position: "absolute",
               top: 0,
@@ -55,7 +64,7 @@ export function MessageList({ entries, streamingId }: MessageListProps): ReactNo
               transform: `translateY(${item.start}px)`,
             }}
           >
-            <Bubble entry={entries[item.index] as ChatEntry} streaming={entries[item.index]?.id === streamingId} />
+            <Bubble entry={entries[item.index] as ChatEntry} streaming={entries[item.index]?.id === streamingId} onQuote={onQuote} onQuoteClick={onQuoteClick} onRollback={onRollback} />
           </div>
         ))}
       </div>

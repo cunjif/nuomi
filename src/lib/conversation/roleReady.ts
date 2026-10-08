@@ -9,6 +9,29 @@ export function readAgentProfileId(params: JsonValue): string | null {
   return null;
 }
 
+/** Reads the `memory` config from a role's params JSON. */
+export function readMemoryConfig(params: JsonValue): {
+  enabled: boolean;
+  tags: string[];
+  autoRemember: "off" | "user_input_only";
+} | null {
+  if (params !== null && typeof params === "object" && !Array.isArray(params)) {
+    const m = params["memory"];
+    if (m !== null && typeof m === "object" && !Array.isArray(m)) {
+      const enabled = (m as Record<string, unknown>)["enabled"];
+      const tags = (m as Record<string, unknown>)["tags"];
+      const autoRemember = (m as Record<string, unknown>)["autoRemember"];
+      return {
+        enabled: typeof enabled === "boolean" ? enabled : false,
+        tags: Array.isArray(tags) ? tags.filter((t): t is string => typeof t === "string") : [],
+        autoRemember:
+          autoRemember === "user_input_only" ? "user_input_only" : "off",
+      };
+    }
+  }
+  return null;
+}
+
 /** A role is "ready" (usable as a Role Agent) when it binds a provider or a CLI agent profile. */
 export function isRoleReady(role: { providerId: string | null; params: JsonValue }): boolean {
   return role.providerId !== null || readAgentProfileId(role.params) !== null;

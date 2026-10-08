@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CapabilityDto, RoleDto, RoleInput } from "../../lib/ipc/bindings.gen";
-import { readAgentProfileId } from "../../lib/conversation/roleReady";
+import type { CapabilityDto, JsonValue, RoleDto, RoleInput } from "../../lib/ipc/bindings.gen";
+import { readAgentProfileId, readMemoryConfig } from "../../lib/conversation/roleReady";
 import { CAPABILITY_KEYS, type BindingMode } from "./RoleForm";
 import { ToolTagInput } from "./ToolTagInput";
 import { describeError } from "../../i18n";
@@ -66,6 +66,12 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
   const [requiredCapabilities, setRequiredCapabilities] = useState<CapabilityDto[]>(
     initialRole?.requiredCapabilities ?? [],
   );
+  const initialMem = initialRole ? readMemoryConfig(initialRole.params) : null;
+  const [memEnabled, setMemEnabled] = useState(initialMem?.enabled ?? false);
+  const [memTags, setMemTags] = useState<string[]>(initialMem?.tags ?? []);
+  const [memAutoRemember, setMemAutoRemember] = useState<"off" | "user_input_only">(
+    initialMem?.autoRemember ?? "off",
+  );
 
   const providersQuery = useQuery({ queryKey: ["providers"], queryFn: ipc.listProviders });
   const profilesQuery = useQuery({ queryKey: ["agentProfiles"], queryFn: ipc.listAgentProfiles });
@@ -99,6 +105,15 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
             const boundAgent = bindingMode === "cli" ? agentProfileId : null;
             if (bindingMode === "provider" && boundProvider === "") return;
             if (bindingMode === "cli" && boundAgent === "") return;
+            const params: Record<string, JsonValue> = {};
+            if (boundAgent !== null) params["agent_profile_id"] = boundAgent;
+            if (memEnabled) {
+              params["memory"] = {
+                enabled: true,
+                tags: memTags,
+                autoRemember: memAutoRemember,
+              };
+            }
             saveMut.mutate({
               name: name.trim(),
               providerId: boundProvider,
@@ -109,7 +124,7 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
               requiredCapabilities,
               temperature: parseOptionalFloat(temperature),
               maxTokens: parseOptionalInt(maxTokens),
-              params: boundAgent !== null ? { agent_profile_id: boundAgent } : {},
+              params,
             });
           }}
         >
@@ -251,6 +266,46 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
               className={`${field} bg-surface text-sm font-mono`}
             />
           </label>
+          <div className="mt-2 rounded border border-ink-muted/30 p-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink">
+              <input
+                type="checkbox"
+                checked={memEnabled}
+                onChange={(e) => setMemEnabled(e.target.checked)}
+                className="accent-ink-accent"
+              />
+              {t("settings.roles.memory.enabled")}
+            </label>
+            {memEnabled && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <label className="flex flex-1 flex-col gap-0.5 text-xs text-ink-muted">
+                  {t("settings.roles.memory.tags")}
+                  <ToolTagInput
+                    value={memTags}
+                    onChange={setMemTags}
+                    candidates={[]}
+                    placeholder={t("settings.roles.memory.tagsHint")}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                  {t("settings.roles.memory.autoRemember")}
+                  <select
+                    value={memAutoRemember}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "off" || v === "user_input_only") setMemAutoRemember(v);
+                    }}
+                    className={`${field} bg-surface text-sm`}
+                  >
+                    <option value="off">{t("settings.roles.memory.autoRememberOff")}</option>
+                    <option value="user_input_only">
+                      {t("settings.roles.memory.autoRememberUserInput")}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            )}
+          </div>
           <div className="mt-3 flex justify-end gap-2">
             <button
               type="button"

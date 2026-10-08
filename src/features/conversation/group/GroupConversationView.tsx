@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CommandContext } from "../../../lib/commands/registry";
@@ -35,6 +35,7 @@ export function GroupConversationView(): ReactNode {
   const navigate = useUiStore((s) => s.setView);
   const selectSession = useUiStore((s) => s.selectSession);
   const { cycleTheme } = useTheme();
+  const [quotedEventSeq, setQuotedEventSeq] = useState<number | null>(null);
 
   const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
   const commandContext = useMemo<CommandContext>(
@@ -52,7 +53,10 @@ export function GroupConversationView(): ReactNode {
   const submitMut = useMutation({
     mutationFn: (input: string) => {
       if (sessionId === null) return Promise.reject(new Error("no session"));
-      return ipc.submitMessage(sessionId, input, [], null, null);
+      return ipc.submitMessage(sessionId, input, [], null, null, quotedEventSeq).then((result) => {
+        setQuotedEventSeq(null);
+        return result;
+      });
     },
     onSuccess: () => {
       if (sessionId !== null) {
@@ -86,12 +90,14 @@ export function GroupConversationView(): ReactNode {
           {messages.map((msg) => {
             const role = (msg.payload as { role?: string }).role ?? "assistant";
             const content = (msg.payload as { content?: string }).content ?? "";
+            const quotedExcerpt = (msg.payload as { quoted_excerpt?: string }).quoted_excerpt;
             return (
               <SpeakerBubble
                 key={msg.seq}
                 roleName={role}
                 roleColor={roleColor(role)}
                 content={content}
+                quotedExcerpt={quotedExcerpt}
               />
             );
           })}

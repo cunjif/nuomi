@@ -10,6 +10,7 @@ import { toast } from "../../lib/store/toastStore";
 import { useTheme } from "../../lib/store/useTheme";
 import { useUiStore } from "../../lib/store/uiStore";
 import { Composer } from "../conversation/composer/Composer";
+import { QuotePreviewBar } from "../conversation/composer/QuotePreviewBar";
 import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
@@ -25,6 +26,9 @@ export function ChatView(): ReactNode {
   const { cycleTheme } = useTheme();
   const stream = useSessionStream(sessionId);
   const [finalText, setFinalText] = useState<string | null>(null);
+  const [quotedEventSeq, setQuotedEventSeq] = useState<number | null>(null);
+  const [quotedExcerpt, setQuotedExcerpt] = useState<string | null>(null);
+  const [rollbackTargetSeq, setRollbackTargetSeq] = useState<number | null>(null);
 
   // `finalText` is the non-streaming fallback bubble for the turn that just
   // completed. It belongs to one session: ChatView stays mounted across
@@ -45,7 +49,12 @@ export function ChatView(): ReactNode {
       if (sessionId === null) return Promise.reject(new Error("no session"));
       setFinalText(null);
       stream.addOptimistic(input);
-      return ipc.submitTask(sessionId, input);
+      const qseq = quotedEventSeq;
+      return ipc.submitTask(sessionId, input, qseq).then((result) => {
+        setQuotedEventSeq(null);
+        setQuotedExcerpt(null);
+        return result;
+      });
     },
     onSuccess: (result) => {
       const hadLive = stream.hasLiveActivity();
@@ -91,6 +100,21 @@ export function ChatView(): ReactNode {
   });
   const isAgentBusy = submitMut.isPending || (queueQuery.data?.length ?? 0) > 0;
 
+  const rollbackMut = useMutation({
+    mutationFn: (toSeq: number) => {
+      if (sessionId === null) return Promise.reject(new Error("no session"));
+      return ipc.rollbackSessionEvents(sessionId, toSeq);
+    },
+    onSuccess: (result) => {
+      setRollbackTargetSeq(null);
+      if (sessionId !== null) {
+        void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+      }
+      toast.success(t("chat.rolledBackN", { count: result.rolledBackCount }));
+    },
+    onError: (e) => toast.error(`${t("chat.rollbackFailed")}: ${describeError(e)}`),
+  });
+
   if (sessionId === null) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-ink-muted">
@@ -114,7 +138,22 @@ export function ChatView(): ReactNode {
           emptyLabel={t("chat.noMessages")}
           onRetry={stream.retry}
         >
-          <MessageList entries={entries} streamingId={submitMut.isPending ? STREAM_ENTRY_ID : null} />
+          <MessageList
+            entries={entries}
+            streamingId={submitMut.isPending ? STREAM_ENTRY_ID : null}
+            onQuote={(seq) => {
+              const entry = entries.find((e) => e.id === `m${seq}`);
+              if (entry) {
+                setQuotedEventSeq(seq);
+                setQuotedExcerpt((entry.text ?? "").slice(0, 80));
+              }
+            }}
+            onQuoteClick={(seq) => {
+              const el = document.querySelector(`[data-entry-id="m${seq}"]`);
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            onRollback={(seq) => setRollbackTargetSeq(seq)}
+          />
           <AgentStatusIndicator
             agentName="AI"
             agentColor="var(--color-ink-accent, #6366f1)"
@@ -129,7 +168,20 @@ export function ChatView(): ReactNode {
         pending={false}
         commandContext={commandContext}
         sessionId={sessionId}
-        topSlot={<QueueList sessionId={sessionId} />}
+        topSlot={
+          <>
+            {quotedExcerpt !== null && (
+              <QuotePreviewBar
+                excerpt={quotedExcerpt}
+                onCancel={() => {
+                  setQuotedEventSeq(null);
+                  setQuotedExcerpt(null);
+                }}
+              />
+            )}
+            <QueueList sessionId={sessionId} />
+          </>
+        }
         onSubmit={async (input) => {
           if (isAgentBusy) {
             await enqueueMut.mutateAsync(input);
@@ -154,6 +206,45 @@ export function ChatView(): ReactNode {
           }
         }}
       />
+      {rollbackTargetSeq !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-sm rounded border border-ink-muted/40 bg-surface-raised p-4">
+            <h4 className="mb-2 text-sm font-semibold text-ink">{t("chat.rollbackConfirm")}</h4>
+            <p className="mb-3 text-xs text-ink-muted">
+              {t("chat.rollbackHint", { count: entries.filter((e) => {
+                const m = /^m(\d+)$/.exec(e.id);
+                return m !== null && Number(m[1]) > rollbackTargetSeq;
+              }).length })}
+            </p>
+            {rollbackMut.data?.containsToolCalls === true && (
+              <p className="mb-3 text-xs text-amber-500">
+                {t("chat.toolSideEffectsRetained")}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRollbackTargetSeq(null)}
+                className="rounded border border-ink-muted px-3 py-1 text-sm text-ink-muted hover:bg-surface-overlay"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={rollbackMut.isPending}
+                onClick={() => rollbackMut.mutate(rollbackTargetSeq)}
+                className="pixel-fill-accent px-3 py-1 text-sm text-surface disabled:opacity-50"
+              >
+                {rollbackMut.isPending ? t("common.processing") : t("chat.rollbackToHere")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

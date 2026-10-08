@@ -55,6 +55,7 @@
     "create": "创建",
     "close": "关闭",
     "add": "添加",
+    "processing": "处理中…",
     "remove": "移除",
     "enabled": "已启用",
     "disabled": "已停用",
@@ -112,6 +113,15 @@
     "noRoleAgent": "请先配置 Role Agent",
     "noRoleAgentHint": "未检测到已配置的 Role Agent，对话功能不可用。请先在设置中将 Role 绑定 Provider 或 CLI Agent。",
     "goToSettings": "前往设置",
+    "reply": "回复",
+    "quoting": "引用",
+    "cancelQuote": "取消引用",
+    "rollbackToHere": "回退到此处",
+    "rollbackConfirm": "确认回退",
+    "rollbackHint": "将隐藏此消息之后的 {{count}} 条消息。",
+    "toolSideEffectsRetained": "⚠️ 此回退段含工具调用，工具副作用（文件/shell/git）已保留且不会撤销。",
+    "rolledBackN": "已回退 {{count}} 条消息",
+    "rollbackFailed": "回退失败",
     "status": {
       "instantiating": {
         "1": "正在唤醒沉睡的代码之魂……",
@@ -586,7 +596,15 @@
       "quickBindingSaved": "Role Agent 已保存",
       "quickBindingFailed": "保存 Role Agent 失败",
       "badgeProviderModel": "Provider：{{name}}/{{model}}",
-      "badgeCliAgentModel": "CLI Agent：{{name}}/{{model}}"
+      "badgeCliAgentModel": "CLI Agent：{{name}}/{{model}}",
+      "memory": {
+        "enabled": "启用记忆",
+        "tags": "记忆标签",
+        "tagsHint": "输入标签…",
+        "autoRemember": "自动记忆",
+        "autoRememberOff": "关闭",
+        "autoRememberUserInput": "仅用户输入"
+      }
     },
     "teams": {
       "heading": "Teams",
@@ -679,6 +697,28 @@
         "retrievalSemantic": "语义",
         "retrievalHybrid": "混合"
       }
+    },
+    "memory": {
+      "heading": "记忆",
+      "rememberTitle": "添加记忆",
+      "contentPlaceholder": "内容...",
+      "tagsPlaceholder": "标签（逗号分隔）",
+      "roleIdPlaceholder": "角色 ID",
+      "userProfile": "用户画像",
+      "remember": "记住",
+      "remembered": "记忆已保存",
+      "rememberFailed": "保存失败",
+      "recallTitle": "搜索记忆",
+      "searchPlaceholder": "搜索关键词...",
+      "recall": "检索",
+      "recallFailed": "检索失败",
+      "noResults": "无结果",
+      "listTitle": "全部记忆",
+      "empty": "暂无记忆。",
+      "delete": "删除",
+      "confirmDelete": "确认？",
+      "cancel": "取消",
+      "deleted": "记忆已删除"
     }
   },
   "plugins": {

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { CliAgentsSection } from "./CliAgentsSection";
 import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
 import { IntegrationsSection } from "./IntegrationsSection";
+import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
 import { WorkspaceSettingsPanel } from "./WorkspaceSettingsPanel";
@@ -18,6 +19,7 @@ const TABS = [
   { key: "roles", labelKey: "settings.roles.heading" },
   { key: "agents", labelKey: "settings.cliAgents.heading" },
   { key: "integrations", labelKey: "settings.integrations.heading" },
+  { key: "memory", labelKey: "settings.memory.heading" },
   { key: "workspace", labelKey: "settings.workspace.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
 ] as const;
@@ -34,6 +36,8 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       return <CliAgentsSection />;
     case "integrations":
       return <IntegrationsSection />;
+    case "memory":
+      return <MemorySection />;
     case "workspace":
       return <WorkspaceSettingsPanel />;
     case "access":

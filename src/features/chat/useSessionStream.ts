@@ -20,6 +20,8 @@ export interface ChatEntry {
   tool?: string;
   argsJson?: string;
   content?: string;
+  quotedEventSeq?: number;
+  quotedExcerpt?: string;
 }
 
 export const STREAM_ENTRY_ID = "__streaming__";
@@ -30,12 +32,16 @@ export function toEntries(events: EventDto[]): ChatEntry[] {
     const p = asRecord(e.payload);
     if (p === null) continue;
     if (e.kind === "message") {
+      const quotedEventSeq =
+        typeof p.quoted_event_seq === "number" ? p.quoted_event_seq : undefined;
       out.push({
         id: `m${e.seq}`,
         kind: "message",
         role: asString(p.role) === "user" ? "user" : "assistant",
         roleName: asString(p.role_name) || undefined,
         text: asString(p.content),
+        quotedEventSeq,
+        quotedExcerpt: quotedEventSeq !== undefined ? asString(p.quoted_excerpt) || undefined : undefined,
       });
     } else if (e.kind === "tool_call") {
       out.push({
@@ -129,6 +135,8 @@ export function useSessionStream(sessionId: string | null): {
           setStreamText("");
           const role = asString(p.role);
           if (role === "user" || role === "assistant") {
+            const quotedEventSeq =
+              typeof p.quoted_event_seq === "number" ? p.quoted_event_seq : undefined;
             setLiveEntries((prev) => [
               ...prev,
               {
@@ -137,6 +145,8 @@ export function useSessionStream(sessionId: string | null): {
                 role,
                 roleName: asString(p.role_name) || undefined,
                 text: asString(p.content),
+                quotedEventSeq,
+                quotedExcerpt: quotedEventSeq !== undefined ? asString(p.quoted_excerpt) || undefined : undefined,
               },
             ]);
           }
@@ -159,6 +169,10 @@ export function useSessionStream(sessionId: string | null): {
           // P0-3: a queued turn failed — refresh the queue list so the
           // failed entry is removed from the pending list.
           if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["messageQueue", sessionId] });
+        } else if (ev.type === "session.events_rolled_back") {
+          // Message rollback: refresh the event list so rolled-back
+          // messages disappear from the view.
+          if (sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
         }
       }
       if (gap && sessionId !== null) void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });

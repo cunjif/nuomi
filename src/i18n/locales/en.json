@@ -55,6 +55,7 @@
     "create": "Create",
     "close": "Close",
     "add": "Add",
+    "processing": "Processing…",
     "remove": "Remove",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -112,6 +113,15 @@
     "noRoleAgent": "Please configure a Role Agent first",
     "noRoleAgentHint": "No Role Agent configured. The conversation feature is unavailable. Please bind a Role to a Provider or CLI Agent in Settings.",
     "goToSettings": "Go to Settings",
+    "reply": "Reply",
+    "quoting": "Quoting",
+    "cancelQuote": "Cancel quote",
+    "rollbackToHere": "Rollback to here",
+    "rollbackConfirm": "Confirm rollback",
+    "rollbackHint": "This will hide {{count}} message(s) after this point.",
+    "toolSideEffectsRetained": "⚠️ This segment contains tool calls. Tool side effects (files/shell/git) are retained and will not be undone.",
+    "rolledBackN": "Rolled back {{count}} message(s)",
+    "rollbackFailed": "Rollback failed",
     "status": {
       "instantiating": {
         "1": "Awakening the slumbering soul of code…",
@@ -586,7 +596,15 @@
       "quickBindingSaved": "Role Agent saved",
       "quickBindingFailed": "Failed to save Role Agent",
       "badgeProviderModel": "Provider: {{name}}/{{model}}",
-      "badgeCliAgentModel": "CLI Agent: {{name}}/{{model}}"
+      "badgeCliAgentModel": "CLI Agent: {{name}}/{{model}}",
+      "memory": {
+        "enabled": "Enable memory",
+        "tags": "Memory tags",
+        "tagsHint": "Enter tag…",
+        "autoRemember": "Auto remember",
+        "autoRememberOff": "Off",
+        "autoRememberUserInput": "User input only"
+      }
     },
     "teams": {
       "heading": "Teams",
@@ -679,6 +697,28 @@
         "retrievalSemantic": "Semantic",
         "retrievalHybrid": "Hybrid"
       }
+    },
+    "memory": {
+      "heading": "Memory",
+      "rememberTitle": "Add a memory",
+      "contentPlaceholder": "Content...",
+      "tagsPlaceholder": "tags (comma-separated)",
+      "roleIdPlaceholder": "role id",
+      "userProfile": "User profile",
+      "remember": "Remember",
+      "remembered": "Memory saved",
+      "rememberFailed": "Failed to save",
+      "recallTitle": "Search memories",
+      "searchPlaceholder": "Search query...",
+      "recall": "Recall",
+      "recallFailed": "Recall failed",
+      "noResults": "No results",
+      "listTitle": "All memories",
+      "empty": "No memories yet.",
+      "delete": "Delete",
+      "confirmDelete": "Confirm?",
+      "cancel": "Cancel",
+      "deleted": "Memory deleted"
     }
   },
   "plugins": {
