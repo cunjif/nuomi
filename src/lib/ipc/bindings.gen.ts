@@ -38,9 +38,25 @@ async listEvents(sessionId: string, afterSeq: number) : Promise<Result<EventDto[
     else return { status: "error", error: e  as any };
 }
 },
-async submitTask(sessionId: string, input: string) : Promise<Result<RunResultDto, IpcError>> {
+async rollbackSessionEvents(sessionId: string, toSeq: number) : Promise<Result<RollbackResultDto, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("submit_task", { sessionId, input }) };
+    return { status: "ok", data: await TAURI_INVOKE("rollback_session_events", { sessionId, toSeq }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listRollbackPoints(sessionId: string) : Promise<Result<RollbackPointDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_rollback_points", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async submitTask(sessionId: string, input: string, quotedEventSeq: number | null) : Promise<Result<RunResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("submit_task", { sessionId, input, quotedEventSeq }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -966,9 +982,9 @@ async getAgentDetail(agentKind: string, agentId: string) : Promise<Result<AgentD
     else return { status: "error", error: e  as any };
 }
 },
-async submitMessage(sessionId: string, text: string, attachmentIds: string[], routeTargetAgentIds: string[] | null, contextInjectionIds: string[] | null) : Promise<Result<RunResultDto, IpcError>> {
+async submitMessage(sessionId: string, text: string, attachmentIds: string[], routeTargetAgentIds: string[] | null, contextInjectionIds: string[] | null, quotedEventSeq: number | null) : Promise<Result<RunResultDto, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("submit_message", { sessionId, text, attachmentIds, routeTargetAgentIds, contextInjectionIds }) };
+    return { status: "ok", data: await TAURI_INVOKE("submit_message", { sessionId, text, attachmentIds, routeTargetAgentIds, contextInjectionIds, quotedEventSeq }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -977,6 +993,38 @@ async submitMessage(sessionId: string, text: string, attachmentIds: string[], ro
 async stopConversation(sessionId: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stop_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async rememberMemory(content: string, tags: string[], kind: string, userProfile: boolean, roleId: string | null, sourceSessionId: string | null) : Promise<Result<MemoryEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remember_memory", { content, tags, kind, userProfile, roleId, sourceSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async recallMemory(query: string | null, tag: string | null, roleId: string | null, limit: number) : Promise<Result<MemoryEntryDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recall_memory", { query, tag, roleId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listMemory(roleId: string | null, limit: number) : Promise<Result<MemoryEntryDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_memory", { roleId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteMemory(id: string) : Promise<Result<boolean, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_memory", { id }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1464,8 +1512,9 @@ providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKe
  * Overrides the stored per-provider proxy when non-empty.
  */
 proxy: string | null }
+export type MemoryEntryDto = { id: string; content: string; sourceSessionId: string | null; tags: string[]; kind: string; userProfile: boolean; createdAt: number; updatedAt: number; roleId: string | null }
 export type MemoryPolicyDto = { retentionDays: number; retrieval: RetrievalStrategyDto }
-export type MemorySummaryDto = { id: string; content: string }
+export type MemorySummaryDto = { id: string; content: string; tags: string[]; kind: string; userProfile: boolean; roleId: string | null; sourceSessionId: string | null; createdAt: number; updatedAt: number }
 export type MessageQueueItemDto = { id: string; text: string; seq: number; createdAt: number }
 /**
  * One model exposed by a provider endpoint plus its capability tags
@@ -1585,6 +1634,8 @@ providerIds?: string[]; systemPromptOverride: string | null; toolAllowlist: stri
  */
 params: JsonValue }
 export type RoleSummaryDto = { id: string; name: string; builtin: boolean }
+export type RollbackPointDto = { seq: number; contentPreview: string }
+export type RollbackResultDto = { rolledBackCount: number; containsToolCalls: boolean }
 /**
  * A capability-routing probe: resolves a role for the required capability
  * set (optionally creating + immediately cleaning an ephemeral temp role

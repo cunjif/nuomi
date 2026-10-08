@@ -162,6 +162,7 @@ pub async fn run_conversation_turn(
     state: &AppState,
     session_id: &str,
     text: &str,
+    quoted_event_seq: Option<i64>,
 ) -> Result<RunResultDto, IpcError> {
     if session_id.trim().is_empty() {
         return Err(IpcError::new(
@@ -170,6 +171,30 @@ pub async fn run_conversation_turn(
         ));
     }
     let token = state.session_cancels.begin(session_id);
+
+    let quoted_excerpt: Option<String> = match quoted_event_seq {
+        Some(seq) => {
+            let db_path = state.db_path.clone();
+            let sid = session_id.to_string();
+            tokio::task::spawn_blocking(move || -> Result<Option<String>, StoreError> {
+                let db = Db::open(&db_path)?;
+                let events =
+                    repos::events::list_by_aggregate(&db.0, "session", &sid, Some(seq - 1))?;
+                Ok(events
+                    .into_iter()
+                    .find(|e| e.seq == seq && e.kind == "message")
+                    .and_then(|e| {
+                        e.payload
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.chars().take(80).collect())
+                    }))
+            })
+            .await
+            .map_err(join_err)??
+        }
+        None => None,
+    };
 
     // Dispatch based on team_id (D1 / D3). Wrapped in a block so that
     // `finish` is always called — even on error paths (`?` inside the block
@@ -364,6 +389,8 @@ pub async fn run_conversation_turn(
                             overlay,
                             external_session_id,
                             max_history_chars,
+                            quoted_event_seq,
+                            quoted_excerpt.clone(),
                         )
                         .await?;
                     // P1-6: CLI handle persistence is best-effort. The
@@ -394,6 +421,8 @@ pub async fn run_conversation_turn(
                             None,
                             external_session_id,
                             max_history_chars,
+                            quoted_event_seq,
+                            quoted_excerpt.clone(),
                         )
                         .await?;
                     // P1-6: same best-effort CLI handle persistence.
@@ -539,6 +568,8 @@ async fn run_single_role_context(
                     overlay,
                     None,
                     None,
+                    None,
+                    None,
                 )
                 .await
                 .map_err(|e| IpcError::new("agent.run_failed", e.to_string()))
@@ -558,6 +589,8 @@ async fn run_single_role_context(
                     None,
                     None,
                     None,
+                    None,
+                    None,
                 )
                 .await
                 .map_err(|e| IpcError::new("agent.run_failed", e.to_string()))
@@ -570,6 +603,7 @@ pub async fn impl_submit_task(
     state: &AppState,
     session_id: String,
     input: String,
+    quoted_event_seq: Option<i64>,
 ) -> Result<RunResultDto, IpcError> {
     // P1-1: use try_set_busy so we don't clobber a running turn. If the
     // agent is already busy, the frontend should route through
@@ -590,7 +624,7 @@ pub async fn impl_submit_task(
             "agent is already processing a turn; use enqueue_message instead",
         ));
     }
-    let result = run_conversation_turn(state, &session_id, &input).await;
+    let result = run_conversation_turn(state, &session_id, &input, quoted_event_seq).await;
     // Release the busy lock and notify the frontend.
     release_busy_and_emit(state, &session_id).await;
     // P0-5: lost-wakeup — a producer may have enqueued while this direct
@@ -778,7 +812,7 @@ async fn process_queue(app_handle: tauri::AppHandle, session_id: String) {
         };
         match entry {
             Some(e) => {
-                let turn_result = run_conversation_turn(&state, &session_id, &e.text).await;
+                let turn_result = run_conversation_turn(&state, &session_id, &e.text, None).await;
                 match turn_result {
                     Ok(_) => {
                         // Success — mark done.
@@ -2780,6 +2814,63 @@ pub async fn impl_get_evolution_settings(
     let mut defaults = nuomi_core::domain::EvolutionSettings::default();
     defaults.online_learning.authorized = legacy_auth;
     Ok(EvolutionSettingsDto::from_entity(defaults))
+}
+
+pub async fn impl_remember_memory(
+    state: &AppState,
+    content: String,
+    tags: Vec<String>,
+    kind: String,
+    user_profile: bool,
+    role_id: Option<String>,
+    source_session_id: Option<String>,
+) -> Result<MemoryEntryDto, IpcError> {
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    let entry = mem
+        .remember(content, source_session_id, tags, &kind, user_profile, role_id)
+        .await
+        .map_err(|e| IpcError::new("memory.remember_failed", e.to_string()))?;
+    Ok(MemoryEntryDto::from(entry))
+}
+
+pub async fn impl_recall_memory(
+    state: &AppState,
+    query: Option<String>,
+    tag: Option<String>,
+    role_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<MemoryEntryDto>, IpcError> {
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    let entries = mem
+        .recall(query, tag, role_id, limit)
+        .await
+        .map_err(|e| IpcError::new("memory.recall_failed", e.to_string()))?;
+    Ok(entries.into_iter().map(MemoryEntryDto::from).collect())
+}
+
+pub async fn impl_list_memory(
+    state: &AppState,
+    role_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<MemoryEntryDto>, IpcError> {
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    let entries = mem
+        .list(role_id, limit)
+        .await
+        .map_err(|e| IpcError::new("memory.list_failed", e.to_string()))?;
+    Ok(entries.into_iter().map(MemoryEntryDto::from).collect())
+}
+
+pub async fn impl_delete_memory(
+    state: &AppState,
+    id: String,
+) -> Result<bool, IpcError> {
+    let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
+    let deleted = mem
+        .delete(id)
+        .await
+        .map_err(|e| IpcError::new("memory.delete_failed", e.to_string()))?;
+    Ok(deleted)
 }
 
 pub async fn impl_set_evolution_settings(
@@ -5245,6 +5336,7 @@ pub async fn impl_submit_message(
     attachment_ids: Vec<String>,
     route_target_agent_ids: Option<Vec<String>>,
     _context_injection_ids: Option<Vec<String>>,
+    quoted_event_seq: Option<i64>,
 ) -> Result<RunResultDto, IpcError> {
     // Validate @route targets: all must be participants in the current conversation.
     if let Some(ref targets) = route_target_agent_ids {
@@ -5275,7 +5367,7 @@ pub async fn impl_submit_message(
     // Attachments ride along as inline references; the model sees the path
     // inside the workspace and reads it with the normal file tools.
     let composed = compose_with_attachments(state, &session_id, &text, &attachment_ids).await?;
-    let result = run_conversation_turn(state, &session_id, &composed).await?;
+    let result = run_conversation_turn(state, &session_id, &composed, quoted_event_seq).await?;
     bind_attachments_to_user_message(state, &session_id, &attachment_ids).await?;
     Ok(result)
 }
@@ -7448,6 +7540,43 @@ pub struct EventSummaryDto {
 pub struct MemorySummaryDto {
     pub id: String,
     pub content: String,
+    pub tags: Vec<String>,
+    pub kind: String,
+    pub user_profile: bool,
+    pub role_id: Option<String>,
+    pub source_session_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryEntryDto {
+    pub id: String,
+    pub content: String,
+    pub source_session_id: Option<String>,
+    pub tags: Vec<String>,
+    pub kind: String,
+    pub user_profile: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub role_id: Option<String>,
+}
+
+impl From<nuomi_core::domain::MemoryEntry> for MemoryEntryDto {
+    fn from(m: nuomi_core::domain::MemoryEntry) -> Self {
+        Self {
+            id: m.id,
+            content: m.content,
+            source_session_id: m.source_session_id,
+            tags: m.tags,
+            kind: m.kind,
+            user_profile: m.user_profile,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+            role_id: m.role_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -7528,6 +7657,13 @@ impl From<nuomi_core::steward::snapshot::AppStateSnapshot> for AppStateSnapshotD
                 .map(|m| MemorySummaryDto {
                     id: m.id,
                     content: m.content,
+                    tags: m.tags,
+                    kind: m.kind,
+                    user_profile: m.user_profile,
+                    role_id: m.role_id,
+                    source_session_id: m.source_session_id,
+                    created_at: m.created_at,
+                    updated_at: m.updated_at,
                 })
                 .collect(),
             prompt_versions: s
@@ -8340,6 +8476,145 @@ pub async fn impl_steward_set_online_authorization(
     .await
     .map_err(|e| IpcError::new("join_error", e.to_string()))??;
     Ok(())
+}
+
+// ---------- message rollback ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackResultDto {
+    pub rolled_back_count: i64,
+    pub contains_tool_calls: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackPointDto {
+    pub seq: i64,
+    pub content_preview: String,
+}
+
+/// Rolls back session events after `to_seq` (soft-hide via `event_rollbacks`).
+/// If the agent is busy, cancels the in-flight turn first (D4).
+pub async fn impl_rollback_session_events(
+    state: &AppState,
+    session_id: String,
+    to_seq: i64,
+) -> Result<RollbackResultDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let sid = session_id.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<RollbackResultDto, IpcError> {
+        let db = Db::open(&db_path)?;
+        migrations::run(&db.0)?;
+        repos::sessions::get(&db.0, &sid)?;
+
+        let events = repos::events::list_by_aggregate(&db.0, "session", &sid, None)?;
+        let target = events.iter().find(|e| e.seq == to_seq);
+        let target = target.ok_or_else(|| {
+            IpcError::new("rollback.invalid_seq", "event not found at the given seq")
+        })?;
+        if target.kind != "message" || target.payload.get("role") != Some(&serde_json::json!("user")) {
+            return Err(IpcError::new(
+                "rollback.not_user_message",
+                "rollback point must be a user message",
+            ));
+        }
+
+        let max_seq = events.last().map(|e| e.seq).unwrap_or(0);
+        if max_seq <= to_seq {
+            return Ok(RollbackResultDto {
+                rolled_back_count: 0,
+                contains_tool_calls: false,
+            });
+        }
+
+        let in_range: Vec<&EventRecord> = events.iter().filter(|e| e.seq > to_seq).collect();
+        let rolled_back_count = in_range.len() as i64;
+        let contains_tool_calls = in_range.iter().any(|e| e.kind == "tool_call");
+
+        repos::event_rollbacks::insert(
+            &db.0,
+            "session",
+            &sid,
+            to_seq + 1,
+            max_seq,
+            now_ms(),
+            Some("user rollback"),
+        )?;
+
+        Ok(RollbackResultDto {
+            rolled_back_count,
+            contains_tool_calls,
+        })
+    })
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+
+    let busy = {
+        let path = state.db_path.clone();
+        let sid = session_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<bool, StoreError> {
+            let db = Db::open(&path)?;
+            repos::sessions::get_busy(&db.0, &sid)
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(false)
+    };
+    if busy {
+        state.session_cancels.cancel(&session_id);
+    }
+
+    state
+        .kernel
+        .context()
+        .publish(nuomi_core::harness::Event::new(
+            "session.events_rolled_back",
+            serde_json::json!({
+                "sessionId": session_id,
+                "rolledBackCount": result.rolled_back_count,
+                "containsToolCalls": result.contains_tool_calls,
+            }),
+        ));
+
+    Ok(result)
+}
+
+/// Returns user-message rollback points (seq + content preview) for the session.
+pub async fn impl_list_rollback_points(
+    state: &AppState,
+    session_id: String,
+) -> Result<Vec<RollbackPointDto>, IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let points = tokio::task::spawn_blocking(move || -> Result<Vec<RollbackPointDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::sessions::get(&db.0, &sid)?;
+        let events = repos::events::list_by_aggregate(&db.0, "session", &sid, None)?;
+        Ok(events
+            .iter()
+            .filter(|e| {
+                e.kind == "message" && e.payload.get("role") == Some(&serde_json::json!("user"))
+            })
+            .map(|e| {
+                let content = e
+                    .payload
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+                let preview: String = content.chars().take(80).collect();
+                RollbackPointDto {
+                    seq: e.seq,
+                    content_preview: preview,
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+    Ok(points)
 }
 
 #[cfg(test)]

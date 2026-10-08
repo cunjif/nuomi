@@ -95,7 +95,7 @@ async fn handle_event(state: &AppState, event: Event) {
                 session_id = %session_id,
                 "schedule dispatch: starting chat run"
             );
-            match commands::run_conversation_turn(state, &session_id, &prompt).await {
+            match commands::run_conversation_turn(state, &session_id, &prompt, None).await {
                 Ok(result) => tracing::info!(
                     task_id = %task_id,
                     session_id = %session_id,

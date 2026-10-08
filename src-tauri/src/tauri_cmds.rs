@@ -119,8 +119,9 @@ pub async fn submit_task(
     state: tauri::State<'_, AppState>,
     session_id: String,
     input: String,
+    quoted_event_seq: Option<i64>,
 ) -> Result<commands::RunResultDto, IpcError> {
-    commands::impl_submit_task(app_handle, &state, session_id, input).await
+    commands::impl_submit_task(app_handle, &state, session_id, input, quoted_event_seq).await
 }
 
 #[tauri::command]
@@ -1113,6 +1114,7 @@ pub async fn submit_message(
     attachment_ids: Vec<String>,
     route_target_agent_ids: Option<Vec<String>>,
     context_injection_ids: Option<Vec<String>>,
+    quoted_event_seq: Option<i64>,
 ) -> Result<commands::RunResultDto, IpcError> {
     commands::impl_submit_message(
         &state,
@@ -1121,6 +1123,7 @@ pub async fn submit_message(
         attachment_ids,
         route_target_agent_ids,
         context_injection_ids,
+        quoted_event_seq,
     )
     .await
 }
@@ -1132,6 +1135,51 @@ pub async fn stop_conversation(
     session_id: String,
 ) -> Result<(), IpcError> {
     commands::impl_stop_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remember_memory(
+    state: tauri::State<'_, AppState>,
+    content: String,
+    tags: Vec<String>,
+    kind: String,
+    user_profile: bool,
+    role_id: Option<String>,
+    source_session_id: Option<String>,
+) -> Result<commands::MemoryEntryDto, IpcError> {
+    commands::impl_remember_memory(&state, content, tags, kind, user_profile, role_id, source_session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn recall_memory(
+    state: tauri::State<'_, AppState>,
+    query: Option<String>,
+    tag: Option<String>,
+    role_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<commands::MemoryEntryDto>, IpcError> {
+    commands::impl_recall_memory(&state, query, tag, role_id, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_memory(
+    state: tauri::State<'_, AppState>,
+    role_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<commands::MemoryEntryDto>, IpcError> {
+    commands::impl_list_memory(&state, role_id, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_memory(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<bool, IpcError> {
+    commands::impl_delete_memory(&state, id).await
 }
 
 #[tauri::command]
@@ -1451,6 +1499,25 @@ pub async fn steward_set_online_authorization(
     authorized: bool,
 ) -> Result<(), IpcError> {
     commands::impl_steward_set_online_authorization(&state, authorized).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn rollback_session_events(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    to_seq: i64,
+) -> Result<commands::RollbackResultDto, IpcError> {
+    commands::impl_rollback_session_events(&state, session_id, to_seq).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_rollback_points(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<commands::RollbackPointDto>, IpcError> {
+    commands::impl_list_rollback_points(&state, session_id).await
 }
 
 /// Frontend heartbeat: called once after the React root mounts to signal that

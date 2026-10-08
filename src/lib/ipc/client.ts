@@ -87,8 +87,12 @@ export const ipc = {
   resumeSession: (sessionId: string) => unwrap(current.resumeSession(sessionId)),
   listEvents: (sessionId: string, afterSeq: number) =>
     unwrap(current.listEvents(sessionId, afterSeq)),
-  submitTask: (sessionId: string, input: string) =>
-    unwrap(current.submitTask(sessionId, input)),
+  rollbackSessionEvents: (sessionId: string, toSeq: number) =>
+    unwrap(current.rollbackSessionEvents(sessionId, toSeq)),
+  listRollbackPoints: (sessionId: string) =>
+    unwrap(current.listRollbackPoints(sessionId)),
+  submitTask: (sessionId: string, input: string, quotedEventSeq?: number | null) =>
+    unwrap(current.submitTask(sessionId, input, quotedEventSeq ?? null)),
   enqueueMessage: (sessionId: string, input: string) =>
     unwrap(current.enqueueMessage(sessionId, input)),
   listMessageQueue: (sessionId: string) =>
@@ -238,6 +242,7 @@ export const ipc = {
     attachmentIds: string[],
     routeTargetAgentIds?: string[] | null,
     contextInjectionIds?: string[] | null,
+    quotedEventSeq?: number | null,
   ) =>
     unwrap(
       current.submitMessage(
@@ -246,9 +251,45 @@ export const ipc = {
         attachmentIds,
         routeTargetAgentIds ?? null,
         contextInjectionIds ?? null,
+        quotedEventSeq ?? null,
       ),
     ),
   stopConversation: (sessionId: string) => unwrap(current.stopConversation(sessionId)),
+  rememberMemory: (
+    content: string,
+    tags: string[],
+    kind: string,
+    userProfile: boolean,
+    roleId?: string | null,
+    sourceSessionId?: string | null,
+  ) =>
+    unwrap(
+      current.rememberMemory(
+        content,
+        tags,
+        kind,
+        userProfile,
+        roleId ?? null,
+        sourceSessionId ?? null,
+      ),
+    ),
+  recallMemory: (
+    query?: string | null,
+    tag?: string | null,
+    roleId?: string | null,
+    limit: number = 20,
+  ) =>
+    unwrap(
+      current.recallMemory(
+        query ?? null,
+        tag ?? null,
+        roleId ?? null,
+        limit,
+      ),
+    ),
+  listMemory: (roleId?: string | null, limit: number = 100) =>
+    unwrap(current.listMemory(roleId ?? null, limit)),
+  deleteMemory: (id: string) => unwrap(current.deleteMemory(id)),
   listActiveRuns: () => unwrap(current.listActiveRuns()),
   cancelRun: (runId: string) => unwrap(current.cancelRun(runId)),
   saveAttachment: (sessionId: string, name: string, mime: string, dataBase64: string) =>

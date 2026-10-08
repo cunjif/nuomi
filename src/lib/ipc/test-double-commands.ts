@@ -160,7 +160,27 @@ export function testDoubleCommands(): CommandSet {
       const all = tdState.events.get(sessionId) ?? [];
       return ok(all.filter((e) => e.seq > afterSeq));
     },
-    async submitTask(sessionId, input) {
+    async rollbackSessionEvents(_sessionId, _toSeq) {
+      return ok({ rolledBackCount: 0, containsToolCalls: false });
+    },
+    async listRollbackPoints(sessionId) {
+      const all = tdState.events.get(sessionId) ?? [];
+      return ok(
+        all
+          .filter((e) => {
+            if (e.kind !== "message" || e.payload === null || typeof e.payload !== "object" || Array.isArray(e.payload)) return false;
+            return (e.payload as Record<string, unknown>)["role"] === "user";
+          })
+          .map((e) => {
+            const payload = e.payload as Record<string, unknown>;
+            return {
+              seq: e.seq,
+              contentPreview: String(payload["content"] ?? "").slice(0, 80),
+            };
+          }),
+      );
+    },
+    async submitTask(sessionId, input, _quotedEventSeq) {
       const events = tdState.events.get(sessionId) ?? [];
       const seq = (events.at(-1)?.seq ?? 0) + 1;
       events.push({ seq, kind: "message", payload: { role: "user", content: input }, createdAt: Date.now() });
@@ -1106,7 +1126,7 @@ export function testDoubleCommands(): CommandSet {
       };
       return ok(detail);
     },
-    async submitMessage(sessionId, text, _attachmentIds, _routeTargetAgentIds, _contextInjectionIds) {
+    async submitMessage(sessionId, text, _attachmentIds, _routeTargetAgentIds, _contextInjectionIds, _quotedEventSeq) {
       const events = tdState.events.get(sessionId) ?? [];
       const seq = (events.at(-1)?.seq ?? 0) + 1;
       events.push({ seq, kind: "message", payload: { role: "user", content: text }, createdAt: Date.now() });
@@ -1115,6 +1135,29 @@ export function testDoubleCommands(): CommandSet {
     },
     async stopConversation(_sessionId) {
       return ok(null);
+    },
+    async rememberMemory(content, tags, kind, userProfile, _roleId, _sourceSessionId) {
+      const entry = {
+        id: nextId("mem"),
+        content,
+        sourceSessionId: null,
+        tags,
+        kind,
+        userProfile,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        roleId: null,
+      };
+      return ok(entry);
+    },
+    async recallMemory(_query, _tag, _roleId, _limit) {
+      return ok<import("./bindings.gen").MemoryEntryDto[]>([]);
+    },
+    async listMemory(_roleId, _limit) {
+      return ok<import("./bindings.gen").MemoryEntryDto[]>([]);
+    },
+    async deleteMemory(_id) {
+      return ok(true);
     },
     async listActiveRuns() {
       return ok<import("./bindings.gen").RunDto[]>([]);
