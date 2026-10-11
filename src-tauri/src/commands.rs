@@ -450,6 +450,15 @@ pub async fn run_conversation_turn(
     })
 }
 
+/// Parses the selector's JSON reply `{"chosen_id": "..."}` and returns the
+/// matching candidate by exact id. Returns `None` when the reply is malformed
+/// or the id does not match any candidate, so the caller can log and fall back.
+fn parse_selector_choice(reply: &str, candidates: &[ResolvedAgent]) -> Option<ResolvedAgent> {
+    let parsed = serde_json::from_str::<serde_json::Value>(reply.trim()).ok()?;
+    let chosen_id = parsed.get("chosen_id")?.as_str()?;
+    candidates.iter().find(|p| p.id == chosen_id).cloned()
+}
+
 /// ADR 0013: IM group chat Selector mode. The first participant acts as
 /// Selector — it receives the user message plus a list of candidate agents
 /// and replies with the id of the agent who should respond. The selected
@@ -490,7 +499,7 @@ async fn run_selector_turn(
         "You are a selector. Choose the best agent to respond to the user message.\n\n\
          Available agents:\n{}\n\n\
          User message: {}\n\n\
-         Reply with ONLY the id of the chosen agent.",
+         Reply with ONLY a JSON object: {{\"chosen_id\": \"<the id of the chosen agent>\"}}",
         candidate_list, text
     );
 
@@ -504,12 +513,17 @@ async fn run_selector_turn(
         "selector responded",
     );
 
-    // 4. Parse selector reply — find the candidate whose id appears in the reply.
-    let selected = candidates
-        .iter()
-        .find(|p| selector_result.final_text.contains(&p.id))
-        .or_else(|| candidates.first())
-        .cloned();
+    // 4. Parse selector reply as JSON {"chosen_id": "..."} and match against
+    //    candidate ids exactly. Falls back to the first candidate on malformed
+    //    output (logged as a warning so silent mismatches are observable).
+    let selected = parse_selector_choice(&selector_result.final_text, candidates).or_else(|| {
+        tracing::warn!(
+            session_id,
+            selector_reply = %selector_result.final_text,
+            "selector reply did not contain a valid chosen_id; falling back to first candidate"
+        );
+        candidates.first().cloned()
+    });
 
     tracing::info!(
         session_id,
