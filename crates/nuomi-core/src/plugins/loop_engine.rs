@@ -269,7 +269,17 @@ impl LoopEngine {
 
         // Memory injection: recall by tag / first words of the task.
         if let Some(mem) = memory {
-            let keyword = user_task.split_whitespace().next().map(str::to_string);
+            // Use the first few words (up to 3) as the recall query so FTS5
+            // can match on multiple tokens; the Keyword (LIKE) path inside
+            // recall falls back to the first token for substring matching.
+            let keyword = {
+                let words: Vec<&str> = user_task.split_whitespace().take(3).collect();
+                if words.is_empty() {
+                    None
+                } else {
+                    Some(words.join(" "))
+                }
+            };
             if let Ok(hits) = mem.recall(keyword, self.config.memory_tag.clone(), self.config.role_id.clone(), 5).await {
                 if !hits.is_empty() {
                     let digest = hits
