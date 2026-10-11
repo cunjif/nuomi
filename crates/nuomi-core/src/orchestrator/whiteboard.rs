@@ -185,6 +185,40 @@ pub(crate) async fn record_turn(
     Ok(())
 }
 
+/// Records a selector decision as an append-only `selector_decision` event on
+/// the session aggregate, so group-chat speaker selection is auditable and
+/// replayable. Does not write to the whiteboard — a selector pick is an
+/// orchestration decision, not a shared note.
+pub(crate) async fn record_selector_decision(
+    wb: &WhiteBoardService,
+    session_id: &str,
+    strategy: &str,
+    candidates: Vec<String>,
+    chosen_index: usize,
+    chosen_role_id: Option<&str>,
+    converged: bool,
+) -> Result<(), super::OrchestratorError> {
+    let payload = serde_json::json!({
+        "strategy": strategy,
+        "candidates": candidates,
+        "chosen_index": chosen_index,
+        "chosen_role_id": chosen_role_id,
+        "converged": converged,
+    });
+    let payload_for_bus = payload.clone();
+    let sid = session_id.to_string();
+    wb.with_db(move |c| repos::events::append(c, "session", &sid, "selector_decision", &payload, now_ms()))
+        .await
+        .map_err(|e| super::OrchestratorError::Store(e.to_string()))?;
+    if let Some(bus) = &wb.bus {
+        bus.publish(crate::harness::Event::new(
+            "session.selector_decision",
+            payload_for_bus,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

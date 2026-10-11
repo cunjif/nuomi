@@ -23,6 +23,7 @@ use crate::orchestrator::{
     GroupChatExecutor, LlmSelector, OrchestratorError, PipelineExecutor, ProviderResolver,
     RoundRobinSelector, RouterExecutor, SpeakerSelector, TeamRunInput, WhiteBoardService,
 };
+use crate::plugins::MemoryService;
 use crate::providers::{
     sensenova_base_url, AnthropicCompatibleClient, LlmProvider, OpenAiCompatibleClient, SecretStore,
 };
@@ -265,6 +266,7 @@ pub async fn run_team(
                     Arc::new(LlmSelector::new(default_provider, input.model.clone()))
                 };
             let outcome = GroupChatExecutor::new(selector)
+                .with_memory(MemoryService::new(db_path.clone()))
                 .run(&input, &resolver, &wb)
                 .await?;
             Ok(TeamRunOutcome {

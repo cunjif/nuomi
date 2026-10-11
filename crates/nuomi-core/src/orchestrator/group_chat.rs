@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use crate::domain::Team;
+use crate::domain::{AutoRemember, RoleMemoryConfig, Team};
+use crate::plugins::MemoryService;
 use crate::providers::{ChatMessage, ChatRequest, ToolCall, ToolDef};
 
 use super::input::{ProviderResolver, TeamRunInput};
 use super::selector::{GroupMember, GroupState};
-use super::whiteboard::{record_turn, WhiteBoardService};
+use super::whiteboard::{record_selector_decision, record_turn, WhiteBoardService};
 use super::OrchestratorError;
 
 /// Internal tool the model calls to hand control to another member.
@@ -73,11 +74,25 @@ pub struct GroupChatOutcome {
 /// Drives [`crate::domain::TeamTopology::GroupChat`] teams.
 pub struct GroupChatExecutor {
     selector: Arc<dyn super::selector::SpeakerSelector>,
+    /// Per-agent long-term memory injected into each speaker's context and
+    /// written after each utterance when the role opts in (ADR 0019 extended
+    /// to group chat). `None` keeps the legacy no-memory behaviour.
+    memory: Option<MemoryService>,
 }
 
 impl GroupChatExecutor {
     pub fn new(selector: Arc<dyn super::selector::SpeakerSelector>) -> Self {
-        Self { selector }
+        Self {
+            selector,
+            memory: None,
+        }
+    }
+
+    /// Attaches a long-term memory service so each speaker recalls its own
+    /// per-agent memories and persists utterances when configured.
+    pub fn with_memory(mut self, memory: MemoryService) -> Self {
+        self.memory = Some(memory);
+        self
     }
 
     pub async fn run(
@@ -111,7 +126,27 @@ impl GroupChatExecutor {
                 Some(target) => target, // explicit handoff wins over the selector
                 None => {
                     let chosen = self.selector.select(&state).await;
-                    if chosen == state.members.len() {
+                    let converged_signal = chosen == state.members.len();
+                    // Record the selector decision as an append-only event so
+                    // group-chat speaker selection is auditable and replayable.
+                    let candidates: Vec<String> =
+                        state.members.iter().map(|m| m.role_id.clone()).collect();
+                    let chosen_role_id = if converged_signal || chosen >= state.members.len() {
+                        None
+                    } else {
+                        Some(state.members[chosen].role_id.as_str())
+                    };
+                    let _ = record_selector_decision(
+                        wb,
+                        &input.session_id,
+                        self.selector.strategy_name(),
+                        candidates,
+                        chosen,
+                        chosen_role_id,
+                        converged_signal,
+                    )
+                    .await;
+                    if converged_signal {
                         converged = true; // convergence signal (index == len)
                         break;
                     }
@@ -136,7 +171,7 @@ impl GroupChatExecutor {
             // ---- one utterance --------------------------------------------
             let role = input.require_role(&state.members[speaker].role_id)?;
             let provider = providers.resolve(role);
-            let request = Self::build_request(input, role, &state, wb).await?;
+            let request = Self::build_request(input, role, &state, wb, &self.memory).await?;
             let response = provider
                 .complete(&request)
                 .await
@@ -144,6 +179,30 @@ impl GroupChatExecutor {
 
             state.push_turn(speaker, response.content.clone());
             record_turn(wb, &input.session_id, role, "message", &response.content, None, None).await?;
+
+            // Per-agent memory write (ADR 0019 extended to group chat): when
+            // the speaking role opts into auto_remember, persist its own
+            // utterance as a private memory entry for future recall.
+            if let Some(ref mem) = self.memory {
+                if let Some(mc) = role
+                    .params
+                    .get("memory")
+                    .and_then(|v| serde_json::from_value::<RoleMemoryConfig>(v.clone()).ok())
+                {
+                    if mc.enabled && matches!(mc.auto_remember, AutoRemember::UserInputOnly) {
+                        let mem = mem.clone();
+                        let sid = input.session_id.clone();
+                        let tags = mc.tags.clone();
+                        let rid = role.id.clone();
+                        let text = response.content.clone();
+                        tokio::spawn(async move {
+                            let _ = mem
+                                .remember(text, Some(sid), tags, "group_chat_utterance", false, Some(rid))
+                                .await;
+                        });
+                    }
+                }
+            }
 
             // ---- handoff protocol -----------------------------------------
             if let Some(call) = response
@@ -193,12 +252,15 @@ impl GroupChatExecutor {
     }
 
     /// Builds the per-turn request: role system prompt, shared transcript and
-    /// whiteboard digest as user context, plus the handoff tool.
+    /// whiteboard digest as user context, plus the handoff tool. When a memory
+    /// service is attached, the speaking role's per-agent memories are recalled
+    /// and appended to the system prompt (ADR 0019 extended to group chat).
     async fn build_request(
         input: &TeamRunInput,
         role: &crate::domain::Role,
         state: &GroupState,
         wb: &WhiteBoardService,
+        memory: &Option<MemoryService>,
     ) -> Result<ChatRequest, OrchestratorError> {
         let board_digest = wb
             .to_context_digest(&input.session_id)
@@ -223,10 +285,27 @@ impl GroupChatExecutor {
             role.name, HANDOFF_TOOL
         ));
 
-        let system = role
+        let mut system = role
             .system_prompt_override
             .clone()
             .unwrap_or_else(|| format!("You are {} in a group discussion.", role.name));
+
+        // Per-agent memory recall: inject the speaker's private + global
+        // memories into the system prompt so each agent brings its own
+        // cross-session knowledge to the discussion.
+        if let Some(mem) = memory {
+            let keyword = input.task.split_whitespace().next().map(str::to_string);
+            if let Ok(hits) = mem.recall(keyword, None, Some(role.id.clone()), 5).await {
+                if !hits.is_empty() {
+                    let digest = hits
+                        .iter()
+                        .map(|m| format!("- {}", m.content))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    system.push_str(&format!("\n\nRelevant long-term memories:\n{digest}"));
+                }
+            }
+        }
 
         Ok(ChatRequest {
             model: input.model.clone(),

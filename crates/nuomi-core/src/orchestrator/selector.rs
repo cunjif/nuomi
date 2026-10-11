@@ -72,6 +72,11 @@ impl GroupState {
 pub trait SpeakerSelector: Send + Sync {
     /// Index into members, or `members.len()` to converge/end.
     async fn select(&self, state: &GroupState) -> usize;
+    /// Human-readable strategy name for event logging
+    /// (e.g. `"llm"`, `"round_robin"`, `"heuristic"`).
+    fn strategy_name(&self) -> &str {
+        "unknown"
+    }
 }
 
 fn word_set(text: &str) -> HashSet<String> {
@@ -115,6 +120,10 @@ impl SpeakerSelector for HeuristicSelector {
         }
         best_idx
     }
+
+    fn strategy_name(&self) -> &str {
+        "heuristic"
+    }
 }
 
 /// Degradation baseline when no smarter selector is available: plain rotation,
@@ -132,6 +141,10 @@ impl SpeakerSelector for RoundRobinSelector {
             Some(last) => (last + 1) % n,
             None => 0,
         }
+    }
+
+    fn strategy_name(&self) -> &str {
+        "round_robin"
     }
 }
 
@@ -206,6 +219,10 @@ impl SpeakerSelector for LlmSelector {
             Some(idx) if idx <= n => idx,
             _ => state.last_speaker.map_or(0, |last| (last + 1) % n),
         }
+    }
+
+    fn strategy_name(&self) -> &str {
+        "llm"
     }
 }
 

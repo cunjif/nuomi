@@ -392,7 +392,13 @@ async fn group_chat_round_robin_respects_max_rounds_and_records_whiteboard() {
         vec!["g1".to_string(), "g2".to_string(), "g3".to_string()]
     );
 
-    // Live mirror reached the kernel bus.
+    // Live mirror reached the kernel bus. The selector decision is recorded
+    // first, then the whiteboard note for the utterance.
+    let event = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("bus event within timeout")
+        .expect("event received");
+    assert_eq!(event.topic, "session.selector_decision");
     let event = timeout(Duration::from_secs(5), rx.recv())
         .await
         .expect("bus event within timeout")
