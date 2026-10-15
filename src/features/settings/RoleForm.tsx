@@ -64,14 +64,13 @@ function RoleDirectorDialog({ onClose }: { onClose: () => void }): ReactNode {
       aria-modal="true"
       aria-label={t("settings.roles.directorTitle")}
     >
-      <div className="relative w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
-        {/* Self-binding panel: top-right of the dialog. */}
-        <div className="absolute right-2 top-2 w-44">
-          <RoleDirectorBindingPanel onBindingChange={setBinding} />
-        </div>
+      <div className="w-full max-w-md rounded border border-ink-muted/40 bg-surface-raised p-4">
         <h4 className="mb-2 text-sm font-semibold text-ink">
           {t("settings.roles.directorTitle")}
         </h4>
+        <div className="mb-2">
+          <RoleDirectorBindingPanel onBindingChange={setBinding} />
+        </div>
         <p className="mb-2 text-xs text-ink-muted">{t("settings.roles.directorHint")}</p>
         <textarea
           value={description}

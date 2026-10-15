@@ -15,9 +15,10 @@ const BINDING_QUERY_KEY = ["role-director-binding"] as const;
  * or CLI Agent (the model it uses to orchestrate). This binding is NOT
  * inherited by the roles it generates.
  *
- * Mounted in the top-right of the RoleDirectorDialog. Reports the current
- * binding (or null) back to the parent via `onBindingChange` so the generate
- * button can be gated on "director has a model to run on".
+ * Mounted inline in the RoleDirectorDialog, between the title and the hint
+ * text. Reports the current binding (or null) back to the parent via
+ * `onBindingChange` so the generate button can be gated on "director has a
+ * model to run on".
  */
 export function RoleDirectorBindingPanel({
   onBindingChange,
@@ -119,8 +120,8 @@ export function RoleDirectorBindingPanel({
       {noModels ? (
         <p className="text-ink-muted">{t("settings.roles.directorNoModel")}</p>
       ) : (
-        <>
-          <div className="mb-1 flex gap-2">
+        <div className="mb-1 flex items-center gap-2">
+          <div className="flex shrink-0 gap-2">
             <label className="flex items-center gap-1">
               <input
                 type="radio"
@@ -142,7 +143,7 @@ export function RoleDirectorBindingPanel({
           </div>
           {mode === "provider" && (
             <select
-              className={field}
+              className={`${field} bg-surface min-w-0 flex-1`}
               value={providerId ?? ""}
               onChange={(e) => handleProviderChange(e.target.value)}
               aria-label={t("settings.roles.bindingProvider")}
@@ -157,7 +158,7 @@ export function RoleDirectorBindingPanel({
           )}
           {mode === "cli" && (
             <select
-              className={field}
+              className={`${field} bg-surface min-w-0 flex-1`}
               value={agentProfileId ?? ""}
               onChange={(e) => handleAgentChange(e.target.value)}
               aria-label={t("settings.roles.bindingCli")}
@@ -170,7 +171,7 @@ export function RoleDirectorBindingPanel({
               ))}
             </select>
           )}
-        </>
+        </div>
       )}
     </div>
   );
