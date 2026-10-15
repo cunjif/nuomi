@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Spinner } from "../../components/ui/Spinner";
 import { describeError } from "../../i18n";
 import {
+  activateBuiltinEditorExtensions,
   attachMonacoProviders,
   findPreviewForPath,
   findWysiwygEditorForPath,
@@ -13,6 +14,8 @@ import {
   useEditorExtVersion,
 } from "../../lib/editor-ext";
 import type { DocumentSymbol, EditorWysiwygApi } from "../../lib/editor-ext";
+import { WysiwygMarkdownEditor } from "../../lib/editor-ext/builtin/wysiwyg-markdown";
+import { extractSymbols } from "../../lib/editor-ext/builtin/outline-symbols";
 import { ipc } from "../../lib/ipc/client";
 import { useTheme } from "../../lib/store/useTheme";
 import { toast } from "../../lib/store/toastStore";
@@ -62,6 +65,12 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   const effectivePath = crossRef?.sourcePath ?? path;
   // Re-render on registry changes so preview/outline swaps are live.
   useEditorExtVersion();
+  // HMR may wipe the registry module (wysiwygEditors emptied); re-activate
+  // builtin extensions once on mount. registerEditorExtension calls notify()
+  // which bumps useEditorExtVersion → single re-render; empty deps => no loop.
+  useEffect(() => {
+    activateBuiltinEditorExtensions();
+  }, []);
   const fileQuery = useQuery({ queryKey: ["file", effectiveWsId, effectivePath], queryFn: () => ipc.readFile(effectivePath, effectiveWsId) });
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? fileQuery.data ?? "";
@@ -76,7 +85,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   // Pending jump-flash timer, so a tab switch never clears a disposed
   // editor's decorations collection.
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   // Full-width WYSIWYG toolbar host: format buttons are portaled here by the
   // wysiwyg editor so the toolbar spans the outline panel too (用户布局).
   const [wysiwygToolbarHost, setWysiwygToolbarHost] = useState<HTMLDivElement | null>(null);
@@ -94,7 +103,10 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   const preview = findPreviewForPath(path);
   // WYSIWYG-capable files (markdown) get a Typora-style editor by default;
   // the toggle falls back to classic Monaco (with its split preview).
-  const wysiwyg = findWysiwygEditorForPath(path);
+  // Fallback: if the registry is empty (HMR wiped wysiwygEditors), use the
+  // directly-imported WysiwygMarkdownEditor so .md always has a WYSIWYG editor.
+  const wysiwyg = findWysiwygEditorForPath(path) ??
+    (/\.md$/i.test(path) ? { extId: "builtin.preview-markdown", component: WysiwygMarkdownEditor } : null);
   const [mdSourceMode, setMdSourceMode] = useState(false);
   const wysiwygActive = wysiwyg !== null && !mdSourceMode;
   const language = languageForPath(path);
@@ -106,7 +118,12 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
     const providers = getOutlineProviders().filter(
       (p) => p.languages.includes("*") || p.languages.includes(language),
     );
-    return providers.flatMap((p) => p.provideSymbols({ path, language, content: value }));
+    if (providers.length > 0) {
+      return providers.flatMap((p) => p.provideSymbols({ path, language, content: value }));
+    }
+    // Fallback: HMR may have wiped the outlines registry; use the directly-
+    // imported extractor so the outline panel still populates.
+    return extractSymbols(language, value);
   }, [fileQuery.isLoading, fileQuery.isError, language, path, value, extVersion]);
 
   const saveMut = useMutation({
@@ -178,49 +195,30 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
     if (line !== null) jumpToLineRef.current(line + 1);
   }, [path, wysiwygActive, wysiwygApi]);
 
-  // View toggles + outline + save: rendered on the WYSIWYG format toolbar
-  // row (toolbarExtra) or in the source-mode header, never both.
-  const controls: ReactNode = (
-    <>
-      {wysiwyg !== null && (
-        <>
-          <button
-            type="button"
-            onClick={() => setMdSourceMode(false)}
-            aria-pressed={wysiwygActive}
-            className="sketch-btn px-2 py-0.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
-          >
-            {t("editor.viewWysiwyg")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMdSourceMode(true)}
-            aria-pressed={!wysiwygActive}
-            className="sketch-btn px-2 py-0.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
-          >
-            {t("editor.viewSource")}
-          </button>
-        </>
-      )}
-      {symbols.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setOutlineOpen((o) => !o)}
-          aria-pressed={outlineOpen}
-          className="sketch-btn px-2 py-0.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
-        >
-          {t("editor.outline")}
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={save}
-        disabled={saveMut.isPending || fileQuery.isLoading}
-        className="sketch-btn px-2 py-0.5 text-xs text-ink focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
-      >
-        {t("files.save")}
-      </button>
-    </>
+  // View-mode toggle (</> icon) and outline button both float at the editor's
+  // top-right corner, stacked vertically (</> above, outline below). No active
+  // highlight — just hover/click feedback. Save is Ctrl+S only (no button).
+  const isMdFile = /\.md$/i.test(path);
+  const viewToggleButton: ReactNode = isMdFile && (
+    <button
+      type="button"
+      onClick={() => setMdSourceMode((m) => !m)}
+      title={mdSourceMode ? t("editor.viewWysiwyg") : t("editor.viewSource")}
+      aria-label={mdSourceMode ? t("editor.viewWysiwyg") : t("editor.viewSource")}
+      className="sketch-btn flex h-6 w-6 items-center justify-center text-[11px] font-mono text-ink-muted hover:bg-surface-overlay hover:text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
+    >
+      {"</>"}
+    </button>
+  );
+  const outlineButton: ReactNode = symbols.length > 0 && (
+    <button
+      type="button"
+      onClick={() => setOutlineOpen((o) => !o)}
+      aria-pressed={outlineOpen}
+      className="sketch-btn px-2 py-0.5 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent"
+    >
+      {t("editor.outline")}
+    </button>
   );
 
   const editorBody = fileQuery.isError ? (
@@ -367,8 +365,8 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           <span>跨工作区编辑 · 保存将回写源工作区原文件</span>
         </div>
       )}
-      {/* WYSIWYG toolbar row spans the FULL tab width (format buttons left,
-      view toggles + save right; outline panel starts directly below it). */}
+      {/* WYSIWYG toolbar row: format buttons only (view toggle + outline
+      float at the editor's top-right corner, stacked vertically). */}
       {wysiwygActive && wysiwyg !== null && (
         <div className="flex shrink-0 items-center gap-2 border-b border-ink-muted/30 px-2 py-1">
           <div
@@ -378,7 +376,6 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
             editor (toolbarContainer contract). */
             data-testid="wysiwyg-toolbar-host"
           />
-          <div className="ml-auto flex shrink-0 items-center gap-1">{controls}</div>
         </div>
       )}
       <div className="flex min-h-0 flex-1">
@@ -388,27 +385,47 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
         {showEditor && (
           <div className="relative min-h-0 min-w-0 flex-1">
             <div className="absolute inset-0">{editorBody}</div>
+            {/* Top-right floating controls: </> toggle (md only) + outline
+            button row, with the outline panel dropping below as a block. */}
+            {(isMdFile || symbols.length > 0) && (
+              <div className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1 rounded border border-ink-muted/40 bg-surface-raised p-1 shadow-sm">
+                  {viewToggleButton}
+                  {outlineButton}
+                </div>
+                {outlineOpen && symbols.length > 0 && (
+                  <div className="max-h-[80vh] w-[10.8vw] overflow-y-auto rounded border border-ink-muted/40 bg-surface-raised p-2 shadow-sm">
+                    {outlineList}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         {/* WYSIWYG pane owns its own scrolling (document-style single pane). */}
-        {wysiwygActive && <div className="min-h-0 min-w-0 flex-1">{editorBody}</div>}
+        {wysiwygActive && (
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {editorBody}
+            {(isMdFile || symbols.length > 0) && (
+              <div className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1 rounded border border-ink-muted/40 bg-surface-raised p-1 shadow-sm">
+                  {viewToggleButton}
+                  {outlineButton}
+                </div>
+                {outlineOpen && symbols.length > 0 && (
+                  <div className="max-h-[80vh] w-[10.8vw] overflow-y-auto rounded border border-ink-muted/40 bg-surface-raised p-2 shadow-sm">
+                    {outlineList}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {previewNode}
-        {showEditor && outlineOpen && symbols.length > 0 && (
-          <nav aria-label={t("editor.outline")} className="min-h-0 w-48 shrink-0 overflow-y-auto border-l border-ink-muted/30 p-2">
-            {outlineList}
-          </nav>
-        )}
-        {wysiwygActive && outlineOpen && symbols.length > 0 && (
-          /* Top-aligned with the content row: the full-width toolbar row
-          above already separates it from the tabs (用户布局). */
-          <nav aria-label={t("editor.outline")} className="min-h-0 w-48 shrink-0 overflow-y-auto border-l border-ink-muted/30 p-2">
-            {outlineList}
-          </nav>
-        )}
       </div>
       {(showEditor || wysiwygActive) && (
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-ink-muted/30 px-2 py-0.5 text-[10px] text-ink-muted">
-          {/* Status row (用户截图): full path left, language + save hint right. */}
+          {/* Status row: full path left, language right. */}
           <span className="min-w-0 truncate font-mono" title={path}>
             {path}
           </span>
@@ -416,7 +433,6 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
             <span>
               {t("editor.languageLabel")}: <span className="font-mono">{language}</span>
             </span>
-            <span>{t("editor.saveHint")}</span>
           </span>
         </div>
       )}
