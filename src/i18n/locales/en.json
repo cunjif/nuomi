@@ -60,7 +60,8 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "viewScopeFocused": "Focused",
-    "viewScopeAll": "All Workspaces"
+    "viewScopeAll": "All Workspaces",
+    "select": "---"
   },
   "shell": {
     "appName": "nuomi",

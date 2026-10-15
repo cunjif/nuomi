@@ -60,7 +60,8 @@
     "enabled": "已启用",
     "disabled": "已停用",
     "viewScopeFocused": "仅看聚焦",
-    "viewScopeAll": "全部工作区"
+    "viewScopeAll": "全部工作区",
+    "select": "---"
   },
   "shell": {
     "appName": "糯米 · nuomi",
