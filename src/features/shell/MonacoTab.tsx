@@ -384,7 +384,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
         scrollbar into an outer scroll container. */}
         {showEditor && (
           <div className="relative min-h-0 min-w-0 flex-1">
-            <div className="absolute inset-0">{editorBody}</div>
+            <div className={`absolute inset-0 ${outlineOpen && symbols.length > 0 ? 'pr-[11vw]' : ''}`}>{editorBody}</div>
             {/* Top-right floating controls: </> toggle (md only) + outline
             button row, with the outline panel dropping below as a block. */}
             {(isMdFile || symbols.length > 0) && (
@@ -404,7 +404,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
         )}
         {/* WYSIWYG pane owns its own scrolling (document-style single pane). */}
         {wysiwygActive && (
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div className={`relative min-h-0 min-w-0 flex-1 ${outlineOpen && symbols.length > 0 ? 'pr-[11vw]' : ''}`}>
             {editorBody}
             {(isMdFile || symbols.length > 0) && (
               <div className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
