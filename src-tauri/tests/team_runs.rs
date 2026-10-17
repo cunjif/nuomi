@@ -616,6 +616,15 @@ fn open_conn(state: &AppState) -> rusqlite::Connection {
     rusqlite::Connection::open(state.db_path.to_string()).unwrap()
 }
 
+/// User-authored roles only — migrations 0031/0035 seed six builtin
+/// steward roles, which must not count against write-assertions.
+fn user_role_count(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT count(*) FROM roles WHERE builtin = 0", [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
+
 /// Polls the run to a terminal state and asserts it succeeded.
 async fn poll_run_to_success(state: &AppState, run_id: &str) {
     let mut final_status = String::new();
@@ -782,7 +791,7 @@ async fn form_team_without_providers_fails_with_no_planner() {
     assert_eq!(error_code(err), "team.no_planner");
 
     let conn = open_conn(&state);
-    assert_eq!(repos::roles::count(&conn).unwrap(), 0);
+    assert_eq!(user_role_count(&conn), 0);
     assert_eq!(repos::teams::count(&conn).unwrap(), 0);
 }
 

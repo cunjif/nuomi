@@ -121,7 +121,7 @@ async fn ac1_db_provider_config_emits_materialized_event() {
 
     // Turn may fail (real HTTP client, no server) but events are emitted
     // before the LLM call — that's what we verify.
-    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello", None).await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -135,7 +135,7 @@ async fn ac2_no_db_config_emits_env_fallback_event() {
     let (state, _dir, _secrets) = boot(vec![FakeLlm::response("hi")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
 
-    commands::run_conversation_turn(&state, &session.id, "hello")
+    commands::run_conversation_turn(&state, &session.id, "hello", None)
         .await
         .unwrap();
 
@@ -159,7 +159,7 @@ async fn ac3_role_overlay_emits_role_applied_event() {
     secrets.set("provider/p1", "sk-test").await.unwrap();
     setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
-    let _ = commands::run_conversation_turn(&state, &session.id, "write code").await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "write code", None).await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -191,7 +191,7 @@ async fn ac3_unbound_group_session_falls_to_single_role() {
     )
     .unwrap();
 
-    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello", None).await;
 
     let kinds = event_kinds(&state, &session.id).await;
     assert!(
@@ -314,7 +314,7 @@ async fn ac6_missing_provider_detected_for_role_without_binding() {
     }
 
     // Running a turn should emit provider.missing event.
-    let _ = commands::run_conversation_turn(&state, &session.id, "hello")
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello", None)
         .await
         .unwrap();
     let kinds = event_kinds(&state, &session.id).await;
@@ -381,7 +381,7 @@ async fn ac8_scheduler_chat_uses_same_dispatch_as_manual_chat() {
 
     // Simulate what the scheduler does: call run_conversation_turn.
     // Turn may fail (real HTTP client) but events are emitted before.
-    let _ = commands::run_conversation_turn(&state, &session.id, "scheduled prompt").await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "scheduled prompt", None).await;
 
     // Same events as manual chat.
     let kinds = event_kinds(&state, &session.id).await;
@@ -433,7 +433,7 @@ async fn ac10_all_debug_events_visible_in_timeline() {
     secrets.set("provider/p1", "sk-test").await.unwrap();
     setup_provider_and_role(&dir.path().join("t.db"), "p1", "r1", &session.id);
 
-    let _ = commands::run_conversation_turn(&state, &session.id, "hello").await;
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello", None).await;
 
     let events = commands::impl_list_events(&state, session.id.clone(), 0)
         .await
@@ -462,7 +462,7 @@ async fn ac10_env_fallback_event_visible_in_timeline() {
     let (state, _dir, _secrets) = boot(vec![FakeLlm::response("ok")]).await;
     let session = commands::impl_create_session(&state).await.unwrap();
 
-    commands::run_conversation_turn(&state, &session.id, "hello")
+    commands::run_conversation_turn(&state, &session.id, "hello", None)
         .await
         .unwrap();
 
@@ -502,7 +502,7 @@ async fn ac10_provider_missing_event_visible_in_timeline() {
         .unwrap();
     }
 
-    let _ = commands::run_conversation_turn(&state, &session.id, "hello")
+    let _ = commands::run_conversation_turn(&state, &session.id, "hello", None)
         .await
         .unwrap();
 

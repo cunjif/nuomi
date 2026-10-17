@@ -316,18 +316,35 @@ pub async fn run_conversation_turn(
             let cwd = Some(state.current_workspace());
             let bus = state.kernel.context().bus();
             let ws_id = focused_workspace_id(&db_path);
-            let outcome = core_run_team(
-                db_path,
-                Some(bus),
-                team_id,
-                session_id,
-                text,
-                secrets,
-                cwd,
-                ws_id,
-            )
-            .await
-            .map_err(|e| IpcError::new("team.run_failed", e.to_string()))?;
+            // SPEC 5.8.1-5: an in-line team chat turn must honor the
+            // session's cancel token. Racing the executor drops it at its
+            // next await point — whatever already hit the whiteboard stays
+            // (append-only), no further rounds run. A finished executor
+            // still wins over a simultaneous cancellation (same rule as
+            // spawn_team_run).
+            let outcome = tokio::select! {
+                biased;
+                r = core_run_team(
+                    db_path,
+                    Some(bus),
+                    team_id,
+                    session_id,
+                    text,
+                    secrets,
+                    cwd,
+                    ws_id,
+                ) => {
+                    r.map_err(|e| IpcError::new("team.run_failed", e.to_string()))?
+                }
+                _ = token.cancelled() => {
+                    tracing::info!(session_id, "team chat turn cancelled by user");
+                    nuomi_core::services::team_runner::TeamRunOutcome {
+                        final_output: String::new(),
+                        converged: false,
+                        rounds: 0,
+                    }
+                }
+            };
             LoopRunResult {
                 final_text: outcome.final_output,
                 steps: outcome.rounds,
@@ -2841,7 +2858,14 @@ pub async fn impl_remember_memory(
 ) -> Result<MemoryEntryDto, IpcError> {
     let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
     let entry = mem
-        .remember(content, source_session_id, tags, &kind, user_profile, role_id)
+        .remember(
+            content,
+            source_session_id,
+            tags,
+            &kind,
+            user_profile,
+            role_id,
+        )
         .await
         .map_err(|e| IpcError::new("memory.remember_failed", e.to_string()))?;
     Ok(MemoryEntryDto::from(entry))
@@ -2875,10 +2899,7 @@ pub async fn impl_list_memory(
     Ok(entries.into_iter().map(MemoryEntryDto::from).collect())
 }
 
-pub async fn impl_delete_memory(
-    state: &AppState,
-    id: String,
-) -> Result<bool, IpcError> {
+pub async fn impl_delete_memory(state: &AppState, id: String) -> Result<bool, IpcError> {
     let mem = nuomi_core::plugins::MemoryService::new(state.db_path.clone());
     let deleted = mem
         .delete(id)
@@ -7379,6 +7400,26 @@ pub struct StewardSessionDto {
     pub goal: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo_list: Option<Vec<TodoItemDto>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_status: Option<StewardRunStatusDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StewardRunStatusStateDto {
+    Idle,
+    Running,
+    AwaitingApproval,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardRunStatusDto {
+    pub state: StewardRunStatusStateDto,
+    pub label: String,
 }
 
 impl From<nuomi_core::domain::StewardSession> for StewardSessionDto {
@@ -7390,6 +7431,8 @@ impl From<nuomi_core::domain::StewardSession> for StewardSessionDto {
             goal: s.goal,
             created_at: s.created_at,
             updated_at: s.updated_at,
+            todo_list: None,
+            run_status: None,
         }
     }
 }
@@ -7483,6 +7526,42 @@ impl From<nuomi_core::steward::kernel::StewardReply> for StewardReplyDto {
                 candidates: candidates.into_iter().map(Into::into).collect(),
             },
             R::Refused { reason } => Self::Refused { reason },
+        }
+    }
+}
+
+/// Steward message role — "user" or "steward".
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum StewardMessageRoleDto {
+    User,
+    Steward,
+}
+
+/// A persisted steward message for history recovery.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardMessageDto {
+    pub id: String,
+    pub role: StewardMessageRoleDto,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<StewardReplyDto>,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::steward::kernel::StewardMessage> for StewardMessageDto {
+    fn from(m: nuomi_core::steward::kernel::StewardMessage) -> Self {
+        use nuomi_core::steward::kernel::StewardMessageRole as R;
+        Self {
+            id: m.id,
+            role: match m.role {
+                R::User => StewardMessageRoleDto::User,
+                R::Steward => StewardMessageRoleDto::Steward,
+            },
+            text: m.text,
+            reply: m.reply.map(Into::into),
+            created_at: m.created_at,
         }
     }
 }
@@ -7721,12 +7800,340 @@ pub async fn impl_steward_list_sessions(
     Ok(sessions.into_iter().map(Into::into).collect())
 }
 
+pub async fn impl_steward_ensure_singleton_session(
+    state: &AppState,
+) -> Result<StewardSessionDto, IpcError> {
+    let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let session =
+        nuomi_core::steward::kernel::ensure_singleton_session(state.db_path.clone(), &ws_id)
+            .await
+            .map_err(|e| match e {
+                nuomi_core::steward::StewardError::Store(msg) => {
+                    IpcError::new("steward.store_unavailable", msg)
+                }
+                nuomi_core::steward::StewardError::NotFound { entity, id } => {
+                    IpcError::new("steward.session_not_found", format!("{entity}#{id}"))
+                }
+                other => IpcError::new("steward.error", other.to_string()),
+            })?;
+
+    let mut dto: StewardSessionDto = session.into();
+    enrich_steward_session_dto(&state.db_path, &mut dto).await;
+    Ok(dto)
+}
+
+/// Best-effort enrichment of a `StewardSessionDto` with `todo_list` and `run_status`.
+/// Fields are set to `None` on failure (non-blocking).
+async fn enrich_steward_session_dto(db_path: &std::sync::Arc<str>, dto: &mut StewardSessionDto) {
+    let session_id = dto.id.clone();
+    let db_path = db_path.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<(Vec<TodoItemDto>, Option<StewardRunStatusDto>), nuomi_core::store::StoreError> {
+        let db = nuomi_core::store::Db::open(&db_path)?;
+        let conn = &db.0;
+
+        // Read todos (best-effort)
+        let todos = nuomi_core::store::repos::sessions::list_todos(conn, &session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| TodoItemDto {
+                id: t.id,
+                description: t.description,
+                completed: t.completed,
+            })
+            .collect::<Vec<_>>();
+
+        // Derive run status (best-effort, degrades to Idle)
+        let run_status = {
+            let cycles = nuomi_core::store::repos::steward::list_cycles(conn, 1).unwrap_or_default();
+            if let Some(cycle) = cycles.first() {
+                use nuomi_core::domain::steward_enums::{CyclePhase, CycleStatus};
+                use nuomi_core::steward::settings::StewardRunStatusState;
+                let state = if cycle.status == CycleStatus::Running {
+                    if cycle.phase == CyclePhase::Gate {
+                        StewardRunStatusState::AwaitingApproval
+                    } else {
+                        StewardRunStatusState::Running
+                    }
+                } else if cycle.status == CycleStatus::Failed {
+                    StewardRunStatusState::Failed
+                } else {
+                    StewardRunStatusState::Idle
+                };
+                let label = match state {
+                    StewardRunStatusState::Idle => "idle",
+                    StewardRunStatusState::Running => "running",
+                    StewardRunStatusState::AwaitingApproval => "awaiting_approval",
+                    StewardRunStatusState::Failed => "failed",
+                }.to_string();
+                Some(StewardRunStatusDto {
+                    state: match state {
+                        StewardRunStatusState::Idle => StewardRunStatusStateDto::Idle,
+                        StewardRunStatusState::Running => StewardRunStatusStateDto::Running,
+                        StewardRunStatusState::AwaitingApproval => StewardRunStatusStateDto::AwaitingApproval,
+                        StewardRunStatusState::Failed => StewardRunStatusStateDto::Failed,
+                    },
+                    label,
+                })
+            } else {
+                Some(StewardRunStatusDto {
+                    state: StewardRunStatusStateDto::Idle,
+                    label: "idle".into(),
+                })
+            }
+        };
+
+        Ok((todos, run_status))
+    })
+    .await;
+
+    if let Ok(Ok((todos, run_status))) = result {
+        dto.todo_list = Some(todos);
+        dto.run_status = run_status;
+    }
+}
+
+// ---------- steward settings ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BindingModeDto {
+    None,
+    Provider,
+    Cli,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SoulConfigDto {
+    pub content: Option<String>,
+    pub max_length: u32,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingConfigDto {
+    pub mode: BindingModeDto,
+    pub provider_id: Option<String>,
+    pub agent_profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageStatsDto {
+    pub total: u64,
+    pub cleared_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardSettingsDto {
+    pub soul: Option<SoulConfigDto>,
+    pub binding: BindingConfigDto,
+    pub run_status: StewardRunStatusDto,
+    pub todo_list: Vec<TodoItemDto>,
+    pub message_stats: MessageStatsDto,
+}
+
+pub async fn impl_steward_get_settings(
+    state: &AppState,
+    session_id: String,
+) -> Result<StewardSettingsDto, IpcError> {
+    let settings = nuomi_core::steward::settings::get_settings(state.db_path.clone(), &session_id)
+        .await
+        .map_err(|e| match e {
+            nuomi_core::steward::settings::SettingsError::SessionNotFound(id) => {
+                IpcError::new("steward.session_not_found", id)
+            }
+            nuomi_core::steward::settings::SettingsError::Store(msg) => {
+                IpcError::new("steward.store_unavailable", msg)
+            }
+            other => IpcError::new("steward.error", other.to_string()),
+        })?;
+
+    Ok(StewardSettingsDto {
+        soul: settings.soul.map(|s| SoulConfigDto {
+            content: s.content,
+            max_length: s.max_length,
+        }),
+        binding: BindingConfigDto {
+            mode: match settings.binding.mode {
+                nuomi_core::steward::settings::BindingMode::None => BindingModeDto::None,
+                nuomi_core::steward::settings::BindingMode::Provider => BindingModeDto::Provider,
+                nuomi_core::steward::settings::BindingMode::Cli => BindingModeDto::Cli,
+            },
+            provider_id: settings.binding.provider_id,
+            agent_profile_id: settings.binding.agent_profile_id,
+        },
+        run_status: StewardRunStatusDto {
+            state: match settings.run_status.state {
+                nuomi_core::steward::settings::StewardRunStatusState::Idle => {
+                    StewardRunStatusStateDto::Idle
+                }
+                nuomi_core::steward::settings::StewardRunStatusState::Running => {
+                    StewardRunStatusStateDto::Running
+                }
+                nuomi_core::steward::settings::StewardRunStatusState::AwaitingApproval => {
+                    StewardRunStatusStateDto::AwaitingApproval
+                }
+                nuomi_core::steward::settings::StewardRunStatusState::Failed => {
+                    StewardRunStatusStateDto::Failed
+                }
+            },
+            label: settings.run_status.label,
+        },
+        todo_list: settings
+            .todo_list
+            .into_iter()
+            .map(|t| TodoItemDto {
+                id: t.id,
+                description: t.description,
+                completed: t.completed,
+            })
+            .collect(),
+        message_stats: MessageStatsDto {
+            total: settings.message_stats.total,
+            cleared_at: settings.message_stats.cleared_at,
+        },
+    })
+}
+
+pub async fn impl_steward_update_soul(
+    state: &AppState,
+    session_id: String,
+    content: String,
+) -> Result<(), IpcError> {
+    nuomi_core::steward::settings::update_soul(state.db_path.clone(), &session_id, &content)
+        .await
+        .map_err(|e| match e {
+            nuomi_core::steward::settings::SettingsError::SoulTooLong(len) => IpcError::new(
+                "steward.soul_too_long",
+                format!("content length {len} exceeds max"),
+            ),
+            nuomi_core::steward::settings::SettingsError::SessionNotFound(id) => {
+                IpcError::new("steward.session_not_found", id)
+            }
+            nuomi_core::steward::settings::SettingsError::Store(msg) => {
+                IpcError::new("steward.store_unavailable", msg)
+            }
+            other => IpcError::new("steward.error", other.to_string()),
+        })?;
+    Ok(())
+}
+
+pub async fn impl_steward_update_binding(
+    state: &AppState,
+    session_id: String,
+    mode: BindingModeDto,
+    provider_id: Option<String>,
+    agent_profile_id: Option<String>,
+) -> Result<(), IpcError> {
+    let core_mode = match mode {
+        BindingModeDto::None => nuomi_core::steward::settings::BindingMode::None,
+        BindingModeDto::Provider => nuomi_core::steward::settings::BindingMode::Provider,
+        BindingModeDto::Cli => nuomi_core::steward::settings::BindingMode::Cli,
+    };
+    nuomi_core::steward::settings::update_binding(
+        state.db_path.clone(),
+        &session_id,
+        core_mode,
+        provider_id.as_deref(),
+        agent_profile_id.as_deref(),
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::settings::SettingsError::BindingTargetNotFound(msg) => {
+            IpcError::new("steward.binding_target_not_found", msg)
+        }
+        nuomi_core::steward::settings::SettingsError::SessionNotFound(id) => {
+            IpcError::new("steward.session_not_found", id)
+        }
+        nuomi_core::steward::settings::SettingsError::Store(msg) => {
+            IpcError::new("steward.store_unavailable", msg)
+        }
+        other => IpcError::new("steward.error", other.to_string()),
+    })?;
+    Ok(())
+}
+
+pub async fn impl_steward_clear_messages(
+    state: &AppState,
+    session_id: String,
+) -> Result<(), IpcError> {
+    nuomi_core::steward::settings::clear_messages(state.db_path.clone(), &session_id)
+        .await
+        .map_err(|e| match e {
+            nuomi_core::steward::settings::SettingsError::SessionNotFound(id) => {
+                IpcError::new("steward.session_not_found", id)
+            }
+            nuomi_core::steward::settings::SettingsError::Store(msg) => {
+                IpcError::new("steward.store_unavailable", msg)
+            }
+            other => IpcError::new("steward.error", other.to_string()),
+        })?;
+    Ok(())
+}
+
+pub async fn impl_steward_batch_delete_messages(
+    state: &AppState,
+    session_id: String,
+    message_ids: Vec<String>,
+) -> Result<(), IpcError> {
+    nuomi_core::steward::settings::batch_delete_messages(
+        state.db_path.clone(),
+        &session_id,
+        &message_ids,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::settings::SettingsError::SessionNotFound(id) => {
+            IpcError::new("steward.session_not_found", id)
+        }
+        nuomi_core::steward::settings::SettingsError::Store(msg) => {
+            IpcError::new("steward.store_unavailable", msg)
+        }
+        other => IpcError::new("steward.error", other.to_string()),
+    })?;
+    Ok(())
+}
+
+pub async fn impl_steward_list_session_messages(
+    state: &AppState,
+    session_id: String,
+    limit: u32,
+) -> Result<Vec<StewardMessageDto>, IpcError> {
+    let messages = nuomi_core::steward::kernel::list_session_messages(
+        state.db_path.clone(),
+        &session_id,
+        limit,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::StewardError::NotFound { entity, id } => {
+            IpcError::new("steward.session_not_found", format!("{entity}#{id}"))
+        }
+        nuomi_core::steward::StewardError::Store(msg) => {
+            IpcError::new("steward.store_unavailable", msg)
+        }
+        other => IpcError::new("steward.error", other.to_string()),
+    })?;
+    Ok(messages.into_iter().map(Into::into).collect())
+}
+
 pub async fn impl_steward_send_message(
     state: &AppState,
     session_id: String,
     text: String,
+    attachment_ids: Option<Vec<String>>,
 ) -> Result<StewardReplyDto, IpcError> {
+    // Streaming deltas flow to the frontend over the event bridge
+    // (`steward.delta` on `event://session/{id}`) while this call runs; the
+    // returned reply is the authoritative conclusion (design §2.2.2-A1).
+    // Attachments are validated and assembled inside the kernel (task 4.3,
+    // design §2.1.3.2): an unusable attachment aborts the send naming the
+    // file (`steward.attachment_invalid`).
+    let attachment_ids = attachment_ids.unwrap_or_default();
     let ws_id = focused_workspace_id(&state.db_path).unwrap_or_default();
+    let ws_root = state.current_workspace();
     let bus = state.kernel.context().bus();
     let reply = nuomi_core::steward::kernel::handle_message(
         state.db_path.clone(),
@@ -7734,10 +8141,320 @@ pub async fn impl_steward_send_message(
         &session_id,
         &text,
         &ws_id,
+        Some(ws_root),
+        &attachment_ids,
         Some(bus),
     )
-    .await?;
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::StewardError::AttachmentInvalid { name, reason } => IpcError::new(
+            "steward.attachment_invalid",
+            format!("附件 {name}不可用：{reason}，请移除后重试"),
+        ),
+        other => IpcError::new("steward.error", other.to_string()),
+    })?;
     Ok(reply.into())
+}
+
+// ---------- steward attachments ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardAttachmentDto {
+    pub id: String,
+    pub session_id: String,
+    pub seq: Option<i64>,
+    pub kind: String,
+    pub name: String,
+    pub mime: String,
+    pub rel_path: String,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub created_at: i64,
+}
+
+impl From<nuomi_core::domain::Attachment> for StewardAttachmentDto {
+    fn from(a: nuomi_core::domain::Attachment) -> Self {
+        Self {
+            id: a.id,
+            session_id: a.session_id,
+            seq: a.seq,
+            kind: a.kind.as_str().to_string(),
+            name: a.name,
+            mime: a.mime,
+            rel_path: a.rel_path,
+            size_bytes: a.size_bytes,
+            sha256: a.sha256,
+            created_at: a.created_at,
+        }
+    }
+}
+
+pub async fn impl_steward_save_attachment(
+    state: &AppState,
+    session_id: String,
+    name: String,
+    mime: String,
+    base64: String,
+) -> Result<StewardAttachmentDto, IpcError> {
+    use base64::Engine;
+    // Session ids are generated by `domain::new_id` — anything else is a
+    // forged id, and it lands in a filesystem path below.
+    if !is_safe_path_segment(&session_id) {
+        return Err(IpcError::new(
+            "steward.attachment_session_invalid",
+            format!("附件 {name} 的会话 id 非法"),
+        ));
+    }
+    // Absolute pre-decode guard (25 MB base64 budget, mirroring the chat
+    // composer): a huge payload must never be decoded into memory even when
+    // `steward_attachment_max_bytes` is configured higher.
+    if base64.len() > MAX_ATTACHMENT_BASE64_LEN {
+        return Err(IpcError::new(
+            "steward.attachment_too_large",
+            format!("附件 {name} 超过 {} 字节上限", MAX_ATTACHMENT_BYTES),
+        ));
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(&base64)
+        .map_err(|e| IpcError::new("steward.attachment_invalid_base64", e.to_string()))?;
+    let ws = state.current_workspace();
+    let attachment = nuomi_core::steward::attachments::save_steward_attachment(
+        state.db_path.clone(),
+        ws,
+        &session_id,
+        &name,
+        &mime,
+        data,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::attachments::StewardAttachmentError::MimeRejected { .. } => {
+            IpcError::new("steward.attachment_mime_rejected", e.to_string())
+        }
+        nuomi_core::steward::attachments::StewardAttachmentError::TooLarge { .. } => {
+            IpcError::new("steward.attachment_too_large", e.to_string())
+        }
+        nuomi_core::steward::attachments::StewardAttachmentError::Empty { .. } => {
+            IpcError::new("steward.attachment_empty", e.to_string())
+        }
+        nuomi_core::steward::attachments::StewardAttachmentError::SessionInvalid { .. } => {
+            IpcError::new("steward.attachment_session_invalid", e.to_string())
+        }
+        nuomi_core::steward::attachments::StewardAttachmentError::Store(msg) => {
+            IpcError::new("steward.store_unavailable", msg)
+        }
+        nuomi_core::steward::attachments::StewardAttachmentError::Io(msg) => {
+            IpcError::new("steward.error", msg)
+        }
+    })?;
+    Ok(attachment.into())
+}
+
+// ---------- steward context usage (task 4.5, design §2.2.2-A3) ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardContextUsageSectionDto {
+    /// `SystemPrompt` | `History` | `ToolResults`.
+    pub name: String,
+    pub tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardPruneRecordDto {
+    pub occurred_at: i64,
+    pub budget_tokens: i64,
+    pub approx_tokens: i64,
+    pub duplicates_collapsed: i64,
+    pub results_summarized: i64,
+    pub folded_messages: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardContextUsageDto {
+    pub sections: Vec<StewardContextUsageSectionDto>,
+    pub total_tokens: i64,
+    pub budget_tokens: i64,
+    pub prune_records: Vec<StewardPruneRecordDto>,
+}
+
+pub async fn impl_steward_get_context_usage(
+    state: &AppState,
+    session_id: String,
+) -> Result<StewardContextUsageDto, IpcError> {
+    let usage =
+        nuomi_core::steward::context_usage::get_context_usage(state.db_path.clone(), &session_id)
+            .await
+            .map_err(|e| match e {
+                nuomi_core::steward::StewardError::NotFound { entity, id } => {
+                    IpcError::new("steward.session_not_found", format!("{entity}#{id}"))
+                }
+                nuomi_core::steward::StewardError::Store(msg) => {
+                    IpcError::new("steward.store_unavailable", msg)
+                }
+                other => IpcError::new("steward.error", other.to_string()),
+            })?;
+    Ok(StewardContextUsageDto {
+        sections: usage
+            .sections
+            .into_iter()
+            .map(|s| StewardContextUsageSectionDto {
+                name: s.name,
+                tokens: s.tokens,
+            })
+            .collect(),
+        total_tokens: usage.total_tokens,
+        budget_tokens: usage.budget_tokens,
+        prune_records: usage
+            .prune_records
+            .into_iter()
+            .map(|r| StewardPruneRecordDto {
+                occurred_at: r.occurred_at,
+                budget_tokens: r.budget_tokens,
+                approx_tokens: r.approx_tokens,
+                duplicates_collapsed: r.duplicates_collapsed,
+                results_summarized: r.results_summarized,
+                folded_messages: r.folded_messages,
+            })
+            .collect(),
+    })
+}
+
+// ---------- steward prompt optimizer (task 4.7, design §2.2.2-A4) ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StewardPromptOptimizeResultDto {
+    pub optimized: String,
+}
+
+pub async fn impl_steward_optimize_prompt(
+    state: &AppState,
+    session_id: String,
+    draft: String,
+) -> Result<StewardPromptOptimizeResultDto, IpcError> {
+    let optimized = nuomi_core::steward::prompt_optimizer::optimize_prompt(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        &session_id,
+        &draft,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::prompt_optimizer::OptimizeError::Timeout => {
+            IpcError::new("steward.optimize_timeout", e.to_string())
+        }
+        nuomi_core::steward::prompt_optimizer::OptimizeError::Failed(msg) => {
+            IpcError::new("steward.optimize_failed", msg)
+        }
+    })?;
+    Ok(StewardPromptOptimizeResultDto { optimized })
+}
+
+// ---------- session-generic composer services (composer alignment) ----------
+// Works for every conversation surface: ordinary RoleAgent chats, group
+// chats, and the steward chat (steward sessions keep their established
+// semantics via delegation inside nuomi-core).
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsageSectionDto {
+    pub name: String,
+    pub tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneRecordDto {
+    pub occurred_at: i64,
+    pub budget_tokens: i64,
+    pub approx_tokens: i64,
+    pub duplicates_collapsed: i64,
+    pub results_summarized: i64,
+    pub folded_messages: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsageDto {
+    pub sections: Vec<ContextUsageSectionDto>,
+    pub total_tokens: i64,
+    pub budget_tokens: i64,
+    pub prune_records: Vec<PruneRecordDto>,
+}
+
+pub async fn impl_get_context_usage(
+    state: &AppState,
+    session_id: String,
+) -> Result<ContextUsageDto, IpcError> {
+    let usage = nuomi_core::services::get_session_context_usage(state.db_path.clone(), &session_id)
+        .await
+        .map_err(|e| match e {
+            nuomi_core::services::SessionContextError::NotFound(id) => {
+                IpcError::new("session.not_found", id)
+            }
+            nuomi_core::services::SessionContextError::Store(msg) => {
+                IpcError::new("session.store_unavailable", msg)
+            }
+        })?;
+    Ok(ContextUsageDto {
+        sections: usage
+            .sections
+            .into_iter()
+            .map(|s| ContextUsageSectionDto {
+                name: s.name,
+                tokens: s.tokens,
+            })
+            .collect(),
+        total_tokens: usage.total_tokens,
+        budget_tokens: usage.budget_tokens,
+        prune_records: usage
+            .prune_records
+            .into_iter()
+            .map(|r| PruneRecordDto {
+                occurred_at: r.occurred_at,
+                budget_tokens: r.budget_tokens,
+                approx_tokens: r.approx_tokens,
+                duplicates_collapsed: r.duplicates_collapsed,
+                results_summarized: r.results_summarized,
+                folded_messages: r.folded_messages,
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptOptimizeResultDto {
+    pub optimized: String,
+}
+
+pub async fn impl_optimize_prompt(
+    state: &AppState,
+    session_id: String,
+    draft: String,
+) -> Result<PromptOptimizeResultDto, IpcError> {
+    let cwd = Some(state.current_workspace());
+    let optimized = nuomi_core::services::optimize_session_prompt(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        cwd,
+        &session_id,
+        &draft,
+    )
+    .await
+    .map_err(|e| match e {
+        nuomi_core::steward::prompt_optimizer::OptimizeError::Timeout => {
+            IpcError::new("prompt.optimize_timeout", e.to_string())
+        }
+        nuomi_core::steward::prompt_optimizer::OptimizeError::Failed(msg) => {
+            IpcError::new("prompt.optimize_failed", msg)
+        }
+    })?;
+    Ok(PromptOptimizeResultDto { optimized })
 }
 
 pub async fn impl_steward_get_app_snapshot(
@@ -7838,12 +8555,28 @@ pub async fn impl_steward_confirm_config_change(
     state: &AppState,
     proposal_id: String,
 ) -> Result<ConfigChangeResultDto, IpcError> {
-    let result = nuomi_core::steward::config_change::confirm_config_change(
+    // With-event variant: confirmation must also record the
+    // `steward.config_confirmed` audit event (spec 5.1.1-3a).
+    let result = nuomi_core::steward::config_change::confirm_config_change_with_event(
         state.db_path.clone(),
         &proposal_id,
     )
     .await?;
     Ok(result.into())
+}
+
+pub async fn impl_steward_cancel_config_change(
+    state: &AppState,
+    session_id: String,
+    proposal_id: String,
+) -> Result<(), IpcError> {
+    nuomi_core::steward::config_change::cancel_config_change_with_event(
+        state.db_path.clone(),
+        &session_id,
+        &proposal_id,
+    )
+    .await?;
+    Ok(())
 }
 
 pub async fn impl_steward_rollback_config_change(
@@ -8480,9 +9213,9 @@ pub async fn impl_steward_set_online_authorization(
 ) -> Result<(), IpcError> {
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || {
-        let mut db = nuomi_core::store::Db::open(&db_path)?;
+        let db = nuomi_core::store::Db::open(&db_path)?;
         nuomi_core::store::repos::settings::set(
-            &mut db.0,
+            &db.0,
             "steward.online_authorized",
             if authorized { "true" } else { "false" },
         )
@@ -8527,7 +9260,9 @@ pub async fn impl_rollback_session_events(
         let target = target.ok_or_else(|| {
             IpcError::new("rollback.invalid_seq", "event not found at the given seq")
         })?;
-        if target.kind != "message" || target.payload.get("role") != Some(&serde_json::json!("user")) {
+        if target.kind != "message"
+            || target.payload.get("role") != Some(&serde_json::json!("user"))
+        {
             return Err(IpcError::new(
                 "rollback.not_user_message",
                 "rollback point must be a user message",

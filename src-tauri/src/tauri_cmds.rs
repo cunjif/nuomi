@@ -1148,7 +1148,16 @@ pub async fn remember_memory(
     role_id: Option<String>,
     source_session_id: Option<String>,
 ) -> Result<commands::MemoryEntryDto, IpcError> {
-    commands::impl_remember_memory(&state, content, tags, kind, user_profile, role_id, source_session_id).await
+    commands::impl_remember_memory(
+        &state,
+        content,
+        tags,
+        kind,
+        user_profile,
+        role_id,
+        source_session_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1310,12 +1319,132 @@ pub async fn steward_list_sessions(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn steward_ensure_singleton_session(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::StewardSessionDto, IpcError> {
+    commands::impl_steward_ensure_singleton_session(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_settings(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::StewardSettingsDto, IpcError> {
+    commands::impl_steward_get_settings(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_update_soul(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    content: String,
+) -> Result<(), IpcError> {
+    commands::impl_steward_update_soul(&state, session_id, content).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_update_binding(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    mode: commands::BindingModeDto,
+    provider_id: Option<String>,
+    agent_profile_id: Option<String>,
+) -> Result<(), IpcError> {
+    commands::impl_steward_update_binding(&state, session_id, mode, provider_id, agent_profile_id)
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_clear_messages(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_steward_clear_messages(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_batch_delete_messages(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    message_ids: Vec<String>,
+) -> Result<(), IpcError> {
+    commands::impl_steward_batch_delete_messages(&state, session_id, message_ids).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_list_session_messages(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    limit: u32,
+) -> Result<Vec<commands::StewardMessageDto>, IpcError> {
+    commands::impl_steward_list_session_messages(&state, session_id, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn steward_send_message(
     state: tauri::State<'_, AppState>,
     session_id: String,
     text: String,
+    attachment_ids: Option<Vec<String>>,
 ) -> Result<commands::StewardReplyDto, IpcError> {
-    commands::impl_steward_send_message(&state, session_id, text).await
+    commands::impl_steward_send_message(&state, session_id, text, attachment_ids).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_save_attachment(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    name: String,
+    mime: String,
+    base64: String,
+) -> Result<commands::StewardAttachmentDto, IpcError> {
+    commands::impl_steward_save_attachment(&state, session_id, name, mime, base64).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_get_context_usage(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::StewardContextUsageDto, IpcError> {
+    commands::impl_steward_get_context_usage(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_optimize_prompt(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    draft: String,
+) -> Result<commands::StewardPromptOptimizeResultDto, IpcError> {
+    commands::impl_steward_optimize_prompt(&state, session_id, draft).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_context_usage(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::ContextUsageDto, IpcError> {
+    commands::impl_get_context_usage(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn optimize_prompt(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    draft: String,
+) -> Result<commands::PromptOptimizeResultDto, IpcError> {
+    commands::impl_optimize_prompt(&state, session_id, draft).await
 }
 
 #[tauri::command]
@@ -1343,6 +1472,16 @@ pub async fn steward_confirm_config_change(
     proposal_id: String,
 ) -> Result<commands::ConfigChangeResultDto, IpcError> {
     commands::impl_steward_confirm_config_change(&state, proposal_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn steward_cancel_config_change(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    proposal_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_steward_cancel_config_change(&state, session_id, proposal_id).await
 }
 
 #[tauri::command]

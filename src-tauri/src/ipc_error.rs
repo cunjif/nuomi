@@ -202,6 +202,10 @@ impl From<nuomi_core::steward::StewardError> for IpcError {
             E::Store(msg) => Self::new("steward.store_failed", msg),
             E::Provider(msg) => Self::new("steward.provider_failed", msg),
             E::Intent(msg) => Self::new("steward.intent_failed", msg),
+            E::AttachmentInvalid { name, reason } => Self::new(
+                "steward.attachment_invalid",
+                format!("附件 {name}不可用：{reason}，请移除后重试"),
+            ),
         }
     }
 }

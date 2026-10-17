@@ -26,8 +26,16 @@ pub struct DomainEvent {
 }
 
 /// Session-scoped high-frequency topics (ADR-0002 namespace 1).
+///
+/// `steward.*` events are scoped to the steward session carried in the
+/// payload's `sessionId` (streaming deltas, reply lifecycle) and follow the
+/// same per-session channel pattern as `session.*` (steward_workbench_v2
+/// design §2.2.2 table: "对齐 ADR-0002 session channel 模式").
 fn is_session_topic(topic: &str) -> bool {
-    topic.starts_with("session.") || topic.starts_with("tool.") || topic.starts_with("hook.")
+    topic.starts_with("session.")
+        || topic.starts_with("tool.")
+        || topic.starts_with("hook.")
+        || topic.starts_with("steward.")
 }
 
 /// Global structured topics (ADR-0002 namespace 2).
@@ -87,6 +95,8 @@ mod tests {
             ("session.delta", Some("s1"), "event://session/s1"),
             ("tool.call", Some("s1"), "event://session/s1"),
             ("hook.pre_tool_call", Some("s2"), "event://session/s2"),
+            ("steward.delta", Some("s1"), "event://session/s1"),
+            ("session.cancelled", Some("s1"), "event://session/s1"),
             ("task.status_changed", None, "event://domain"),
             ("run.state_changed", None, "event://domain"),
             ("approval.requested", None, "event://domain"),
@@ -111,6 +121,27 @@ mod tests {
         assert!(partition_event(&Event::new("misc.noise", json!({}))).is_empty());
         // session-topic without sessionId cannot be routed safely
         assert!(partition_event(&Event::new("tool.call", json!({}))).is_empty());
+        // steward topics without sessionId cannot be routed either
+        assert!(partition_event(&Event::new("steward.delta", json!({}))).is_empty());
+    }
+
+    #[test]
+    fn steward_delta_carries_stream_payload() {
+        let ev = Event::new(
+            "steward.delta",
+            json!({ "sessionId": "st9", "text": "你", "seq": 3 }),
+        );
+        let routed = partition_event(&ev);
+        assert_eq!(routed.len(), 1);
+        let (channel, wire) = &routed[0];
+        assert_eq!(channel, "event://session/st9");
+        assert_eq!(wire.r#type, "steward.delta");
+        assert_eq!(wire.session_id.as_deref(), Some("st9"));
+        assert_eq!(wire.seq, Some(3));
+        assert_eq!(
+            wire.payload.get("text").and_then(|v| v.as_str()),
+            Some("你")
+        );
     }
 
     #[test]

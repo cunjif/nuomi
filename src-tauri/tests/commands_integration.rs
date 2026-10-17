@@ -27,7 +27,7 @@ async fn session_lifecycle_and_event_pagination() {
     commands::impl_resume_session(&state, s1.id.clone())
         .await
         .unwrap();
-    let result = commands::run_conversation_turn(&state, &s1.id, "hello")
+    let result = commands::run_conversation_turn(&state, &s1.id, "hello", None)
         .await
         .unwrap();
     assert_eq!(result.final_text, "hi");
@@ -84,19 +84,21 @@ async fn task_board_transition_auto_dispatches_run() {
 async fn workspace_sandbox_rejects_escape() {
     let (state, dir) = boot(vec![]).await;
     state.switch_workspace(dir.path().to_path_buf()).unwrap();
-    commands::impl_write_file(&state, "a/b.txt".into(), "hello".into())
+    commands::impl_write_file(&state, "a/b.txt".into(), "hello".into(), None)
         .await
         .unwrap();
     assert_eq!(
-        commands::impl_read_file(&state, "a/b.txt".into())
+        commands::impl_read_file(&state, "a/b.txt".into(), None)
             .await
             .unwrap(),
         "hello"
     );
-    let listing = commands::impl_list_dir(&state, "a".into()).await.unwrap();
+    let listing = commands::impl_list_dir(&state, "a".into(), None)
+        .await
+        .unwrap();
     assert_eq!(listing.len(), 1);
 
-    let err = commands::impl_read_file(&state, "../escape.txt".into()).await;
+    let err = commands::impl_read_file(&state, "../escape.txt".into(), None).await;
     assert!(err.is_err());
 }
 
@@ -106,55 +108,57 @@ async fn workspace_file_ops_roundtrip() {
     state.switch_workspace(dir.path().to_path_buf()).unwrap();
 
     // create_file
-    commands::impl_create_file(&state, "notes/a.txt".into(), "hi".into())
+    commands::impl_create_file(&state, "notes/a.txt".into(), "hi".into(), None)
         .await
         .unwrap();
     assert_eq!(
-        commands::impl_read_file(&state, "notes/a.txt".into())
+        commands::impl_read_file(&state, "notes/a.txt".into(), None)
             .await
             .unwrap(),
         "hi",
     );
 
     // create_dir
-    commands::impl_create_dir(&state, "docs".into())
+    commands::impl_create_dir(&state, "docs".into(), None)
         .await
         .unwrap();
-    let root = commands::impl_list_dir(&state, "".into()).await.unwrap();
+    let root = commands::impl_list_dir(&state, "".into(), None)
+        .await
+        .unwrap();
     assert!(root.iter().any(|e| e.name == "docs" && e.is_dir));
 
     // rename
-    commands::impl_rename(&state, "notes/a.txt".into(), "notes/b.txt".into())
+    commands::impl_rename(&state, "notes/a.txt".into(), "notes/b.txt".into(), None)
         .await
         .unwrap();
     assert_eq!(
-        commands::impl_read_file(&state, "notes/b.txt".into())
+        commands::impl_read_file(&state, "notes/b.txt".into(), None)
             .await
             .unwrap(),
         "hi",
     );
 
     // copy
-    commands::impl_copy(&state, "notes/b.txt".into(), "docs/b.txt".into())
+    commands::impl_copy(&state, "notes/b.txt".into(), "docs/b.txt".into(), None)
         .await
         .unwrap();
     assert_eq!(
-        commands::impl_read_file(&state, "docs/b.txt".into())
+        commands::impl_read_file(&state, "docs/b.txt".into(), None)
             .await
             .unwrap(),
         "hi",
     );
 
     // delete
-    commands::impl_delete(&state, "notes/b.txt".into())
+    commands::impl_delete(&state, "notes/b.txt".into(), None)
         .await
         .unwrap();
-    assert!(commands::impl_read_file(&state, "notes/b.txt".into())
+    assert!(commands::impl_read_file(&state, "notes/b.txt".into(), None)
         .await
         .is_err());
     // copy preserved
     assert_eq!(
-        commands::impl_read_file(&state, "docs/b.txt".into())
+        commands::impl_read_file(&state, "docs/b.txt".into(), None)
             .await
             .unwrap(),
         "hi",
@@ -165,22 +169,32 @@ async fn workspace_file_ops_roundtrip() {
 async fn workspace_file_ops_reject_escape() {
     let (state, dir) = boot(vec![]).await;
     state.switch_workspace(dir.path().to_path_buf()).unwrap();
-    commands::impl_create_file(&state, "safe.txt".into(), "x".into())
+    commands::impl_create_file(&state, "safe.txt".into(), "x".into(), None)
         .await
         .unwrap();
 
     for rel in ["../out.txt", "/etc/passwd", "C:\\abs"] {
-        assert!(commands::impl_create_file(&state, rel.into(), "x".into())
+        assert!(
+            commands::impl_create_file(&state, rel.into(), "x".into(), None)
+                .await
+                .is_err()
+        );
+        assert!(commands::impl_create_dir(&state, rel.into(), None)
             .await
             .is_err());
-        assert!(commands::impl_create_dir(&state, rel.into()).await.is_err());
-        assert!(commands::impl_delete(&state, rel.into()).await.is_err());
-        assert!(commands::impl_rename(&state, rel.into(), "safe.txt".into())
+        assert!(commands::impl_delete(&state, rel.into(), None)
             .await
             .is_err());
-        assert!(commands::impl_copy(&state, rel.into(), "safe.txt".into())
-            .await
-            .is_err());
+        assert!(
+            commands::impl_rename(&state, rel.into(), "safe.txt".into(), None)
+                .await
+                .is_err()
+        );
+        assert!(
+            commands::impl_copy(&state, rel.into(), "safe.txt".into(), None)
+                .await
+                .is_err()
+        );
     }
 }
 
