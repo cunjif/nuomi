@@ -1009,7 +1009,21 @@
     "directoryMissing": "目录缺失",
     "loading": "加载中…",
     "orphanSessions": "孤儿会话",
-    "reclaimInto": "归入此工作区"
+    "reclaimInto": "归入此工作区",
+    "workDirs": "工作目录",
+    "focusDir": "聚焦此目录",
+    "removeDir": "从工作区移除",
+    "addDir": "添加目录",
+    "browseNewDir": "浏览新目录…",
+    "dirAdded": "目录已添加",
+    "dirMounted": "目录已挂载",
+    "dirRemoved": "目录已移除",
+    "dirOpFailed": "目录操作失败",
+    "addDirFailed": "添加目录失败",
+    "directoryMissingToast": "目录不存在，可移除或重新定位",
+    "removeDirDirtyTitle": "移除目录",
+    "removeDirDirtyBody": "该目录下有未保存的文件，移除目录将丢弃修改：",
+    "removeDirDirtyConfirm": "移除目录"
   },
   "capability": {
     "reasoning": "推理",

@@ -1003,7 +1003,21 @@
     "directoryMissing": "Directory missing",
     "loading": "Loading…",
     "orphanSessions": "Orphan sessions",
-    "reclaimInto": "Reclaim into this workspace"
+    "reclaimInto": "Reclaim into this workspace",
+    "workDirs": "Work directories",
+    "focusDir": "Focus this directory",
+    "removeDir": "Remove from workspace",
+    "addDir": "Add directory",
+    "browseNewDir": "Browse for a new directory…",
+    "dirAdded": "Directory added",
+    "dirMounted": "Directory mounted",
+    "dirRemoved": "Directory removed",
+    "dirOpFailed": "Directory operation failed",
+    "addDirFailed": "Failed to add directory",
+    "directoryMissingToast": "Directory missing on disk — remove it or relocate it",
+    "removeDirDirtyTitle": "Remove directory",
+    "removeDirDirtyBody": "This directory has unsaved files. Removing it discards the changes:",
+    "removeDirDirtyConfirm": "Remove directory"
   },
   "capability": {
     "reasoning": "Reasoning",
