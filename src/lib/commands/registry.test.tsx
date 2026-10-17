@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { i18n } from "../../i18n";
 import { Composer } from "../../features/conversation/composer/Composer";
+import { Toaster } from "../../components/ui/Toaster";
 import { injectIpcCommands, ipc } from "../../lib/ipc/client";
 import { tdState } from "../../lib/ipc/test-double";
 import { renderWithProviders } from "../../test/helpers";
@@ -219,5 +220,73 @@ describe("Composer — command execution", () => {
     await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalled());
     expect(mocks.selectSession).toHaveBeenCalledTimes(1);
     expect(mocks.selectSession.mock.calls[0]?.[0]).toMatch(/^s-/);
+  });
+});
+
+describe("Composer — AI optimize (session-generic IPC)", () => {
+  it("runs optimize from the wand button and adopts the rewrite into the draft", async () => {
+    const optimizeMock = vi.fn(async (_s: string, draft: string) => ({
+      status: "ok" as const,
+      data: { optimized: `[优化] ${draft}` },
+    }));
+    injectIpcCommands({ optimizePrompt: optimizeMock });
+    renderWithProviders(
+      <>
+        <Composer
+          disabled={false}
+          pending={false}
+          commandContext={makeContext().ctx}
+          sessionId="s1"
+          onSubmit={vi.fn()}
+        />
+        <Toaster />
+      </>,
+    );
+
+    const textarea = typeIntoTextarea("帮我看看");
+    fireEvent.click(screen.getByRole("button", { name: "AI 优化提示词" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "提示词优化对比" });
+    expect(dialog.textContent).toContain("帮我看看");
+    expect(dialog.textContent).toContain("[优化] 帮我看看");
+    // Draft is untouched before an explicit adopt.
+    expect(textarea.value).toBe("帮我看看");
+    expect(optimizeMock).toHaveBeenCalledWith("s1", "帮我看看");
+
+    fireEvent.click(screen.getByRole("button", { name: "采纳" }));
+    await waitFor(() => expect(textarea.value).toBe("[优化] 帮我看看"));
+    expect(
+      screen.queryByRole("dialog", { name: "提示词优化对比" }),
+    ).toBeNull();
+  });
+
+  it("toasts the failure and keeps the draft when optimize errors", async () => {
+    injectIpcCommands({
+      optimizePrompt: async () => ({
+        status: "error" as const,
+        error: { generic: { code: "prompt.optimize_failed", message: "会话未绑定模型服务，无法优化" } },
+      }),
+    });
+    renderWithProviders(
+      <>
+        <Composer
+          disabled={false}
+          pending={false}
+          commandContext={makeContext().ctx}
+          sessionId="s1"
+          onSubmit={vi.fn()}
+        />
+        <Toaster />
+      </>,
+    );
+
+    const textarea = typeIntoTextarea("帮我看看");
+    fireEvent.click(screen.getByRole("button", { name: "AI 优化提示词" }));
+
+    expect(await screen.findByText(/无法优化/)).toBeInTheDocument();
+    expect(textarea.value).toBe("帮我看看");
+    expect(
+      screen.queryByRole("dialog", { name: "提示词优化对比" }),
+    ).toBeNull();
   });
 });

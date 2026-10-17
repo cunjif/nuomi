@@ -223,6 +223,13 @@ const SparklesIcon: Glyph = (p) => (
     <path d="M18.5 4v3M20 5.5h-3M5 16.5v2.5M6.2 17.7H4" />
   </svg>
 );
+const WandIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M4 20L15.5 8.5" />
+    <path d="M14.5 3.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z" />
+    <path d="M19.5 12.5l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z" />
+  </svg>
+);
 const XCircleIcon: Glyph = (p) => (
   <svg {...p}>
     <circle cx="12" cy="12" r="8" />
@@ -357,6 +364,7 @@ export const iconRegistry = {
   file: FileIcon,
   users: UsersIcon,
   sparkles: SparklesIcon,
+  wand: WandIcon,
   "x-circle": XCircleIcon,
   "drag-handle": DragHandleIcon,
   note: NoteIcon,

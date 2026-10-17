@@ -148,6 +148,24 @@
         "6": "Downloading the idea from the cloud, 99%…",
         "7": "Untangling a thousand threads into one",
         "8": "The flash of insight is almost here, give it one more second"
+      },
+      "pill": {
+        "expand": "Expand status details",
+        "collapse": "Collapse status details",
+        "stop": "Stop",
+        "waiting": "Waited {{seconds}}s",
+        "current": "Current",
+        "initial": "🤔 Thinking…"
+      },
+      "toolCall": "🔧 Calling tool {{tool}}…",
+      "toolCallWithTarget": "🔧 Calling tool {{tool}} ({{target}})…",
+      "stopped": "⏹ Stopped",
+      "agentFailed": "⚠️ Agent failed: {{summary}}",
+      "interrupted": "⚠️ Reply interrupted — received content kept",
+      "group": {
+        "waiting": "🫖 Waiting for agents…",
+        "speaking": "💭 {{name}} is thinking…",
+        "next": "⏭️ Waiting for the next speaker…"
       }
     }
   },
@@ -231,6 +249,24 @@
     "attachmentTooLarge": "File too large (max 25 MB)",
     "attachmentInvalidMime": "File type not allowed",
     "pasteFolded": "Folded large text into attachment ({{size}})",
+    "optimize": "AI optimize prompt",
+    "optimizeRunning": "Optimizing…",
+    "optimizeCompareLabel": "Prompt optimization comparison",
+    "optimizeOriginal": "Original",
+    "optimizeOptimized": "Optimized",
+    "optimizeAdopt": "Adopt",
+    "optimizeRetry": "Retry",
+    "optimizeDiscard": "Discard",
+    "optimizeFailed": "Prompt optimization failed: {{message}}",
+    "contextUsage": "Context usage",
+    "contextUsageTitle": "Context usage and prune history",
+    "contextUsagePopupLabel": "Context prune workbench",
+    "contextUsageSections": "Current context composition",
+    "contextUsageSectionRow": "{{tokens}} tokens ({{percent}}%)",
+    "contextUsageTotal": "Total {{total}} / {{budget}} tokens ({{percent}}%)",
+    "contextUsagePruneTitle": "Prune history",
+    "contextUsageNoPrune": "No prune records yet",
+    "contextUsagePruneItem": "{{time}}: folded {{folded}}, deduped {{dedup}}, summarized {{summarized}} results → {{tokens}} tokens",
     "toolbar": {
       "voice": "Voice input",
       "functionMenu": "Function menu",
@@ -1030,5 +1066,15 @@
     "openFromHint": "Open in current workspace (from {{name}})",
     "selectWorkspaceHint": "Select a workspace first",
     "pullToCurrent": "↗ pull to current"
+  },
+  "steward": {
+    "composer": {
+      "placeholder": "Message the steward...",
+      "pendingAttachments": "Pending attachments",
+      "unsupportedType": "Unsupported file type: {{name}}",
+      "tooLarge": "File too large: {{name}} (limit {{limit}})",
+      "emptyFile": "Empty file: {{name}}",
+      "saveFailed": "Attachment save failed: {{message}}"
+    }
   }
 }

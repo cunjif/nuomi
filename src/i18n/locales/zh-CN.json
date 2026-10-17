@@ -148,6 +148,24 @@
         "6": "想法正在从云端下载，进度 99%……",
         "7": "正在把千头万绪捋成一根线",
         "8": "灵光马上就到，再给它一秒钟"
+      },
+      "pill": {
+        "expand": "展开状态详情",
+        "collapse": "收起状态详情",
+        "stop": "停止",
+        "waiting": "已等待 {{seconds}} 秒",
+        "current": "当前",
+        "initial": "🤔 正在思考…"
+      },
+      "toolCall": "🔧 正在调用工具 {{tool}}…",
+      "toolCallWithTarget": "🔧 正在调用工具 {{tool}}（{{target}}）…",
+      "stopped": "⏹ 已停止",
+      "agentFailed": "⚠️ Agent 执行失败：{{summary}}",
+      "interrupted": "⚠️ 回复已中断，已接收内容保留",
+      "group": {
+        "waiting": "🫖 正在等待 Agent 响应…",
+        "speaking": "💭 {{name}} 正在思考…",
+        "next": "⏭️ 等待下一位 Agent 发言…"
       }
     }
   },
@@ -231,6 +249,24 @@
     "attachmentTooLarge": "文件过大（上限 25 MB）",
     "attachmentInvalidMime": "不支持的文件类型",
     "pasteFolded": "大文本已折叠为附件（{{size}}）",
+    "optimize": "AI 优化提示词",
+    "optimizeRunning": "AI 优化中…",
+    "optimizeCompareLabel": "提示词优化对比",
+    "optimizeOriginal": "原文",
+    "optimizeOptimized": "优化后",
+    "optimizeAdopt": "采纳",
+    "optimizeRetry": "重新优化",
+    "optimizeDiscard": "放弃",
+    "optimizeFailed": "提示词优化失败：{{message}}",
+    "contextUsage": "上下文用量",
+    "contextUsageTitle": "上下文用量与压缩记录",
+    "contextUsagePopupLabel": "Context 压缩工作浮窗",
+    "contextUsageSections": "当前上下文构成",
+    "contextUsageSectionRow": "{{tokens}} tokens（{{percent}}%）",
+    "contextUsageTotal": "总用量 {{total}} / {{budget}} tokens（{{percent}}%）",
+    "contextUsagePruneTitle": "压缩记录",
+    "contextUsageNoPrune": "暂无压缩记录",
+    "contextUsagePruneItem": "{{time}}：折叠 {{folded}} 条、去重 {{dedup}} 条、摘要 {{summarized}} 条结果 → {{tokens}} tokens",
     "toolbar": {
       "voice": "语音输入",
       "functionMenu": "功能列表",
@@ -1030,5 +1066,15 @@
     "openFromHint": "在当前工作区打开（来自 {{name}}）",
     "selectWorkspaceHint": "请先选择一个工作区",
     "pullToCurrent": "↗ 拉到当前"
+  },
+  "steward": {
+    "composer": {
+      "placeholder": "向管家发送消息...",
+      "pendingAttachments": "待发送附件",
+      "unsupportedType": "不支持的文件类型：{{name}}",
+      "tooLarge": "文件过大：{{name}}（超过 {{limit}} 上限）",
+      "emptyFile": "文件为空：{{name}}",
+      "saveFailed": "附件保存失败：{{message}}"
+    }
   }
 }

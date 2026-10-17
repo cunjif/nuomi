@@ -22,8 +22,11 @@ import {
 } from "../../../lib/conversation/attachmentModel";
 import { CompletionMenu, type CompletionItem } from "./CompletionMenu";
 import { useComposerTriggers } from "./useComposerTriggers";
+import { usePromptOptimize } from "./usePromptOptimize";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { AttachmentShelf } from "./AttachmentShelf";
+import { OptimizeCompareBar } from "./OptimizeCompareBar";
+import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { Icon } from "../../../components/ui/Icon/Icon";
 
 export interface ComposerProps {
@@ -69,6 +72,8 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const executingRef = useRef(false);
+  const { optimize, runOptimize, clearOptimize, describeOptimizeError } =
+    usePromptOptimize(sessionId);
 
   // Auto-grow: adjust textarea height to fit content, capped at ~12 rows.
   useEffect(() => {
@@ -97,26 +102,39 @@ export function Composer({
     onError: (e) => toast.error(`${t("composer.attachmentFailed")}: ${describeError(e)}`),
   });
 
-  const onFileSelected = (file: File): void => {
+  const onFilesSelected = (files: FileList | null): void => {
     if (!sessionId) return;
-    if (!isWithinSize(file.size)) {
-      toast.error(t("composer.attachmentTooLarge"));
-      return;
+    for (const file of Array.from(files ?? [])) {
+      if (!isWithinSize(file.size)) {
+        toast.error(t("composer.attachmentTooLarge"));
+        continue;
+      }
+      const mime = file.type || guessMime(file.name);
+      if (!isAllowedMime(mime)) {
+        toast.error(t("composer.attachmentInvalidMime"));
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = (): void => {
+        const result = reader.result;
+        if (typeof result !== "string") return;
+        const base64 = result.split(",")[1] ?? "";
+        attachMut.mutate({ name: file.name, mime, dataBase64: base64 });
+      };
+      reader.onerror = (): void => toast.error(t("composer.attachmentFailed"));
+      reader.readAsDataURL(file);
     }
-    const mime = file.type || guessMime(file.name);
-    if (!isAllowedMime(mime)) {
-      toast.error(t("composer.attachmentInvalidMime"));
-      return;
+  };
+
+  // Prompt AI optimize (session-generic IPC): the draft is never replaced
+  // without an explicit adopt — compare-first, adopt/discard.
+  const handleOptimize = async (draft: string): Promise<void> => {
+    try {
+      await runOptimize(draft);
+    } catch (e) {
+      // Timeout/failure keeps the draft untouched.
+      toast.error(describeOptimizeError(e));
     }
-    const reader = new FileReader();
-    reader.onload = (): void => {
-      const result = reader.result;
-      if (typeof result !== "string") return;
-      const base64 = result.split(",")[1] ?? "";
-      attachMut.mutate({ name: file.name, mime, dataBase64: base64 });
-    };
-    reader.onerror = (): void => toast.error(t("composer.attachmentFailed"));
-    reader.readAsDataURL(file);
   };
 
   const trigger = useComposerTriggers(value, caret);
@@ -256,6 +274,21 @@ export function Composer({
           }}
         />
       )}
+      {optimize.state === "compare" && (
+        <OptimizeCompareBar
+          original={optimize.original}
+          optimized={optimize.optimized}
+          busy={false}
+          onAdopt={(optimized) => {
+            setValue(optimized);
+            clearOptimize();
+          }}
+          onRetry={(original) => {
+            void handleOptimize(original);
+          }}
+          onDiscard={clearOptimize}
+        />
+      )}
       <div className="flex items-end gap-2">
         {leftSlot}
         <div className="relative flex min-h-0 flex-1">
@@ -344,6 +377,11 @@ export function Composer({
             <ComposerToolbar
               onFunctionMenuClick={() => { /* function menu — task group 5 */ }}
               onAttachmentClick={() => fileInputRef.current?.click()}
+              onOptimizeClick={() => void handleOptimize(value)}
+              optimizeRunning={optimize.state === "running"}
+              optimizeDisabled={
+                disabled || pending || sessionId === null || value.trim().length === 0
+              }
             />
           </div>
           <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5">
@@ -368,13 +406,16 @@ export function Composer({
           </div>
         </div>
       </div>
+      <div className="mt-1 flex justify-end">
+        <ContextUsageIndicator sessionId={sessionId} />
+      </div>
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFileSelected(file);
+          onFilesSelected(e.target.files);
           e.target.value = "";
         }}
       />

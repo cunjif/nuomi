@@ -55,6 +55,13 @@ import type {
   RunDto,
   ScheduleDto,
   StewardSessionDto,
+  StewardMessageDto,
+  StewardAttachmentDto,
+  StewardContextUsageDto,
+  StewardPromptOptimizeResultDto,
+  ContextUsageDto,
+  PromptOptimizeResultDto,
+  StewardSettingsDto,
   TaskDto,
   TeamDto,
   TeamInput,
@@ -149,7 +156,9 @@ export function testDoubleCommands(): CommandSet {
       return ok(s);
     },
     async listSessions() {
-      return ok([...tdState.sessions]);
+      // Steward sessions never surface in IM session listings (repo layer
+      // NOT EXISTS anti-join on steward_sessions — mirrored here).
+      return ok(tdState.sessions.filter((s) => !tdState.stewardSessionIds.has(s.id)));
     },
     async resumeSession(sessionId) {
       return tdState.sessions.some((s) => s.id === sessionId)
@@ -1037,7 +1046,9 @@ export function testDoubleCommands(): CommandSet {
       return ok(s);
     },
     async listConversations(kind, workspaceId) {
-      const all = tdState.sessions;
+      // Steward sessions never surface in IM conversation listings (repo
+      // layer NOT EXISTS anti-join on steward_sessions — mirrored here).
+      const all = tdState.sessions.filter((s) => !tdState.stewardSessionIds.has(s.id));
       const byKind = kind === null ? [...all] : all.filter((s) => s.kind === kind);
       return ok(workspaceId === null ? byKind : byKind.filter((s) => s.workspaceId === workspaceId));
     },
@@ -1289,8 +1300,100 @@ export function testDoubleCommands(): CommandSet {
     async stewardListSessions() {
       return ok([]);
     },
-    async stewardSendMessage(_sessionId, _text) {
+    async stewardEnsureSingletonSession() {
+      const now = Date.now();
+      const s: StewardSessionDto = {
+        id: nextId("ss"),
+        stewardId: "steward",
+        title: "管家会话",
+        goal: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return ok(s);
+    },
+    async stewardListSessionMessages(_sessionId, _limit) {
+      const msgs: StewardMessageDto[] = [];
+      return ok(msgs);
+    },
+    async stewardSendMessage(_sessionId, _text, _attachmentIds) {
       return ok({ type: "text" as const, content: "test double" });
+    },
+    async stewardSaveAttachment(_sessionId, name, mime, _base64) {
+      const now = Date.now();
+      const att: StewardAttachmentDto = {
+        id: nextId("att"),
+        sessionId: _sessionId,
+        seq: null,
+        kind: mime.startsWith("image/") ? "image" : "file",
+        name,
+        mime,
+        relPath: `.nuomi/attachments/${_sessionId}/deadbeef.bin`,
+        sizeBytes: 0,
+        sha256: "deadbeef",
+        createdAt: now,
+      };
+      return ok(att);
+    },
+    async stewardGetContextUsage(_sessionId) {
+      const usage: StewardContextUsageDto = {
+        sections: [
+          { name: "SystemPrompt", tokens: 120 },
+          { name: "History", tokens: 80 },
+          { name: "ToolResults", tokens: 40 },
+        ],
+        totalTokens: 240,
+        budgetTokens: 32768,
+        pruneRecords: [],
+      };
+      return ok(usage);
+    },
+    async stewardOptimizePrompt(_sessionId, draft) {
+      const result: StewardPromptOptimizeResultDto = {
+        optimized: `[优化] ${draft}`,
+      };
+      return ok(result);
+    },
+    async getContextUsage(_sessionId) {
+      const usage: ContextUsageDto = {
+        sections: [
+          { name: "SystemPrompt", tokens: 120 },
+          { name: "History", tokens: 80 },
+          { name: "ToolResults", tokens: 40 },
+        ],
+        totalTokens: 240,
+        budgetTokens: 32768,
+        pruneRecords: [],
+      };
+      return ok(usage);
+    },
+    async optimizePrompt(_sessionId, draft) {
+      const result: PromptOptimizeResultDto = {
+        optimized: `[优化] ${draft}`,
+      };
+      return ok(result);
+    },
+    async stewardGetSettings(_sessionId) {
+      const settings: StewardSettingsDto = {
+        soul: { content: null, maxLength: 16000 },
+        binding: { mode: "none", providerId: null, agentProfileId: null },
+        runStatus: { state: "idle", label: "idle" },
+        todoList: [],
+        messageStats: { total: 0, clearedAt: null },
+      };
+      return ok(settings);
+    },
+    async stewardUpdateSoul(_sessionId, _content) {
+      return ok(null);
+    },
+    async stewardUpdateBinding(_sessionId, _mode, _providerId, _agentProfileId) {
+      return ok(null);
+    },
+    async stewardClearMessages(_sessionId) {
+      return ok(null);
+    },
+    async stewardBatchDeleteMessages(_sessionId, _messageIds) {
+      return ok(null);
     },
     async stewardGetAppSnapshot() {
       const snap: AppStateSnapshotDto = {
@@ -1325,6 +1428,9 @@ export function testDoubleCommands(): CommandSet {
         targetId: "td",
       };
       return ok(result);
+    },
+    async stewardCancelConfigChange(_sessionId: string, _proposalId: string) {
+      return ok(null);
     },
     async stewardRollbackConfigChange(_snapshotId: string) {
       return ok(null);

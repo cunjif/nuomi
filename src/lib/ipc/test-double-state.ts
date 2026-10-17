@@ -57,6 +57,12 @@ interface DoubleState {
   workspaces: import("./bindings.gen").WorkspaceEntryDto[];
   /** path → entry; dirs have content === null */
   files: Map<string, { isDir: boolean; size: number; content: string | null }>;
+  /**
+   * Ids of steward sessions (mirrors the `steward_sessions` table): their
+   * authoritative marker. `listConversations`/`listSessions` exclude them,
+   * matching the Rust repo layer's NOT EXISTS anti-join.
+   */
+  stewardSessionIds: Set<string>;
 }
 
 export const tdState: DoubleState = {
@@ -83,6 +89,7 @@ export const tdState: DoubleState = {
   workspaceConfigured: true,
   workspaces: [],
   files: new Map(),
+  stewardSessionIds: new Set(),
 };
 
 let idCounter = 0;
@@ -127,6 +134,17 @@ export function seedConversation(row: Partial<ConversationDto> & { id: string })
     workspaceId: "__migrated__",
     ...row,
   });
+}
+
+/**
+ * Seeds a steward conversation: a sessions row (kind 'background', mirroring
+ * migration 0027) plus the authoritative `steward_sessions` marker. Steward
+ * sessions are excluded from conversation listings, so components rendering
+ * the IM session list can assert they never leak in.
+ */
+export function seedStewardSession(row: Partial<ConversationDto> & { id: string }): void {
+  seedConversation({ kind: "background", title: row.id, ...row });
+  tdState.stewardSessionIds.add(row.id);
 }
 
 /**
@@ -192,6 +210,7 @@ export function tdReset(): void {
   tdState.workspaceConfigured = true;
   tdState.workspaces.length = 0;
   tdState.files.clear();
+  tdState.stewardSessionIds.clear();
 }
 
 /** Seed workspace entries: value is directory marker or file content. */
