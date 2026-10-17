@@ -93,6 +93,21 @@ fn map_registry_error(err: &nuomi_core::services::RegistryError) -> IpcError {
     }
 }
 
+fn map_registry_v2_error(err: &nuomi_core::services::RegistryV2Error) -> IpcError {
+    use nuomi_core::services::RegistryV2Error as E;
+    match err {
+        E::InvalidPath(_) => IpcError::new("workspace.path_invalid", err.to_string()),
+        E::Blacklisted(_) => IpcError::new("workspace.escape_denied", err.to_string()),
+        E::DirectoryMissing(_) => IpcError::new("workspace.directory_missing", err.to_string()),
+        E::NotFound(_) => IpcError::new("workspace.not_found", err.to_string()),
+        E::DirectoryNotFound(_) => IpcError::new("workspace.directory_not_found", err.to_string()),
+        E::AlreadyOpen(_) => IpcError::new("workspace.already_open", err.to_string()),
+        E::NoDirectories(_) => IpcError::new("workspace.no_directories", err.to_string()),
+        E::Store(_) => IpcError::new("store.failed", err.to_string()),
+        E::Io(_) => IpcError::new("workspace.io", err.to_string()),
+    }
+}
+
 fn map_migration_error(err: &nuomi_core::services::MigrationOrchestrationError) -> IpcError {
     use nuomi_core::services::MigrationOrchestrationError as E;
     match err {
@@ -148,6 +163,12 @@ impl From<nuomi_core::services::WorkspaceError> for IpcError {
 impl From<nuomi_core::services::RegistryError> for IpcError {
     fn from(e: nuomi_core::services::RegistryError) -> Self {
         CoreError::from(e).into()
+    }
+}
+
+impl From<nuomi_core::services::RegistryV2Error> for IpcError {
+    fn from(e: nuomi_core::services::RegistryV2Error) -> Self {
+        map_registry_v2_error(&e)
     }
 }
 
@@ -225,6 +246,10 @@ pub mod codes {
     pub const WORKSPACE_ALREADY_EXISTS: &str = "workspace.already_exists";
     pub const WORKSPACE_NOT_FOUND: &str = "workspace.not_found";
     pub const WORKSPACE_DIRECTORY_MISSING: &str = "workspace.directory_missing";
+    pub const WORKSPACE_PATH_INVALID: &str = "workspace.path_invalid";
+    pub const WORKSPACE_DIRECTORY_NOT_FOUND: &str = "workspace.directory_not_found";
+    pub const WORKSPACE_ALREADY_OPEN: &str = "workspace.already_open";
+    pub const WORKSPACE_NO_DIRECTORIES: &str = "workspace.no_directories";
     pub const WORKSPACE_IO: &str = "workspace.io";
     pub const GIT_COMMAND_NOT_ALLOWED: &str = "git.command_not_allowed";
     pub const GIT_NOT_A_REPOSITORY: &str = "git.not_a_repository";

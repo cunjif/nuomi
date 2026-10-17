@@ -518,6 +518,54 @@ async getOpenSet() : Promise<Result<OpenSetDto, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async workspaceAddDirectory(path: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_add_directory", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRemoveDirectory(workspaceId: string, directoryId: string) : Promise<Result<RemoveDirectoryResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_remove_directory", { workspaceId, directoryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceMountDirectory(workspaceId: string, directoryId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_mount_directory", { workspaceId, directoryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceUnmountDirectory(workspaceId: string, directoryId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_unmount_directory", { workspaceId, directoryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceSwitch(workspaceId: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_switch", { workspaceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceGetOpen() : Promise<Result<WorkspaceEntryDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_get_open") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async pinWorkspace(id: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("pin_workspace", { id }) };
@@ -1717,6 +1765,12 @@ export type RedactPatternInput = { pattern: string; replacement: string }
 export type RefineConfigDto = { triggerFailures: number; minEditStrategy: RefineStrategyDto; evidenceThreshold: number; rollbackEnabled: boolean }
 export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_spec"
 /**
+ * Result of removing a work directory: whether the workspace auto-closed
+ * because its last directory was removed (empty state; registry row,
+ * sessions and on-disk files stay untouched).
+ */
+export type RemoveDirectoryResultDto = { workspaceClosed: boolean }
+/**
  * Result of removing a workspace: the removed id plus the new active id
  * (None when the registry is now empty).
  */
@@ -1840,8 +1894,18 @@ export type TodoItemDto = { id: string; description: string; completed: boolean 
 export type UnreadIndicatorDto = { workspaceId: string; count: number }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
 /**
+ * A work directory of a workspace (two-level model, ADR-0021).
+ */
+export type WorkDirectoryDto = { id: string; absPath: string; displayName: string; mounted: boolean; addedAt: number; 
+/**
+ * The path currently exists and is a directory; `false` marks a stale
+ * directory (row kept, UI renders it disabled).
+ */
+available: boolean }
+/**
  * A registered workspace entry as seen by the frontend. `directory_present`
- * is a runtime probe (the root dir may have been deleted out-of-band).
+ * means the workspace has at least one work directory that exists on disk
+ * (two-level model; the legacy root-dir probe folded into it).
  */
 export type WorkspaceEntryDto = { id: string; rootPath: string; colorTag: string; createdAt: number; isActive: boolean; directoryPresent: boolean; 
 /**
@@ -1863,7 +1927,20 @@ openedAt?: number | null;
 /**
  * When the workspace was last focused (unix-ms), if open.
  */
-lastFocusedAt?: number | null }
+lastFocusedAt?: number | null; 
+/**
+ * Truncated workspace label: up to 4 directory display names joined
+ * with `-` plus `...` when truncated (ADR-0021, derived — never stored).
+ */
+label?: string | null; 
+/**
+ * Full workspace label (tooltip variant of `label`).
+ */
+labelFull?: string | null; 
+/**
+ * The workspace's work directories with availability flags.
+ */
+directories?: WorkDirectoryDto[] | null }
 /**
  * Workspace contract: the active sandbox root plus whether the workspace has
  * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env

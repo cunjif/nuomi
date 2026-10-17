@@ -584,3 +584,141 @@ async fn view_scope_rejects_invalid_surface() {
         .expect_err("invalid surface must be rejected");
     assert_eq!(ipc_code(&err_set), "view_scope.invalid_surface");
 }
+
+// ---------- two-level workspace commands (ADR-0021, task 6.5) ----------
+
+#[tokio::test]
+async fn workspace_v2_directory_lifecycle() {
+    let (state, dir) = boot(vec![]).await;
+
+    // Fresh boot: empty registry → get_open is null.
+    assert!(commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Missing path is rejected with the spec'd error code.
+    let missing = dir.path().join("nope");
+    let err = commands::impl_workspace_add_directory(&state, missing.to_string_lossy().to_string())
+        .await
+        .expect_err("missing directory must be rejected");
+    assert_eq!(ipc_code(&err), "workspace.directory_missing");
+
+    // Empty state + unowned path → fresh workspace with one directory, open.
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    let ws1 = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    assert!(ws1.is_open.unwrap());
+    assert!(ws1.is_focused.unwrap());
+    assert_eq!(ws1.label.as_deref(), Some("alpha"));
+    assert_eq!(ws1.label_full.as_deref(), Some("alpha"));
+    let dirs = ws1.directories.as_ref().unwrap();
+    assert_eq!(dirs.len(), 1);
+    assert_eq!(dirs[0].display_name, "alpha");
+    assert!(dirs[0].available);
+    assert!(dirs[0].mounted);
+    // In-memory sandbox root synced to the first available directory.
+    assert!(state.current_workspace().ends_with("alpha"));
+
+    // get_open returns the open workspace.
+    let open = commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(open.id, ws1.id);
+
+    // Open workspace → the second directory joins it (label updates).
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(&beta).unwrap();
+    let ws1b = commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    assert_eq!(ws1b.id, ws1.id);
+    assert_eq!(ws1b.label.as_deref(), Some("alpha-beta"));
+    assert_eq!(ws1b.directories.as_ref().unwrap().len(), 2);
+    // Root stays on the first directory (added_at order).
+    assert!(state.current_workspace().ends_with("alpha"));
+
+    // Unmount/mount roundtrip reflects in get_open.
+    let beta_id = ws1b.directories.as_ref().unwrap()[1].id.clone();
+    commands::impl_workspace_unmount_directory(&state, ws1.id.clone(), beta_id.clone())
+        .await
+        .unwrap();
+    let open = commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!open.directories.as_ref().unwrap()[1].mounted);
+    commands::impl_workspace_mount_directory(&state, ws1.id.clone(), beta_id.clone())
+        .await
+        .unwrap();
+    let open = commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(open.directories.as_ref().unwrap()[1].mounted);
+
+    // list_workspaces carries the derived label + directories (B6).
+    let listed = commands::impl_list_workspaces(&state).await.unwrap();
+    let entry = listed.iter().find(|w| w.id == ws1.id).unwrap();
+    assert_eq!(entry.label.as_deref(), Some("alpha-beta"));
+    assert_eq!(entry.label_full.as_deref(), Some("alpha-beta"));
+    assert_eq!(entry.directories.as_ref().unwrap().len(), 2);
+    assert!(entry.is_open.unwrap());
+
+    // Close (retirement shim) → empty state; a third path opens a second
+    // workspace.
+    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+        .await
+        .unwrap();
+    assert!(commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .is_none());
+    let gamma = dir.path().join("gamma");
+    std::fs::create_dir_all(&gamma).unwrap();
+    let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    assert_ne!(ws2.id, ws1.id);
+    assert_eq!(ws2.label.as_deref(), Some("gamma"));
+    assert!(state.current_workspace().ends_with("gamma"));
+
+    // Switch back: label preserved, root re-synced to the first directory.
+    let switched = commands::impl_workspace_switch(&state, ws1.id.clone())
+        .await
+        .unwrap();
+    assert_eq!(switched.id, ws1.id);
+    assert_eq!(switched.label.as_deref(), Some("alpha-beta"));
+    assert!(state.current_workspace().ends_with("alpha"));
+
+    // Removing a non-last directory keeps the workspace open (label shrinks).
+    let alpha_id = switched.directories.as_ref().unwrap()[0].id.clone();
+    let r1 = commands::impl_workspace_remove_directory(&state, ws1.id.clone(), alpha_id)
+        .await
+        .unwrap();
+    assert!(!r1.workspace_closed);
+    let open = commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(open.label.as_deref(), Some("beta"));
+
+    // Removing the last directory auto-closes the workspace.
+    let r2 = commands::impl_workspace_remove_directory(&state, ws1.id.clone(), beta_id)
+        .await
+        .unwrap();
+    assert!(r2.workspace_closed);
+    assert!(commands::impl_workspace_get_open(&state)
+        .await
+        .unwrap()
+        .is_none());
+
+    // An emptied workspace cannot be opened or switched to.
+    let err = commands::impl_workspace_switch(&state, ws1.id.clone())
+        .await
+        .expect_err("workspace without directories must be rejected");
+    assert_eq!(ipc_code(&err), "workspace.no_directories");
+}

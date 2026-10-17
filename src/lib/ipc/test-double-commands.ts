@@ -48,6 +48,7 @@ import type {
   PluginListResultDto,
   ProviderInput,
   RecentWorkspaceDto,
+  RemoveDirectoryResultDto,
   RemoveWorkspaceResult,
   Result,
   RoleDto,
@@ -66,6 +67,7 @@ import type {
   TeamDto,
   TeamInput,
   TeamPlanDto,
+  WorkDirectoryDto,
   WorkspaceEntryDto,
 } from "./bindings.gen";
 import type { commands as Commands } from "./bindings.gen";
@@ -409,6 +411,99 @@ export function testDoubleCommands(): CommandSet {
         pinnedWorkspaceIds: [],
         unreadIndicators: [],
       } as OpenSetDto);
+    },
+    async workspaceAddDirectory(path: string) {
+      // Mirror v2 single-open semantics: open workspace → join it, empty
+      // state → fresh workspace containing only this directory.
+      const displayName = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+      const existing = tdState.workspaces ?? [];
+      const open = existing.find((w) => w.isActive);
+      if (open) {
+        const dir: WorkDirectoryDto = {
+          id: nextId("dir"),
+          absPath: path,
+          displayName,
+          mounted: true,
+          addedAt: Date.now(),
+          available: true,
+        };
+        open.directories = [...(open.directories ?? []), dir];
+        const names = open.directories.map((d) => d.displayName).join("-");
+        open.label = names || null;
+        open.labelFull = names || null;
+        open.directoryPresent = open.directories.some((d) => d.available);
+        return ok(open);
+      }
+      const entry: WorkspaceEntryDto = {
+        id: nextId("ws"),
+        rootPath: path,
+        colorTag: "paper-yellow",
+        createdAt: Date.now(),
+        isActive: true,
+        directoryPresent: true,
+        isOpen: true,
+        isFocused: true,
+        label: displayName,
+        labelFull: displayName,
+        directories: [
+          {
+            id: nextId("dir"),
+            absPath: path,
+            displayName,
+            mounted: true,
+            addedAt: Date.now(),
+            available: true,
+          },
+        ],
+      };
+      tdState.workspaces = [...existing.map((w) => ({ ...w, isActive: false })), entry];
+      return ok(entry);
+    },
+    async workspaceRemoveDirectory(workspaceId: string, directoryId: string) {
+      const existing = tdState.workspaces ?? [];
+      const target = existing.find((w) => w.id === workspaceId);
+      if (!target) return err("workspace.not_found", `workspace #${workspaceId} not found`);
+      const remaining = (target.directories ?? []).filter((d) => d.id !== directoryId);
+      target.directories = remaining;
+      const names = remaining.map((d) => d.displayName).join("-");
+      target.label = names || null;
+      target.labelFull = names || null;
+      target.directoryPresent = remaining.some((d) => d.available);
+      const workspaceClosed = remaining.length === 0;
+      if (workspaceClosed) target.isActive = false;
+      const result: RemoveDirectoryResultDto = { workspaceClosed };
+      return ok(result);
+    },
+    async workspaceMountDirectory(workspaceId: string, directoryId: string) {
+      const dir = (tdState.workspaces ?? [])
+        .find((w) => w.id === workspaceId)
+        ?.directories?.find((d) => d.id === directoryId);
+      if (!dir) return err("workspace.directory_not_found", `directory #${directoryId} not found`);
+      dir.mounted = true;
+      return ok(null);
+    },
+    async workspaceUnmountDirectory(workspaceId: string, directoryId: string) {
+      const dir = (tdState.workspaces ?? [])
+        .find((w) => w.id === workspaceId)
+        ?.directories?.find((d) => d.id === directoryId);
+      if (!dir) return err("workspace.directory_not_found", `directory #${directoryId} not found`);
+      dir.mounted = false;
+      return ok(null);
+    },
+    async workspaceSwitch(id: string) {
+      const existing = tdState.workspaces ?? [];
+      const target = existing.find((w) => w.id === id);
+      if (!target) return err("workspace.not_found", `workspace #${id} not found`);
+      for (const w of existing) {
+        w.isActive = w.id === id;
+        w.isFocused = w.id === id;
+        w.isOpen = w.id === id ? true : w.isOpen;
+      }
+      return ok(target);
+    },
+    async workspaceGetOpen() {
+      const open = (tdState.workspaces ?? []).find((w) => w.isActive);
+      return ok(open ?? null);
     },
     async pinWorkspace(_id: string) {
       return ok(null);

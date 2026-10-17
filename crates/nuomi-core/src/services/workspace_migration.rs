@@ -102,6 +102,15 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
                     is_pinned: false,
                 };
                 repo::insert(conn, &entry)?;
+                // Two-level model invariant (ADR-0021): a fresh entry is
+                // materialized by its root path as the first work directory
+                // (0036's SQL backfill only covered rows existing at
+                // migration time; this entry is created after the runner).
+                if let Some(display) = workspace_label::derive_display_name(&root_path, &[]) {
+                    crate::store::repos::work_directories::add(
+                        conn, &entry.id, &root_path, &display,
+                    )?;
+                }
                 if entry.is_active {
                     repo::set_active(conn, &entry.id)?;
                 }

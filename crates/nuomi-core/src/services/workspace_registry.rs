@@ -123,6 +123,13 @@ impl WorkspaceRegistry {
             is_pinned: false,
         };
         repo::insert(&conn, &entry)?;
+        // Two-level model invariant (ADR-0021): every workspace is
+        // materialized by its directories — register the root path as the
+        // first work directory so v2 open/switch accepts v1-created
+        // workspaces too.
+        let display = super::workspace_label::derive_display_name(&entry.root_path, &[])
+            .ok_or_else(|| RegistryError::InvalidPath(entry.root_path.clone()))?;
+        crate::store::repos::work_directories::add(&conn, &entry.id, &entry.root_path, &display)?;
         if was_empty {
             repo::set_active(&conn, &entry.id)?;
             entry.is_active = true;

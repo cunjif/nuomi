@@ -6179,7 +6179,8 @@ pub struct WorkspaceInfo {
 }
 
 /// A registered workspace entry as seen by the frontend. `directory_present`
-/// is a runtime probe (the root dir may have been deleted out-of-band).
+/// means the workspace has at least one work directory that exists on disk
+/// (two-level model; the legacy root-dir probe folded into it).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceEntryDto {
@@ -6204,6 +6205,39 @@ pub struct WorkspaceEntryDto {
     /// When the workspace was last focused (unix-ms), if open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_focused_at: Option<i64>,
+    /// Truncated workspace label: up to 4 directory display names joined
+    /// with `-` plus `...` when truncated (ADR-0021, derived — never stored).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Full workspace label (tooltip variant of `label`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_full: Option<String>,
+    /// The workspace's work directories with availability flags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<WorkDirectoryDto>>,
+}
+
+/// A work directory of a workspace (two-level model, ADR-0021).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDirectoryDto {
+    pub id: String,
+    pub abs_path: String,
+    pub display_name: String,
+    pub mounted: bool,
+    pub added_at: i64,
+    /// The path currently exists and is a directory; `false` marks a stale
+    /// directory (row kept, UI renders it disabled).
+    pub available: bool,
+}
+
+/// Result of removing a work directory: whether the workspace auto-closed
+/// because its last directory was removed (empty state; registry row,
+/// sessions and on-disk files stay untouched).
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveDirectoryResultDto {
+    pub workspace_closed: bool,
 }
 
 /// A single open workspace in the open set.
@@ -6376,29 +6410,98 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                 .into_iter()
                 .map(|r| (r.workspace_id.clone(), r))
                 .collect();
-            Ok(list
-                .into_iter()
+            list.into_iter()
                 .map(|wp| {
                     let os = open_state.get(&wp.entry.id);
-                    WorkspaceEntryDto {
-                        id: wp.entry.id.clone(),
+                    let dirs = repos::work_directories::list_by_workspace_with_availability(
+                        &db.0,
+                        &wp.entry.id,
+                    )?;
+                    let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
+                    let label = nuomi_core::services::derive_label(&dir_entries);
+                    Ok(WorkspaceEntryDto {
+                        id: wp.entry.id,
                         root_path: wp.entry.root_path,
                         color_tag: wp.entry.color_tag,
                         created_at: wp.entry.created_at,
                         is_active: wp.entry.is_active,
-                        directory_present: wp.directory_present,
+                        directory_present: dirs.iter().any(|d| d.available),
                         is_pinned: Some(wp.entry.is_pinned),
                         is_open: Some(os.is_some()),
                         is_focused: Some(os.map(|r| r.is_focused).unwrap_or(false)),
                         opened_at: os.map(|r| r.opened_at),
                         last_focused_at: os.map(|r| r.last_focused_at),
-                    }
+                        label: optional_label(&label.label),
+                        label_full: optional_label(&label.label_full),
+                        directories: Some(work_directory_dtos(&dirs)),
+                    })
                 })
-                .collect())
+                .collect()
         })
         .await
         .map_err(join_err)??;
     Ok(entries)
+}
+
+/// Maps an empty derivation to `None` (no usable label — the UI falls back).
+fn optional_label(label: &str) -> Option<String> {
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
+    }
+}
+
+fn work_directory_dtos(
+    dirs: &[repos::work_directories::WorkDirectoryStatus],
+) -> Vec<WorkDirectoryDto> {
+    dirs.iter()
+        .map(|d| WorkDirectoryDto {
+            id: d.directory.id.clone(),
+            abs_path: d.directory.abs_path.clone(),
+            display_name: d.directory.display_name.clone(),
+            mounted: d.directory.mounted,
+            added_at: d.directory.added_at,
+            available: d.available,
+        })
+        .collect()
+}
+
+/// Maps a v2 `WorkspaceView` (the open workspace) to the wire DTO with its
+/// derived label and directories.
+fn workspace_view_to_dto(view: &nuomi_core::services::WorkspaceView) -> WorkspaceEntryDto {
+    let dir_entries: Vec<_> = view
+        .directories
+        .iter()
+        .map(|d| d.directory.clone())
+        .collect();
+    let label = nuomi_core::services::derive_label(&dir_entries);
+    WorkspaceEntryDto {
+        id: view.entry.id.clone(),
+        root_path: view.entry.root_path.clone(),
+        color_tag: view.entry.color_tag.clone(),
+        created_at: view.entry.created_at,
+        is_active: view.entry.is_active,
+        directory_present: view.directories.iter().any(|d| d.available),
+        is_pinned: Some(view.entry.is_pinned),
+        is_open: Some(true),
+        is_focused: Some(true),
+        opened_at: None,
+        last_focused_at: None,
+        label: optional_label(&label.label),
+        label_full: optional_label(&label.label_full),
+        directories: Some(work_directory_dtos(&view.directories)),
+    }
+}
+
+/// Best-effort sync of the in-memory sandbox root to the workspace's first
+/// available directory (added_at order). Interim single-root semantics under
+/// the two-level model — per-directory sandbox authorization lands with the
+/// sandbox task group (ADR-0022).
+fn sync_root_to_view(state: &AppState, view: &nuomi_core::services::WorkspaceView) {
+    if let Some(dir) = view.directories.iter().find(|d| d.available) {
+        let _ = state.switch_workspace(PathBuf::from(&dir.directory.abs_path));
+    }
 }
 
 pub async fn impl_add_workspace(
@@ -6434,6 +6537,9 @@ pub async fn impl_add_workspace(
         } else {
             None
         },
+        label: None,
+        label_full: None,
+        directories: None,
     })
 }
 
@@ -6502,6 +6608,9 @@ pub async fn impl_activate_workspace(
         is_focused: Some(true),
         opened_at: Some(nuomi_core::domain::now_ms()),
         last_focused_at: Some(nuomi_core::domain::now_ms()),
+        label: None,
+        label_full: None,
+        directories: None,
     })
 }
 
@@ -6526,69 +6635,61 @@ pub async fn impl_get_active_workspace(
             is_focused: Some(entry.is_active),
             opened_at: None,
             last_focused_at: None,
+            label: None,
+            label_full: None,
+            directories: None,
         }
     }))
 }
 
 // ---- Multi-workspace open-set commands ----
+// open/close/focus/close_all are ADR-0021 retirement shims (one version
+// cycle): they delegate to the v2 single-open registry while keeping their
+// wire contracts for the not-yet-migrated frontend. get_open_set keeps its
+// raw-table read — the open-state table is shared and v2 maintains it.
 
 pub async fn impl_open_workspace(
     state: &AppState,
     id: String,
 ) -> Result<OpenWorkspaceResult, IpcError> {
+    // Shim: the old multi-open "open" maps to the single-open switch — the
+    // sanctioned transition between open workspaces (design B4).
     let db_path = state.db_path.clone();
-    let id_for_open = id.clone();
-    tokio::task::spawn_blocking(move || -> Result<OpenWorkspaceResult, IpcError> {
-        let svc =
-            nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-        svc.open(&id_for_open).map_err(map_open_set_error)?;
-        Ok(OpenWorkspaceResult {
-            workspace_id: id_for_open,
-        })
-    })
+    let id_for_switch = id.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.switch(&id_for_switch)?)
+        },
+    )
     .await
     .map_err(join_err)??;
-    // Sync in-memory root to the opened workspace.
-    let reg = state.workspace_registry.clone();
-    let id_clone = id.clone();
-    let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&id_clone))
-        .await
-        .map_err(join_err)??;
-    if let Some(e) = entry {
-        let _ = state.switch_workspace(PathBuf::from(&e.root_path));
-    }
+    sync_root_to_view(state, &view);
     Ok(OpenWorkspaceResult { workspace_id: id })
 }
 
 pub async fn impl_close_workspace(
     state: &AppState,
     id: String,
-    force: bool,
+    _force: bool,
 ) -> Result<CloseWorkspaceResult, IpcError> {
+    // `_force` is contract compat only: v2 close has no dirty-check gate —
+    // closing never touches sessions, runs or directories.
     let db_path = state.db_path.clone();
-    let result = tokio::task::spawn_blocking(
-        move || -> Result<nuomi_core::services::workspace_open_set::CloseOutcome, IpcError> {
-            let svc =
-                nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-            svc.close(&id, force).map_err(map_open_set_error)
-        },
-    )
+    let id_for_close = id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+        svc.close(&id_for_close)?;
+        Ok(())
+    })
     .await
     .map_err(join_err)??;
-    // Sync in-memory root if focus transferred.
-    if let Some(ref new_focused) = result.new_focused_id {
-        let reg = state.workspace_registry.clone();
-        let nid = new_focused.clone();
-        let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&nid))
-            .await
-            .map_err(join_err)??;
-        if let Some(e) = entry {
-            let _ = state.switch_workspace(PathBuf::from(&e.root_path));
-        }
-    }
+    // Single-open: closing the only open workspace leaves the empty state —
+    // focus never transfers.
     Ok(CloseWorkspaceResult {
-        closed_id: result.closed_id,
-        new_focused_id: result.new_focused_id,
+        closed_id: id,
+        new_focused_id: None,
     })
 }
 
@@ -6596,24 +6697,20 @@ pub async fn impl_focus_workspace(
     state: &AppState,
     id: String,
 ) -> Result<FocusWorkspaceResult, IpcError> {
+    // Shim: under single-open, focusing IS switching (idempotent refocus on
+    // the open workspace; opens a closed one via the sanctioned transition).
     let db_path = state.db_path.clone();
-    let id_for_focus = id.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let svc =
-            nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-        svc.focus(&id_for_focus).map_err(map_open_set_error)
-    })
+    let id_for_switch = id.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.switch(&id_for_switch)?)
+        },
+    )
     .await
     .map_err(join_err)??;
-    // Sync in-memory root to the focused workspace.
-    let reg = state.workspace_registry.clone();
-    let id_clone = id.clone();
-    let entry = tokio::task::spawn_blocking(move || reg.find_by_id(&id_clone))
-        .await
-        .map_err(join_err)??;
-    if let Some(e) = entry {
-        let _ = state.switch_workspace(PathBuf::from(&e.root_path));
-    }
+    sync_root_to_view(state, &view);
     Ok(FocusWorkspaceResult { workspace_id: id })
 }
 
@@ -6622,22 +6719,129 @@ pub async fn impl_close_all_workspaces(
     exclude_pinned: bool,
 ) -> Result<Vec<CloseWorkspaceResult>, IpcError> {
     let db_path = state.db_path.clone();
-    let outcomes = tokio::task::spawn_blocking(
-        move || -> Result<Vec<nuomi_core::services::workspace_open_set::CloseOutcome>, IpcError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<CloseWorkspaceResult>, IpcError> {
+        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+        let mut outcomes = Vec::new();
+        if let Some(view) = svc.get_open()? {
+            // Single-open: at most one workspace to close; `exclude_pinned`
+            // keeps a pinned one open (legacy behavior).
+            if !(exclude_pinned && view.entry.is_pinned) {
+                let closed_id = view.entry.id;
+                svc.close(&closed_id)?;
+                outcomes.push(CloseWorkspaceResult {
+                    closed_id,
+                    new_focused_id: None,
+                });
+            }
+        }
+        Ok(outcomes)
+    })
+    .await
+    .map_err(join_err)?
+}
+
+// ---- Two-level workspace commands (ADR-0021) ----
+
+pub async fn impl_workspace_add_directory(
+    state: &AppState,
+    path: String,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
             let svc =
-                nuomi_core::services::WorkspaceOpenSetService::new(PathBuf::from(db_path.as_ref()));
-            svc.close_all(exclude_pinned).map_err(map_open_set_error)
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.add_directory(std::path::Path::new(&path))?)
         },
     )
     .await
     .map_err(join_err)??;
-    Ok(outcomes
-        .into_iter()
-        .map(|o| CloseWorkspaceResult {
-            closed_id: o.closed_id,
-            new_focused_id: o.new_focused_id,
-        })
-        .collect())
+    sync_root_to_view(state, &view);
+    Ok(workspace_view_to_dto(&view))
+}
+
+pub async fn impl_workspace_remove_directory(
+    state: &AppState,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<RemoveDirectoryResultDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let result = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::RemoveDirectoryResult, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.remove_directory(&workspace_id, &directory_id)?)
+        },
+    )
+    .await
+    .map_err(join_err)??;
+    Ok(RemoveDirectoryResultDto {
+        workspace_closed: result.workspace_closed,
+    })
+}
+
+pub async fn impl_workspace_mount_directory(
+    state: &AppState,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<(), IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+        svc.mount_directory(&workspace_id, &directory_id)?;
+        Ok(())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_workspace_unmount_directory(
+    state: &AppState,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<(), IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+        svc.unmount_directory(&workspace_id, &directory_id)?;
+        Ok(())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_workspace_switch(
+    state: &AppState,
+    workspace_id: String,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.switch(&workspace_id)?)
+        },
+    )
+    .await
+    .map_err(join_err)??;
+    sync_root_to_view(state, &view);
+    Ok(workspace_view_to_dto(&view))
+}
+
+pub async fn impl_workspace_get_open(
+    state: &AppState,
+) -> Result<Option<WorkspaceEntryDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<Option<nuomi_core::services::WorkspaceView>, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc.get_open()?)
+        },
+    )
+    .await
+    .map_err(join_err)??;
+    Ok(view.as_ref().map(workspace_view_to_dto))
 }
 
 pub async fn impl_get_open_set(state: &AppState) -> Result<OpenSetDto, IpcError> {
@@ -6859,47 +7063,6 @@ pub async fn impl_cross_workspace_compare(
     })
     .await
     .map_err(join_err)?
-}
-
-/// Maps `OpenSetError` to `IpcError`.
-fn map_open_set_error(e: nuomi_core::services::OpenSetError) -> IpcError {
-    use nuomi_core::services::OpenSetError as E;
-    match e {
-        E::NotFound(id) => {
-            IpcError::new("workspace.not_found", format!("workspace not found: {id}"))
-        }
-        E::AlreadyOpen(id) => IpcError::new(
-            "workspace.already_open",
-            format!("workspace already open: {id}"),
-        ),
-        E::OpenSetFull(n) => IpcError::new(
-            "workspace.open_set_full",
-            format!("open set full (max {n})"),
-        ),
-        E::DirectoryMissing(p) => IpcError::new(
-            "workspace.directory_missing",
-            format!("directory missing: {p}"),
-        ),
-        E::ProbeTimeout(ms) => IpcError::new(
-            "workspace.probe_timeout",
-            format!("directory probe timed out: {ms}ms"),
-        ),
-        E::Store(e) => IpcError::from(e),
-        E::NeedConfirm {
-            workspace_id,
-            reason,
-            dirty_files,
-            running_tasks,
-        } => IpcError::with_details(
-            "workspace.need_confirm",
-            format!("close needs confirmation for workspace {workspace_id}: {reason}"),
-            serde_json::json!({
-                "workspaceId": workspace_id,
-                "dirtyFiles": dirty_files,
-                "runningTasks": running_tasks,
-            }),
-        ),
-    }
 }
 
 pub async fn impl_list_orphan_sessions(

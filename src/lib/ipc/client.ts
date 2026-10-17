@@ -326,6 +326,15 @@ export const ipc = {
   closeAllWorkspaces: (excludePinned: boolean) =>
     unwrap(current.closeAllWorkspaces(excludePinned)),
   getOpenSet: () => unwrap(current.getOpenSet()),
+  workspaceAddDirectory: (path: string) => unwrap(current.workspaceAddDirectory(path)),
+  workspaceRemoveDirectory: (workspaceId: string, directoryId: string) =>
+    unwrap(current.workspaceRemoveDirectory(workspaceId, directoryId)),
+  workspaceMountDirectory: (workspaceId: string, directoryId: string) =>
+    unwrap(current.workspaceMountDirectory(workspaceId, directoryId)),
+  workspaceUnmountDirectory: (workspaceId: string, directoryId: string) =>
+    unwrap(current.workspaceUnmountDirectory(workspaceId, directoryId)),
+  workspaceSwitch: (workspaceId: string) => unwrap(current.workspaceSwitch(workspaceId)),
+  workspaceGetOpen: () => unwrap(current.workspaceGetOpen()),
   pinWorkspace: (id: string) => unwrap(current.pinWorkspace(id)),
   unpinWorkspace: (id: string) => unwrap(current.unpinWorkspace(id)),
   getLayoutSnapshot: () => unwrap(current.getLayoutSnapshot()),

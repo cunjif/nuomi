@@ -659,6 +659,64 @@ pub async fn get_open_set(
     commands::impl_get_open_set(&state).await
 }
 
+// ---- Two-level workspace commands (ADR-0021) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_add_directory(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_workspace_add_directory(&state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_remove_directory(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<commands::RemoveDirectoryResultDto, IpcError> {
+    commands::impl_workspace_remove_directory(&state, workspace_id, directory_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_mount_directory(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_workspace_mount_directory(&state, workspace_id, directory_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_unmount_directory(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_workspace_unmount_directory(&state, workspace_id, directory_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_switch(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_workspace_switch(&state, workspace_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_get_open(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<commands::WorkspaceEntryDto>, IpcError> {
+    commands::impl_workspace_get_open(&state).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn pin_workspace(state: tauri::State<'_, AppState>, id: String) -> Result<(), IpcError> {
