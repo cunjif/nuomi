@@ -265,6 +265,22 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0033_event_rollbacks.sql"
         )),
     ),
+    (
+        34,
+        "0034_steward_settings_schema",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0034_steward_settings_schema.sql"
+        )),
+    ),
+    (
+        35,
+        "0035_steward_main_role_seed",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0035_steward_main_role_seed.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -700,19 +716,19 @@ mod tests {
     #[test]
     fn migrations_steward_tables_idempotent_on_empty_db() {
         let conn = Connection::open_in_memory().unwrap();
-        // First run: applies all migrations 0001-0033
+        // First run: applies all migrations 0001-0035
         run(&conn).unwrap();
         let v1: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v1, 33);
+        assert_eq!(v1, 35);
 
-        // Second run: no-op (user_version already 33)
+        // Second run: no-op (user_version already 35)
         run(&conn).unwrap();
         let v2: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v2, 33);
+        assert_eq!(v2, 35);
 
         // Steward tables exist and are empty (except roles331 seeds 5 builtin roles)
         let steward_sessions: i64 = conn
@@ -726,7 +742,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(builtin_roles, 5);
+        assert_eq!(builtin_roles, 6);
     }
 
     #[test]

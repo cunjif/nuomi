@@ -248,7 +248,10 @@ mod tests {
         insert(&conn, &entry("a", "x", &["work"], false, 1)).unwrap();
         insert(&conn, &entry("b", "name is james", &["me"], true, 2)).unwrap();
         insert(&conn, &entry("c", "y", &["work"], false, 3)).unwrap();
-        assert_eq!(search(&conn, None, Some("work"), None, 10).unwrap().len(), 2);
+        assert_eq!(
+            search(&conn, None, Some("work"), None, 10).unwrap().len(),
+            2
+        );
         let profile = list_user_profile(&conn).unwrap();
         assert_eq!(profile.len(), 1);
         assert_eq!(profile[0].id, "b");

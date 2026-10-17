@@ -23,7 +23,14 @@ pub fn insert(
         "INSERT INTO event_rollbacks
             (aggregate_type, aggregate_id, from_seq, to_seq, rolled_back_at, reason)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![aggregate_type, aggregate_id, from_seq, to_seq, rolled_back_at, reason],
+        params![
+            aggregate_type,
+            aggregate_id,
+            from_seq,
+            to_seq,
+            rolled_back_at,
+            reason
+        ],
     )?;
     Ok(EventRollback {
         id: conn.last_insert_rowid(),
@@ -48,10 +55,7 @@ pub fn list(
          WHERE aggregate_type = ?1 AND aggregate_id = ?2
          ORDER BY rolled_back_at ASC",
     )?;
-    let rows = stmt.query_map(
-        params![aggregate_type, aggregate_id],
-        row_to_rollback,
-    )?;
+    let rows = stmt.query_map(params![aggregate_type, aggregate_id], row_to_rollback)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -125,8 +129,15 @@ mod tests {
     fn list_by_aggregate_filters_rolled_back_events() {
         let conn = db();
         for i in 1..=5 {
-            events::append(&conn, "session", "s1", "message", &serde_json::json!({ "i": i }), i)
-                .unwrap();
+            events::append(
+                &conn,
+                "session",
+                "s1",
+                "message",
+                &serde_json::json!({ "i": i }),
+                i,
+            )
+            .unwrap();
         }
         // Before rollback: all 5 events visible
         let before = events::list_by_aggregate(&conn, "session", "s1", None).unwrap();
@@ -146,8 +157,15 @@ mod tests {
     fn no_rollback_records_means_no_filtering() {
         let conn = db();
         for i in 1..=3 {
-            events::append(&conn, "session", "s1", "message", &serde_json::json!({ "i": i }), i)
-                .unwrap();
+            events::append(
+                &conn,
+                "session",
+                "s1",
+                "message",
+                &serde_json::json!({ "i": i }),
+                i,
+            )
+            .unwrap();
         }
         let all = events::list_by_aggregate(&conn, "session", "s1", None).unwrap();
         assert_eq!(all.len(), 3);

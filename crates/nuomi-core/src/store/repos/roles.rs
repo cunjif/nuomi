@@ -256,7 +256,7 @@ mod tests {
             .map(|r| r.id)
             .collect();
         assert_eq!(ids, vec!["early", "mid", "late"]);
-        assert_eq!(count(&conn).unwrap(), 3 + 5);
+        assert_eq!(count(&conn).unwrap(), 3 + 6);
     }
 
     #[test]
@@ -305,7 +305,7 @@ mod tests {
         insert(&conn, &role("r1", "one")).unwrap();
         assert!(delete(&conn, "r1").unwrap());
         assert!(!delete(&conn, "r1").unwrap());
-        assert_eq!(count(&conn).unwrap(), 5);
+        assert_eq!(count(&conn).unwrap(), 6);
     }
 
     #[test]

@@ -335,10 +335,14 @@ pub fn cache_scope(conn: &Connection, id: &str) -> Result<Option<String>, StoreE
 
 /// Lists sessions for `workspace_id`, most recently updated first.
 /// Cross-workspace isolation: only sessions belonging to this workspace are returned.
+/// Steward sessions are physically excluded (their authoritative marker is a row in
+/// `steward_sessions`; genuinely background sessions are unaffected).
 pub fn list(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
-         FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?2",
+         FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM steward_sessions WHERE id = sessions.id)
+         ORDER BY updated_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_session)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -355,10 +359,13 @@ pub fn list_by_workspace(
 
 /// Lists sessions across ALL workspaces, most recently updated first.
 /// Used by the conversation list when the workspace filter is "all".
+/// Steward sessions are physically excluded (see [`list`]).
 pub fn list_all(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
-         FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?1",
+         FROM sessions WHERE deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM steward_sessions WHERE id = sessions.id)
+         ORDER BY updated_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_session)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -638,5 +645,51 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn list_excludes_steward_sessions_but_keeps_background_kind() {
+        let conn = db();
+        // Three sessions in the same workspace: a regular IM chat, a genuine
+        // background session (kind='background', no steward_sessions row), and a
+        // steward session (sessions row + authoritative steward_sessions marker).
+        insert(&conn, &session("im-chat")).unwrap();
+        set_workspace_id(&conn, "im-chat", "ws-a").unwrap();
+        insert(&conn, &session("bg-real")).unwrap();
+        set_workspace_id(&conn, "bg-real", "ws-a").unwrap();
+        update_kind(&conn, "bg-real", ConversationKind::Background).unwrap();
+        insert(&conn, &session("steward-sess")).unwrap();
+        set_workspace_id(&conn, "steward-sess", "ws-a").unwrap();
+        update_kind(&conn, "steward-sess", ConversationKind::Background).unwrap();
+        conn.execute(
+            "INSERT INTO steward_sessions (id, steward_id, title, created_at, updated_at)
+             VALUES ('steward-sess', 'steward-main', '', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let ids = |sessions: &[Session]| -> Vec<String> {
+            sessions.iter().map(|s| s.id.clone()).collect::<Vec<_>>()
+        };
+
+        // list excludes the steward session, keeps the genuine background one.
+        let listed = list(&conn, "ws-a", 10).unwrap();
+        assert!(!ids(&listed).contains(&"steward-sess".to_string()));
+        assert!(ids(&listed).contains(&"im-chat".to_string()));
+        assert!(ids(&listed).contains(&"bg-real".to_string()));
+        assert_eq!(listed.len(), 2);
+
+        // list_by_workspace shares the same exclusion (semantic alias).
+        let by_ws = list_by_workspace(&conn, "ws-a", 10).unwrap();
+        assert!(!ids(&by_ws).contains(&"steward-sess".to_string()));
+        assert_eq!(by_ws.len(), 2);
+
+        // list_all (cross-workspace "all" filter) also excludes the steward session.
+        insert(&conn, &session("other-ws")).unwrap();
+        set_workspace_id(&conn, "other-ws", "ws-b").unwrap();
+        let all = list_all(&conn, 10).unwrap();
+        assert!(!ids(&all).contains(&"steward-sess".to_string()));
+        assert!(ids(&all).contains(&"other-ws".to_string()));
+        assert_eq!(all.len(), 3);
     }
 }
