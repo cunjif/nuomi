@@ -16,18 +16,31 @@
 //! - `gate`: evolution gate + artifact merger (K-Steward-7)
 //! - `artifact`: artifact repository + diff (K-Steward-7)
 //! - `events`: steward.* event types + logger (K-Steward-8)
+//! - `tools`: LLM-callable tool registry for the steward agent loop
+//! - `llm_loop`: LLM-driven agent loop (conversation + tool orchestration + suspend protocol)
+//! - `attachments`: steward-scoped attachment intake (whitelist + cap + content-addressed storage)
+//! - `context_builder`: attachment context assembly (text/pdf/office/images, design §2.1.3.2)
+//! - `context_usage`: read-only usage aggregation for the indicator/popup
+//! - `prompt_optimizer`: one-shot draft rewrite on the bound provider
 
 pub mod artifact;
+pub mod attachments;
 pub mod cleanse;
 pub mod config_change;
+pub mod context_builder;
+pub mod context_usage;
 pub mod cycle;
 pub mod dev_team;
 pub mod events;
 pub mod gate;
 pub mod intent;
 pub mod kernel;
+pub mod llm_loop;
+pub mod prompt_optimizer;
+pub mod settings;
 pub mod snapshot;
 pub mod task;
+pub mod tools;
 
 use thiserror::Error;
 
@@ -36,6 +49,9 @@ use thiserror::Error;
 pub enum StewardError {
     #[error("not found: {entity}#{id}")]
     NotFound { entity: &'static str, id: String },
+
+    #[error("attachment {name} unusable: {reason}")]
+    AttachmentInvalid { name: String, reason: String },
 
     #[error("conflict on {entity}#{id}: {reason}")]
     Conflict {

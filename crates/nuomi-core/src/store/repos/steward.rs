@@ -324,18 +324,33 @@ pub fn update_cycle_phase_status(
     id: &str,
     phase: CyclePhase,
     status: CycleStatus,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
+    // Guard: only a still-running cycle may advance — the background
+    // orchestrator must never overwrite a terminal (failed/cancelled/
+    // completed) status.
     let n = conn.execute(
-        "UPDATE evolution_cycles SET phase = ?2, status = ?3 WHERE id = ?1",
+        "UPDATE evolution_cycles SET phase = ?2, status = ?3
+         WHERE id = ?1 AND status = 'running'",
         params![id, phase.as_str(), status.as_str()],
     )?;
     if n == 0 {
-        return Err(StoreError::NotFound {
-            entity: "evolution_cycle",
-            id: id.to_string(),
-        });
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM evolution_cycles WHERE id = ?1",
+                params![id],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !exists {
+            return Err(StoreError::NotFound {
+                entity: "evolution_cycle",
+                id: id.to_string(),
+            });
+        }
+        return Ok(false);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Marks a cycle as cancelled and sets ended_at. Does not touch tasks —
@@ -1112,9 +1127,26 @@ mod tests {
     fn cycle_update_phase_status() {
         let conn = db();
         ensure_cycle(&conn, "c1");
-        update_cycle_phase_status(&conn, "c1", CyclePhase::Research, CycleStatus::Running).unwrap();
+        assert!(
+            update_cycle_phase_status(&conn, "c1", CyclePhase::Research, CycleStatus::Running)
+                .unwrap()
+        );
         let got = get_cycle(&conn, "c1").unwrap();
         assert_eq!(got.phase, CyclePhase::Research);
+
+        // A terminal cycle is never advanced by the background runner.
+        conn.execute(
+            "UPDATE evolution_cycles SET status = 'failed', ended_at = 99 WHERE id = 'c1'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !update_cycle_phase_status(&conn, "c1", CyclePhase::Design, CycleStatus::Running)
+                .unwrap()
+        );
+        let got = get_cycle(&conn, "c1").unwrap();
+        assert_eq!(got.phase, CyclePhase::Research);
+        assert_eq!(got.status, CycleStatus::Failed);
     }
 
     #[test]
@@ -1362,6 +1394,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 5, "5 builtin steward roles must be seeded");
+        assert_eq!(
+            count, 6,
+            "6 builtin steward roles must be seeded (5 dev roles + 1 main)"
+        );
     }
 }

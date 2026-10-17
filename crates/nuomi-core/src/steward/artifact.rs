@@ -266,9 +266,9 @@ mod tests {
         let task_id = task.id.clone();
         let dbp1 = dbp.clone();
         spawn_blocking(move || {
-            let mut db = Db::open(&dbp1)?;
-            steward::insert_cycle(&mut db.0, &cycle)?;
-            steward::insert_task(&mut db.0, &task)?;
+            let db = Db::open(&dbp1)?;
+            steward::insert_cycle(&db.0, &cycle)?;
+            steward::insert_task(&db.0, &task)?;
             Ok::<_, StewardError>(())
         })
         .await

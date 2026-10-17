@@ -424,6 +424,99 @@ pub async fn confirm_config_change_with_event(
     Ok(result)
 }
 
+/// Cancels a pending config change proposal (steward_workbench_v2 design
+/// §2.2.2-A5: the cancel leg of the confirm/cancel loop).
+///
+/// The config itself is never touched — only the artifact status flips to
+/// `Rejected`. Two events are recorded:
+/// 1. `steward.config_change_cancelled` on the proposal aggregate (audit);
+/// 2. a `steward.message_sent` note on the session aggregate, so the
+///    history rebuild (`list_session_messages`) exposes "用户已取消" to the
+///    next LLM turn.
+pub async fn cancel_config_change_with_event(
+    db_path: Arc<str>,
+    session_id: &str,
+    proposal_id: &str,
+) -> Result<(), StewardError> {
+    let proposal_id = proposal_id.to_string();
+    let db_path_for_events = Arc::clone(&db_path);
+    let (proposal_id, target_type, target_id) = spawn_blocking(move || {
+        let mut db = Db::open(&db_path)?;
+        let conn = &mut db.0;
+        let tx = conn.transaction()?;
+
+        let artifact = steward::get_artifact(&tx, &proposal_id).map_err(|e| match e {
+            crate::store::StoreError::NotFound { .. } => StewardError::NotFound {
+                entity: "config_change_proposal",
+                id: proposal_id.clone(),
+            },
+            other => StewardError::Store(other.to_string()),
+        })?;
+        if artifact.artifact_type != ArtifactType::ConfigChange {
+            return Err(StewardError::NotFound {
+                entity: "config_change_proposal",
+                id: proposal_id.clone(),
+            });
+        }
+        if artifact.status != ArtifactStatus::PendingReview {
+            return Err(StewardError::Conflict {
+                entity: "config_change_proposal",
+                id: proposal_id.clone(),
+                reason: format!("proposal is already {:?}", artifact.status),
+            });
+        }
+
+        let target_type = artifact.content["target_type"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let target_id = artifact.content["target_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+
+        steward::update_artifact_status(&tx, &proposal_id, ArtifactStatus::Rejected)?;
+        tx.commit()?;
+
+        Ok::<_, StewardError>((proposal_id, target_type, target_id))
+    })
+    .await
+    .map_err(|e| StewardError::Store(format!("join error: {e}")))??;
+
+    // Audit event on the proposal aggregate.
+    super::events::publish_event(
+        Arc::clone(&db_path_for_events),
+        &proposal_id,
+        super::events::StewardEventKind::ConfigChangeCancelled,
+        &serde_json::json!({
+            "session_id": session_id,
+            "proposal_id": proposal_id,
+            "target_type": target_type,
+            "target_id": target_id,
+        }),
+    )
+    .await;
+
+    // Session-context note so the next LLM turn perceives the cancellation.
+    let note = format!("用户已取消配置变更建议（{proposal_id}），配置保持不变。");
+    let session_id = session_id.to_string();
+    let _ = tokio::task::spawn_blocking(move || {
+        let db = Db::open(&db_path_for_events)?;
+        crate::store::repos::events::append(
+            &db.0,
+            "steward",
+            &session_id,
+            "steward.message_sent",
+            &serde_json::json!({"session_id": session_id, "text": note}),
+            crate::domain::now_ms(),
+        )?;
+        Ok::<_, crate::store::StoreError>(())
+    })
+    .await;
+
+    Ok(())
+}
+
 /// T8-4: wraps `rollback_config_change` with `steward.config_rolled_back` event.
 pub async fn rollback_config_change_with_event(
     db_path: Arc<str>,
@@ -746,5 +839,95 @@ mod tests {
         rollback_config_change_with_event(dbp, &result.snapshot_id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_leaves_config_unchanged_and_records_events() {
+        let dbp = db_path().await;
+        let role_id = "role_cancel1".to_string();
+        {
+            let db = Db::open(&dbp).unwrap();
+            seed_role(&db.0, &role_id, "Cancel Role");
+        }
+        let target = ConfigTarget::Role {
+            id: role_id.clone(),
+        };
+        let proposal = propose(dbp.clone(), target, r#"{"temperature":0.2}"#)
+            .await
+            .unwrap();
+
+        cancel_config_change_with_event(dbp.clone(), "sess-cancel-1", &proposal.proposal_id)
+            .await
+            .unwrap();
+
+        // Config untouched: the role keeps its original temperature.
+        {
+            let db = Db::open(&dbp).unwrap();
+            let role = roles::get(&db.0, &role_id).unwrap();
+            assert_eq!(role.temperature, Some(0.7));
+            // Artifact flipped to Rejected.
+            let artifact = steward::get_artifact(&db.0, &proposal.proposal_id).unwrap();
+            assert_eq!(artifact.status, crate::domain::ArtifactStatus::Rejected);
+        }
+
+        // Audit event on the proposal aggregate.
+        {
+            let db = Db::open(&dbp).unwrap();
+            let evts =
+                super::super::events::list(&db.0, Some(&proposal.proposal_id), None, 100).unwrap();
+            let cancelled = evts
+                .iter()
+                .find(|e| e.kind == "steward.config_change_cancelled")
+                .expect("config_change_cancelled event must be recorded");
+            assert_eq!(
+                cancelled.payload.get("session_id").and_then(|v| v.as_str()),
+                Some("sess-cancel-1")
+            );
+        }
+
+        // Session-context note visible to the history rebuild.
+        {
+            let db = Db::open(&dbp).unwrap();
+            let evts = super::super::events::list(&db.0, Some("sess-cancel-1"), None, 100).unwrap();
+            let note = evts
+                .iter()
+                .find(|e| e.kind == "steward.message_sent")
+                .expect("cancellation note must be recorded on the session");
+            let text = note.payload.get("text").and_then(|v| v.as_str()).unwrap();
+            assert!(text.contains("用户已取消"), "got: {text}");
+            assert!(text.contains(&proposal.proposal_id), "got: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_after_confirm_returns_conflict() {
+        let dbp = db_path().await;
+        let role_id = "role_cancel2".to_string();
+        {
+            let db = Db::open(&dbp).unwrap();
+            seed_role(&db.0, &role_id, "Cancel After Confirm");
+        }
+        let target = ConfigTarget::Role {
+            id: role_id.clone(),
+        };
+        let proposal = propose(dbp.clone(), target, r#"{"temperature":0.6}"#)
+            .await
+            .unwrap();
+        confirm_config_change(dbp.clone(), &proposal.proposal_id)
+            .await
+            .unwrap();
+        let err = cancel_config_change_with_event(dbp, "sess-cancel-2", &proposal.proposal_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StewardError::Conflict { .. }));
+    }
+
+    #[tokio::test]
+    async fn cancel_unknown_proposal_returns_not_found() {
+        let dbp = db_path().await;
+        let err = cancel_config_change_with_event(dbp, "sess-cancel-3", "no_such_proposal")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StewardError::NotFound { .. }));
     }
 }

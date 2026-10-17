@@ -674,8 +674,8 @@ mod tests {
         };
         let db_path = db_path.clone();
         spawn_blocking(move || {
-            let mut db = Db::open(&db_path)?;
-            let _ = steward::insert_cycle(&mut db.0, &cycle);
+            let db = Db::open(&db_path)?;
+            let _ = steward::insert_cycle(&db.0, &cycle);
             Ok::<_, StewardError>(())
         })
         .await

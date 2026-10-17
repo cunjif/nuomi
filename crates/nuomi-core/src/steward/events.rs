@@ -1,8 +1,15 @@
 //! Steward event types + logger (K-Steward-8, T8-1 ~ T8-2).
 //!
 //! All steward events use `aggregate_type = "steward"` and are append-only
-//! via `store::repos::events::append`. The 17 event kinds match design.md
-//! §2.3.2.4 exactly.
+//! via `store::repos::events::append`. The original 17 event kinds match
+//! design.md §2.3.2.4 exactly; the steward agent loop (steward_workbench_v2
+//! design §2.1.3.1) adds `ToolCall`, `ToolResult`, `ContextPruned`, `Message`,
+//! `ReplyCompleted` and `ConfigChangeCancelled`; the degrade paths (spec
+//! 5.1.3-1b/3b) add `LlmFailed` and `SafetyRefused`.
+//!
+//! `steward.delta` is the one non-persistent steward topic: live streaming
+//! notifications published on the EventBus only (never appended to the
+//! events table) — see [`TOPIC_DELTA`].
 
 use std::sync::Arc;
 
@@ -12,7 +19,18 @@ use crate::domain::now_ms;
 use crate::store::repos::events;
 use crate::store::StoreError;
 
-/// Steward event kinds (design.md §2.3.2.4 — 17 variants).
+/// Non-persistent live-streaming topic for steward reply deltas.
+///
+/// Published on the EventBus only — unlike every [`StewardEventKind`], it is
+/// NEVER appended to the events table (append-only audit stays clean; the
+/// authoritative final text lands as `steward.message` instead).
+///
+/// Payload shape: `{ "sessionId": String, "text": String, "seq": u64 }`
+/// where `seq` is 1-based and monotonic within one reply turn.
+pub const TOPIC_DELTA: &str = "steward.delta";
+
+/// Steward event kinds (design.md §2.3.2.4 — 17 variants, plus 6 agent-loop
+/// variants from steward_workbench_v2 design §2.1.3.1 / §2.2.2-A1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StewardEventKind {
     MessageReceived,
@@ -32,6 +50,14 @@ pub enum StewardEventKind {
     ArtifactMerged,
     CleanseCompleted,
     DevRoleBindingChanged,
+    ToolCall,
+    ToolResult,
+    ContextPruned,
+    Message,
+    ReplyCompleted,
+    ConfigChangeCancelled,
+    LlmFailed,
+    SafetyRefused,
 }
 
 impl StewardEventKind {
@@ -55,10 +81,18 @@ impl StewardEventKind {
             Self::ArtifactMerged => "steward.artifact_merged",
             Self::CleanseCompleted => "steward.cleanse_completed",
             Self::DevRoleBindingChanged => "steward.dev_role_binding_changed",
+            Self::ToolCall => "steward.tool_call",
+            Self::ToolResult => "steward.tool_result",
+            Self::ContextPruned => "steward.context_pruned",
+            Self::Message => "steward.message",
+            Self::ReplyCompleted => "steward.reply_completed",
+            Self::ConfigChangeCancelled => "steward.config_change_cancelled",
+            Self::LlmFailed => "steward.llm_failed",
+            Self::SafetyRefused => "steward.safety_refused",
         }
     }
 
-    /// All 17 kinds in declaration order.
+    /// All kinds in declaration order.
     pub fn all() -> &'static [StewardEventKind] {
         &[
             Self::MessageReceived,
@@ -78,6 +112,14 @@ impl StewardEventKind {
             Self::ArtifactMerged,
             Self::CleanseCompleted,
             Self::DevRoleBindingChanged,
+            Self::ToolCall,
+            Self::ToolResult,
+            Self::ContextPruned,
+            Self::Message,
+            Self::ReplyCompleted,
+            Self::ConfigChangeCancelled,
+            Self::LlmFailed,
+            Self::SafetyRefused,
         ]
     }
 }
@@ -120,6 +162,23 @@ pub async fn publish_event(
         Ok::<_, StoreError>(())
     })
     .await;
+}
+
+/// Best-effort live publish onto the EventBus — the non-persistent half of
+/// the steward streaming channel (design §2.1 "管家流式事件通道": the
+/// durable authority stays in the `events` table via [`publish_event`]).
+///
+/// Bus payloads MUST carry `sessionId` (camelCase) so the shell bridge
+/// (`src-tauri/src/events.rs`) can route them to the per-session channel
+/// `event://session/{id}`. Nothing is appended to the events table here.
+pub fn publish_bus(
+    bus: Option<&crate::harness::EventBus>,
+    topic: &str,
+    payload: serde_json::Value,
+) {
+    if let Some(bus) = bus {
+        bus.publish(crate::harness::Event::new(topic, payload));
+    }
 }
 
 // ============================================================ T8-8: Journal mirror
@@ -234,12 +293,27 @@ mod tests {
     }
 
     #[test]
-    fn all_17_kinds_have_distinct_strings() {
+    fn all_kinds_have_distinct_strings() {
         let kinds = StewardEventKind::all();
-        assert_eq!(kinds.len(), 17);
+        assert_eq!(kinds.len(), 25);
         let strs: Vec<&str> = kinds.iter().map(|k| k.as_str()).collect();
         let unique: std::collections::HashSet<&str> = strs.iter().copied().collect();
-        assert_eq!(unique.len(), 17, "all 17 kind strings must be distinct");
+        assert_eq!(unique.len(), 25, "all 25 kind strings must be distinct");
+    }
+
+    #[test]
+    fn delta_topic_is_not_a_persistent_kind() {
+        // `steward.delta` is the non-persistent streaming topic: it must
+        // never appear in the append-only kinds, and no persistent kind may
+        // collide with it.
+        assert_eq!(TOPIC_DELTA, "steward.delta");
+        for kind in StewardEventKind::all() {
+            assert_ne!(
+                kind.as_str(),
+                TOPIC_DELTA,
+                "steward.delta must stay out of the persistent kinds"
+            );
+        }
     }
 
     #[test]
@@ -361,13 +435,13 @@ mod tests {
     }
 
     #[test]
-    fn all_17_kinds_can_be_logged() {
+    fn all_kinds_can_be_logged() {
         let conn = db();
         for kind in StewardEventKind::all() {
             log(&conn, "test", *kind, &json!({"kind": kind.as_str()})).unwrap();
         }
         let evts = list(&conn, Some("test"), None, 100).unwrap();
-        assert_eq!(evts.len(), 17);
+        assert_eq!(evts.len(), 25);
     }
 
     // T8-13: zero-intrusion verification

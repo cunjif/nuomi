@@ -600,15 +600,21 @@ impl CycleOrchestrator {
             let mut db = Db::open(&db_path)?;
             let conn = &mut db.0;
             let tx = conn.transaction()?;
-            events::append(
-                &tx,
-                "steward",
-                &cycle_id,
-                "steward.cycle_phase_changed",
-                &serde_json::json!({"from": from.as_str(), "to": to.as_str()}),
-                now_ms(),
-            )?;
-            steward::update_cycle_phase_status(&tx, &cycle_id, to, CycleStatus::Running)?;
+            // Conditional advance: a terminal cycle (failed/cancelled/
+            // completed) is never overwritten; only a running cycle
+            // transitions and logs its phase-changed event.
+            let advanced =
+                steward::update_cycle_phase_status(&tx, &cycle_id, to, CycleStatus::Running)?;
+            if advanced {
+                events::append(
+                    &tx,
+                    "steward",
+                    &cycle_id,
+                    "steward.cycle_phase_changed",
+                    &serde_json::json!({"from": from.as_str(), "to": to.as_str()}),
+                    now_ms(),
+                )?;
+            }
             tx.commit()?;
             Ok::<_, StewardError>(())
         })
@@ -895,8 +901,8 @@ mod tests {
             let dbp = dbp.clone();
             let cycle = cycle.clone();
             spawn_blocking(move || {
-                let mut db = Db::open(&dbp)?;
-                steward::insert_cycle(&mut db.0, &cycle)?;
+                let db = Db::open(&dbp)?;
+                steward::insert_cycle(&db.0, &cycle)?;
                 Ok::<_, StewardError>(())
             })
             .await
@@ -1049,8 +1055,8 @@ mod tests {
         let cycle_clone = cycle.clone();
         let db_path = db_path.clone();
         spawn_blocking(move || {
-            let mut db = Db::open(&db_path)?;
-            steward::insert_cycle(&mut db.0, &cycle_clone)?;
+            let db = Db::open(&db_path)?;
+            steward::insert_cycle(&db.0, &cycle_clone)?;
             Ok::<_, StewardError>(())
         })
         .await

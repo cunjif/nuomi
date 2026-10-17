@@ -238,8 +238,8 @@ mod tests {
         assert!(snap.sessions.is_empty());
         assert_eq!(
             snap.roles.len(),
-            5,
-            "5 builtin steward roles should be present"
+            6,
+            "6 builtin steward roles should be present (5 dev roles + 1 main)"
         );
         assert!(snap.roles.iter().all(|r| r.builtin));
     }
@@ -264,7 +264,7 @@ mod tests {
             .unwrap();
         }
         let snap = read(dbp, "__migrated__").await.unwrap();
-        assert!(snap.providers.len() >= 1);
-        assert!(snap.teams.len() >= 1);
+        assert!(!snap.providers.is_empty());
+        assert!(!snap.teams.is_empty());
     }
 }

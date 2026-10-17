@@ -1,5 +1,11 @@
 //! Intent recognition — classifies user messages to steward actions.
 //! (K-Steward-2, T2-5/T2-6)
+//!
+//! Scope (steward_workbench v2): the rule recognizer no longer drives the
+//! reply path — the LLM agent loop (`llm_loop`) owns conversation and tool
+//! orchestration now. The recognizer's remaining production use is
+//! tailoring the binding-guidance hint shown when no model service is
+//! bound (`kernel::binding_guidance_reply`).
 
 use serde::{Deserialize, Serialize};
 
@@ -43,11 +49,9 @@ pub trait IntentRecognizer: Send + Sync {
     ) -> Result<IntentRecognition, StewardError>;
 }
 
-/// A rule-based intent recognizer used as the default when no LLM is configured.
-///
-/// Uses keyword matching to classify the message into one of 5 intents.
-/// In production, this is replaced by `LlmIntentRecognizer` which calls a
-/// lightweight LLM with JSON output constraints.
+/// A rule-based intent recognizer used only for the unbound-LLM guidance
+/// hint (steward_workbench v2) — the reply path is LLM-driven. Uses
+/// keyword matching to classify the message into one of 5 intents.
 pub struct RuleIntentRecognizer;
 
 #[async_trait::async_trait]
@@ -110,7 +114,11 @@ impl IntentRecognizer for RuleIntentRecognizer {
     }
 }
 
-/// Confidence threshold below which the steward asks the user to clarify.
+/// Confidence threshold historically used to trigger clarify replies.
+/// Retired from the reply path (steward_workbench v2): clarification is
+/// now LLM-driven — the system prompt instructs the model to ask targeted
+/// follow-ups only on genuine ambiguity. Kept for recognizer tests and
+/// diagnostics.
 pub const CLARIFY_THRESHOLD: f64 = 0.6;
 
 #[cfg(test)]
