@@ -19,6 +19,7 @@ pub mod steward;
 pub mod tasks_runs;
 pub mod teams;
 pub mod whiteboard;
+pub mod work_directories;
 pub mod workspace_layout_snapshot;
 pub mod workspace_open_state;
 pub mod workspace_recent;
