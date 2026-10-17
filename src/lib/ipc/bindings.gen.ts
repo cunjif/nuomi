@@ -566,6 +566,14 @@ async workspaceGetOpen() : Promise<Result<WorkspaceEntryDto | null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async workspaceFocusDirectory(workspaceId: string, directoryId: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_focus_directory", { workspaceId, directoryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async pinWorkspace(id: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("pin_workspace", { id }) };
@@ -1901,7 +1909,12 @@ export type WorkDirectoryDto = { id: string; absPath: string; displayName: strin
  * The path currently exists and is a directory; `false` marks a stale
  * directory (row kept, UI renders it disabled).
  */
-available: boolean }
+available: boolean; 
+/**
+ * Whether this directory is the workspace's active (focused) one — the
+ * FileTree root and sandbox root point at it (session state, ADR-0021).
+ */
+isActive: boolean }
 /**
  * A registered workspace entry as seen by the frontend. `directory_present`
  * means the workspace has at least one work directory that exists on disk

@@ -55,6 +55,8 @@ interface DoubleState {
   workspaceConfigured: boolean;
   /** Registered workspaces for the multi-workspace test double. */
   workspaces: import("./bindings.gen").WorkspaceEntryDto[];
+  /** Session-state active (focused) work directory of the open workspace. */
+  activeDirectoryId: string | null;
   /** path → entry; dirs have content === null */
   files: Map<string, { isDir: boolean; size: number; content: string | null }>;
   /**
@@ -88,6 +90,7 @@ export const tdState: DoubleState = {
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
   workspaces: [],
+  activeDirectoryId: null,
   files: new Map(),
   stewardSessionIds: new Set(),
 };
@@ -209,6 +212,7 @@ export function tdReset(): void {
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;
   tdState.workspaces.length = 0;
+  tdState.activeDirectoryId = null;
   tdState.files.clear();
   tdState.stewardSessionIds.clear();
 }

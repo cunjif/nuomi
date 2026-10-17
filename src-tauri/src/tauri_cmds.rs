@@ -719,6 +719,16 @@ pub async fn workspace_get_open(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn workspace_focus_directory(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_workspace_focus_directory(&state, workspace_id, directory_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn pin_workspace(state: tauri::State<'_, AppState>, id: String) -> Result<(), IpcError> {
     commands::impl_pin_workspace(&state, id).await
 }

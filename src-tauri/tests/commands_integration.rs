@@ -619,6 +619,7 @@ async fn workspace_v2_directory_lifecycle() {
     assert_eq!(dirs[0].display_name, "alpha");
     assert!(dirs[0].available);
     assert!(dirs[0].mounted);
+    assert!(dirs[0].is_active);
     // In-memory sandbox root synced to the first available directory.
     assert!(state.current_workspace().ends_with("alpha"));
 
@@ -638,10 +639,15 @@ async fn workspace_v2_directory_lifecycle() {
     assert_eq!(ws1b.id, ws1.id);
     assert_eq!(ws1b.label.as_deref(), Some("alpha-beta"));
     assert_eq!(ws1b.directories.as_ref().unwrap().len(), 2);
-    // Root stays on the first directory (added_at order).
-    assert!(state.current_workspace().ends_with("alpha"));
+    // Adding a directory auto-focuses it (spec 5.5.1-3b): the active marker
+    // and the in-memory root move to the fresh directory.
+    let dirs_b = ws1b.directories.as_ref().unwrap();
+    assert!(!dirs_b[0].is_active);
+    assert!(dirs_b[1].is_active);
+    assert!(state.current_workspace().ends_with("beta"));
 
-    // Unmount/mount roundtrip reflects in get_open.
+    // Unmount/mount roundtrip reflects in get_open; the active marker moves
+    // off the unmounted directory and mount auto-focuses it again.
     let beta_id = ws1b.directories.as_ref().unwrap()[1].id.clone();
     commands::impl_workspace_unmount_directory(&state, ws1.id.clone(), beta_id.clone())
         .await
@@ -650,7 +656,10 @@ async fn workspace_v2_directory_lifecycle() {
         .await
         .unwrap()
         .unwrap();
-    assert!(!open.directories.as_ref().unwrap()[1].mounted);
+    let open_dirs = open.directories.as_ref().unwrap();
+    assert!(!open_dirs[1].mounted);
+    assert!(open_dirs[0].is_active);
+    assert!(!open_dirs[1].is_active);
     commands::impl_workspace_mount_directory(&state, ws1.id.clone(), beta_id.clone())
         .await
         .unwrap();
@@ -658,7 +667,9 @@ async fn workspace_v2_directory_lifecycle() {
         .await
         .unwrap()
         .unwrap();
-    assert!(open.directories.as_ref().unwrap()[1].mounted);
+    let open_dirs = open.directories.as_ref().unwrap();
+    assert!(open_dirs[1].mounted);
+    assert!(open_dirs[1].is_active);
 
     // list_workspaces carries the derived label + directories (B6).
     let listed = commands::impl_list_workspaces(&state).await.unwrap();
@@ -686,12 +697,15 @@ async fn workspace_v2_directory_lifecycle() {
     assert_eq!(ws2.label.as_deref(), Some("gamma"));
     assert!(state.current_workspace().ends_with("gamma"));
 
-    // Switch back: label preserved, root re-synced to the first directory.
+    // Switch back: label preserved, root re-synced to the first directory
+    // (the slot still references the outgoing workspace — free per-workspace
+    // memory — so the chain falls through to alpha).
     let switched = commands::impl_workspace_switch(&state, ws1.id.clone())
         .await
         .unwrap();
     assert_eq!(switched.id, ws1.id);
     assert_eq!(switched.label.as_deref(), Some("alpha-beta"));
+    assert!(switched.directories.as_ref().unwrap()[0].is_active);
     assert!(state.current_workspace().ends_with("alpha"));
 
     // Removing a non-last directory keeps the workspace open (label shrinks).
@@ -705,6 +719,9 @@ async fn workspace_v2_directory_lifecycle() {
         .unwrap()
         .unwrap();
     assert_eq!(open.label.as_deref(), Some("beta"));
+    // The removed directory was the effective active one → the root falls
+    // through to the remaining directory.
+    assert!(state.current_workspace().ends_with("beta"));
 
     // Removing the last directory auto-closes the workspace.
     let r2 = commands::impl_workspace_remove_directory(&state, ws1.id.clone(), beta_id)
@@ -721,4 +738,74 @@ async fn workspace_v2_directory_lifecycle() {
         .await
         .expect_err("workspace without directories must be rejected");
     assert_eq!(ipc_code(&err), "workspace.no_directories");
+}
+
+#[tokio::test]
+async fn workspace_v2_focus_directory() {
+    let (state, dir) = boot(vec![]).await;
+
+    // Two directories in one workspace; adding auto-focuses the fresh one.
+    // The workspace row's root_path is a placeholder uuid (ADR-0021) — all
+    // file commands must resolve through the directory chain regardless.
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    std::fs::write(alpha.join("a.txt"), "a").unwrap();
+    let _ws = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(&beta).unwrap();
+    std::fs::write(beta.join("b.txt"), "b").unwrap();
+    let ws = commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let dirs = ws.directories.as_ref().unwrap();
+    let (alpha_id, beta_id) = (dirs[0].id.clone(), dirs[1].id.clone());
+    assert!(dirs[1].is_active);
+    assert!(state.current_workspace().ends_with("beta"));
+
+    // File commands resolve through the active directory: list "" → beta.
+    let entries = commands::impl_list_dir(&state, "".to_string(), Some(ws.id.clone()))
+        .await
+        .unwrap();
+    assert!(entries.iter().any(|e| e.name == "b.txt"));
+    assert!(!entries.iter().any(|e| e.name == "a.txt"));
+
+    // Focus back to alpha: root + FileTree re-point, DTO marks alpha.
+    let focused = commands::impl_workspace_focus_directory(&state, ws.id.clone(), alpha_id)
+        .await
+        .unwrap();
+    assert!(focused.directories.as_ref().unwrap()[0].is_active);
+    assert!(state.current_workspace().ends_with("alpha"));
+    let entries = commands::impl_list_dir(&state, "".to_string(), Some(ws.id.clone()))
+        .await
+        .unwrap();
+    assert!(entries.iter().any(|e| e.name == "a.txt"));
+    assert!(!entries.iter().any(|e| e.name == "b.txt"));
+
+    // Focusing an unknown directory id is rejected with the spec'd code.
+    let err = commands::impl_workspace_focus_directory(&state, ws.id.clone(), "nope".to_string())
+        .await
+        .expect_err("unknown directory must be rejected");
+    assert_eq!(ipc_code(&err), "workspace.directory_not_found");
+
+    // Focusing a directory of a non-open workspace is rejected.
+    let err = commands::impl_workspace_focus_directory(&state, "other-ws".to_string(), beta_id)
+        .await
+        .expect_err("non-open workspace must be rejected");
+    assert_eq!(ipc_code(&err), "workspace.not_found");
+
+    // A directory deleted from disk cannot be focused (spec 5.5.3-1).
+    let gamma = dir.path().join("gamma");
+    std::fs::create_dir_all(&gamma).unwrap();
+    let ws = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let gamma_id = ws.directories.as_ref().unwrap()[2].id.clone();
+    assert!(state.current_workspace().ends_with("gamma"));
+    std::fs::remove_dir_all(&gamma).unwrap();
+    let err = commands::impl_workspace_focus_directory(&state, ws.id.clone(), gamma_id)
+        .await
+        .expect_err("stale directory must be rejected");
+    assert_eq!(ipc_code(&err), "workspace.directory_missing");
 }

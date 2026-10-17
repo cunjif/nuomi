@@ -6229,6 +6229,9 @@ pub struct WorkDirectoryDto {
     /// The path currently exists and is a directory; `false` marks a stale
     /// directory (row kept, UI renders it disabled).
     pub available: bool,
+    /// Whether this directory is the workspace's active (focused) one — the
+    /// FileTree root and sandbox root point at it (session state, ADR-0021).
+    pub is_active: bool,
 }
 
 /// Result of removing a work directory: whether the workspace auto-closed
@@ -6399,6 +6402,7 @@ pub struct IsolationViolationDto {
 pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntryDto>, IpcError> {
     let reg = state.workspace_registry.clone();
     let db_path = state.db_path.clone();
+    let active_slot = state.active_directory();
     let entries =
         tokio::task::spawn_blocking(move || -> Result<Vec<WorkspaceEntryDto>, IpcError> {
             let list = reg.list()?;
@@ -6419,6 +6423,21 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                     )?;
                     let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
                     let label = nuomi_core::services::derive_label(&dir_entries);
+                    // Active-directory marking only for the open workspace —
+                    // the resolver chain (slotted, else first mounted+available).
+                    let active_id = os.and_then(|_| {
+                        slotted_active_directory_id(&active_slot, &wp.entry.id)
+                            .filter(|id| {
+                                dirs.iter().any(|d| {
+                                    d.directory.id == *id && d.available && d.directory.mounted
+                                })
+                            })
+                            .or_else(|| {
+                                dirs.iter()
+                                    .find(|d| d.available && d.directory.mounted)
+                                    .map(|d| d.directory.id.clone())
+                            })
+                    });
                     Ok(WorkspaceEntryDto {
                         id: wp.entry.id,
                         root_path: wp.entry.root_path,
@@ -6433,7 +6452,7 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                         last_focused_at: os.map(|r| r.last_focused_at),
                         label: optional_label(&label.label),
                         label_full: optional_label(&label.label_full),
-                        directories: Some(work_directory_dtos(&dirs)),
+                        directories: Some(work_directory_dtos(&dirs, active_id.as_deref())),
                     })
                 })
                 .collect()
@@ -6454,6 +6473,7 @@ fn optional_label(label: &str) -> Option<String> {
 
 fn work_directory_dtos(
     dirs: &[repos::work_directories::WorkDirectoryStatus],
+    active_directory_id: Option<&str>,
 ) -> Vec<WorkDirectoryDto> {
     dirs.iter()
         .map(|d| WorkDirectoryDto {
@@ -6463,13 +6483,50 @@ fn work_directory_dtos(
             mounted: d.directory.mounted,
             added_at: d.directory.added_at,
             available: d.available,
+            is_active: active_directory_id == Some(d.directory.id.as_str()),
         })
         .collect()
 }
 
+/// The active-directory slot's directory id when it belongs to
+/// `workspace_id` (session state, single-open).
+fn slotted_active_directory_id(
+    slot: &Option<(String, String)>,
+    workspace_id: &str,
+) -> Option<String> {
+    slot.as_ref()
+        .and_then(|(ws, dir)| (ws == workspace_id).then_some(dir.clone()))
+}
+
+/// The effective active directory of a workspace as the resolver chain
+/// ([`crate::state::AppState::resolve_workspace_root`]) would pick it: the
+/// slotted directory when still mounted+available, else the first
+/// mounted+available directory (added_at order). Mirrors the DTO marking
+/// onto what the FileTree actually shows.
+fn effective_active_directory_id(
+    state: &AppState,
+    workspace_id: &str,
+    dirs: &[repos::work_directories::WorkDirectoryStatus],
+) -> Option<String> {
+    if let Some(slot) = slotted_active_directory_id(&state.active_directory(), workspace_id) {
+        if dirs
+            .iter()
+            .any(|d| d.directory.id == slot && d.available && d.directory.mounted)
+        {
+            return Some(slot);
+        }
+    }
+    dirs.iter()
+        .find(|d| d.available && d.directory.mounted)
+        .map(|d| d.directory.id.clone())
+}
+
 /// Maps a v2 `WorkspaceView` (the open workspace) to the wire DTO with its
 /// derived label and directories.
-fn workspace_view_to_dto(view: &nuomi_core::services::WorkspaceView) -> WorkspaceEntryDto {
+fn workspace_view_to_dto(
+    view: &nuomi_core::services::WorkspaceView,
+    active_directory_id: Option<&str>,
+) -> WorkspaceEntryDto {
     let dir_entries: Vec<_> = view
         .directories
         .iter()
@@ -6490,17 +6547,31 @@ fn workspace_view_to_dto(view: &nuomi_core::services::WorkspaceView) -> Workspac
         last_focused_at: None,
         label: optional_label(&label.label),
         label_full: optional_label(&label.label_full),
-        directories: Some(work_directory_dtos(&view.directories)),
+        directories: Some(work_directory_dtos(&view.directories, active_directory_id)),
     }
 }
 
-/// Best-effort sync of the in-memory sandbox root to the workspace's first
-/// available directory (added_at order). Interim single-root semantics under
-/// the two-level model — per-directory sandbox authorization lands with the
+/// Best-effort sync of the in-memory sandbox root to the workspace's active
+/// work directory when still available, else to the first available
+/// directory (added_at order). Interim single-root semantics under the
+/// two-level model — per-directory sandbox authorization lands with the
 /// sandbox task group (ADR-0022).
 fn sync_root_to_view(state: &AppState, view: &nuomi_core::services::WorkspaceView) {
-    if let Some(dir) = view.directories.iter().find(|d| d.available) {
-        let _ = state.switch_workspace(PathBuf::from(&dir.directory.abs_path));
+    let active = slotted_active_directory_id(&state.active_directory(), &view.entry.id);
+    let pick = active
+        .as_deref()
+        .and_then(|dir_id| {
+            view.directories
+                .iter()
+                .find(|d| d.directory.id == dir_id && d.available && d.directory.mounted)
+        })
+        .or_else(|| {
+            view.directories
+                .iter()
+                .find(|d| d.available && d.directory.mounted)
+        });
+    if let Some(dir) = pick {
+        state.set_workspace_root(PathBuf::from(&dir.directory.abs_path));
     }
 }
 
@@ -6747,17 +6818,32 @@ pub async fn impl_workspace_add_directory(
     path: String,
 ) -> Result<WorkspaceEntryDto, IpcError> {
     let db_path = state.db_path.clone();
+    let add_path = path.clone();
     let view = tokio::task::spawn_blocking(
         move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
             let svc =
                 nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-            Ok(svc.add_directory(std::path::Path::new(&path))?)
+            Ok(svc.add_directory(std::path::Path::new(&add_path))?)
         },
     )
     .await
     .map_err(join_err)??;
-    sync_root_to_view(state, &view);
-    Ok(workspace_view_to_dto(&view))
+    // Auto-focus the directory this call touched (spec 5.5.1-3b): match the
+    // canonical input path against the view's directories; a mismatch (race,
+    // exotic path form) falls back to the plain root sync.
+    let canonical = nuomi_core::services::guard_canonicalize(std::path::Path::new(&path))
+        .map(|p| p.to_string_lossy().to_string())
+        .ok();
+    let focused = canonical
+        .as_deref()
+        .and_then(|c| view.directories.iter().find(|d| d.directory.abs_path == c));
+    if let Some(dir) = focused {
+        state.set_active_directory(&view.entry.id, &dir.directory.id, &dir.directory.abs_path);
+    } else {
+        sync_root_to_view(state, &view);
+    }
+    let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
+    Ok(workspace_view_to_dto(&view, active.as_deref()))
 }
 
 pub async fn impl_workspace_remove_directory(
@@ -6766,15 +6852,35 @@ pub async fn impl_workspace_remove_directory(
     directory_id: String,
 ) -> Result<RemoveDirectoryResultDto, IpcError> {
     let db_path = state.db_path.clone();
+    let (remove_ws, remove_dir) = (workspace_id.clone(), directory_id.clone());
     let result = tokio::task::spawn_blocking(
         move || -> Result<nuomi_core::services::RemoveDirectoryResult, IpcError> {
             let svc =
                 nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-            Ok(svc.remove_directory(&workspace_id, &directory_id)?)
+            Ok(svc.remove_directory(&remove_ws, &remove_dir)?)
         },
     )
     .await
     .map_err(join_err)??;
+    // Drop the slot when the removed directory (or its whole workspace) was
+    // the active one, then keep the in-memory root on a still-available
+    // directory while the workspace stays open.
+    state.clear_active_directory(&workspace_id, Some(&directory_id));
+    if !result.workspace_closed {
+        let db_path = state.db_path.clone();
+        let view = tokio::task::spawn_blocking(
+            move || -> Result<Option<nuomi_core::services::WorkspaceView>, IpcError> {
+                let svc =
+                    nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+                Ok(svc.get_open()?)
+            },
+        )
+        .await
+        .map_err(join_err)??;
+        if let Some(view) = view {
+            sync_root_to_view(state, &view);
+        }
+    }
     Ok(RemoveDirectoryResultDto {
         workspace_closed: result.workspace_closed,
     })
@@ -6786,13 +6892,31 @@ pub async fn impl_workspace_mount_directory(
     directory_id: String,
 ) -> Result<(), IpcError> {
     let db_path = state.db_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-        svc.mount_directory(&workspace_id, &directory_id)?;
-        Ok(())
-    })
+    let (mount_ws, mount_dir) = (workspace_id.clone(), directory_id.clone());
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<Option<nuomi_core::services::WorkspaceView>, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            svc.mount_directory(&mount_ws, &mount_dir)?;
+            Ok(svc.get_open()?)
+        },
+    )
     .await
-    .map_err(join_err)?
+    .map_err(join_err)??;
+    // Auto-focus the freshly mounted directory when it belongs to the open
+    // workspace and is available (spec 5.5.1-3a).
+    if let Some(view) = view {
+        if view.entry.id == workspace_id {
+            if let Some(dir) = view
+                .directories
+                .iter()
+                .find(|d| d.directory.id == directory_id && d.available)
+            {
+                state.set_active_directory(&view.entry.id, &directory_id, &dir.directory.abs_path);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn impl_workspace_unmount_directory(
@@ -6824,8 +6948,12 @@ pub async fn impl_workspace_switch(
     )
     .await
     .map_err(join_err)??;
+    // The slot still references the outgoing workspace (kept for free
+    // per-workspace memory) — the sync falls through to the target's first
+    // available directory.
     sync_root_to_view(state, &view);
-    Ok(workspace_view_to_dto(&view))
+    let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
+    Ok(workspace_view_to_dto(&view, active.as_deref()))
 }
 
 pub async fn impl_workspace_get_open(
@@ -6841,7 +6969,60 @@ pub async fn impl_workspace_get_open(
     )
     .await
     .map_err(join_err)??;
-    Ok(view.as_ref().map(workspace_view_to_dto))
+    Ok(view.as_ref().map(|view| {
+        let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
+        workspace_view_to_dto(view, active.as_deref())
+    }))
+}
+
+/// Focuses (activates) a work directory of the open workspace: the sandbox
+/// root and FileTree root re-point to it and `workspace_for` resolves
+/// through it (spec 5.5.1-3). Rejects unknown workspaces/directories and
+/// directories missing on disk.
+pub async fn impl_workspace_focus_directory(
+    state: &AppState,
+    workspace_id: String,
+    directory_id: String,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let (focus_ws, focus_dir) = (workspace_id.clone(), directory_id.clone());
+    let (view, abs_path) = tokio::task::spawn_blocking(
+        move || -> Result<(nuomi_core::services::WorkspaceView, String), IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            let view = svc
+                .get_open()?
+                .filter(|v| v.entry.id == focus_ws)
+                .ok_or_else(|| {
+                    IpcError::from(nuomi_core::services::RegistryV2Error::NotFound(
+                        focus_ws.clone(),
+                    ))
+                })?;
+            let dir = view
+                .directories
+                .iter()
+                .find(|d| d.directory.id == focus_dir && d.directory.mounted)
+                .ok_or_else(|| {
+                    IpcError::from(nuomi_core::services::RegistryV2Error::DirectoryNotFound(
+                        focus_dir.clone(),
+                    ))
+                })?;
+            if !dir.available {
+                return Err(IpcError::from(
+                    nuomi_core::services::RegistryV2Error::DirectoryMissing(
+                        dir.directory.abs_path.clone(),
+                    ),
+                ));
+            }
+            let abs_path = dir.directory.abs_path.clone();
+            Ok((view, abs_path))
+        },
+    )
+    .await
+    .map_err(join_err)??;
+    state.set_active_directory(&view.entry.id, &directory_id, &abs_path);
+    let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
+    Ok(workspace_view_to_dto(&view, active.as_deref()))
 }
 
 pub async fn impl_get_open_set(state: &AppState) -> Result<OpenSetDto, IpcError> {

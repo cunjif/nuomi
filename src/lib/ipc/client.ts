@@ -335,6 +335,8 @@ export const ipc = {
     unwrap(current.workspaceUnmountDirectory(workspaceId, directoryId)),
   workspaceSwitch: (workspaceId: string) => unwrap(current.workspaceSwitch(workspaceId)),
   workspaceGetOpen: () => unwrap(current.workspaceGetOpen()),
+  workspaceFocusDirectory: (workspaceId: string, directoryId: string) =>
+    unwrap(current.workspaceFocusDirectory(workspaceId, directoryId)),
   pinWorkspace: (id: string) => unwrap(current.pinWorkspace(id)),
   unpinWorkspace: (id: string) => unwrap(current.unpinWorkspace(id)),
   getLayoutSnapshot: () => unwrap(current.getLayoutSnapshot()),

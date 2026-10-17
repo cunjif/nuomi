@@ -100,6 +100,26 @@ const errWithDetails = (code: string, message: string, details: JsonValue): Resu
   error: { generic: { code, message, details } },
 });
 
+/**
+ * Mirrors the backend resolver chain onto the DTO: the slotted directory
+ * when still mounted+available, else the first mounted+available one
+ * (added_at order). Marks `isActive` on every directory of `ws`.
+ */
+function markActiveDirectories(ws: WorkspaceEntryDto): WorkspaceEntryDto {
+  const dirs = ws.directories ?? [];
+  const mounted = dirs.filter((d) => d.mounted && d.available);
+  const active =
+    tdState.activeDirectoryId && mounted.some((d) => d.id === tdState.activeDirectoryId)
+      ? tdState.activeDirectoryId
+      : (mounted[0]?.id ?? null);
+  const marked = dirs.map((d) => ({ ...d, isActive: d.id === active }));
+  // Keep tdState rows in sync for direct assertions, but return a fresh
+  // object: real commands build a new DTO per call, and React Query skips
+  // re-renders when a queryFn returns the same reference.
+  ws.directories = marked;
+  return { ...ws, directories: marked };
+}
+
 /** Preset member roles every auto-formed team binds (deterministic). */
 const AUTO_FORM_ROLE_IDS = ["role-auto-planner", "role-auto-worker"] as const;
 
@@ -344,7 +364,10 @@ export function testDoubleCommands(): CommandSet {
       return ok({ root: tdState.workspaceRoot, configured: true });
     },
     async listWorkspaces() {
-      return ok(tdState.workspaces ?? []);
+      const list = tdState.workspaces ?? [];
+      const open = list.find((w) => w.isActive);
+      if (open) markActiveDirectories(open);
+      return ok(list);
     },
     async addWorkspace(path: string) {
       const entry: WorkspaceEntryDto = {
@@ -413,8 +436,9 @@ export function testDoubleCommands(): CommandSet {
       } as OpenSetDto);
     },
     async workspaceAddDirectory(path: string) {
-      // Mirror v2 single-open semantics: open workspace → join it, empty
-      // state → fresh workspace containing only this directory.
+      // Mirror v2 single-open semantics: open workspace → join it (the fresh
+      // directory auto-focuses), empty state → fresh workspace containing
+      // only this directory.
       const displayName = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
       const existing = tdState.workspaces ?? [];
       const open = existing.find((w) => w.isActive);
@@ -426,14 +450,17 @@ export function testDoubleCommands(): CommandSet {
           mounted: true,
           addedAt: Date.now(),
           available: true,
+          isActive: false,
         };
         open.directories = [...(open.directories ?? []), dir];
+        tdState.activeDirectoryId = dir.id;
         const names = open.directories.map((d) => d.displayName).join("-");
         open.label = names || null;
         open.labelFull = names || null;
         open.directoryPresent = open.directories.some((d) => d.available);
-        return ok(open);
+        return ok(markActiveDirectories(open));
       }
+      const dirId = nextId("dir");
       const entry: WorkspaceEntryDto = {
         id: nextId("ws"),
         rootPath: path,
@@ -447,17 +474,19 @@ export function testDoubleCommands(): CommandSet {
         labelFull: displayName,
         directories: [
           {
-            id: nextId("dir"),
+            id: dirId,
             absPath: path,
             displayName,
             mounted: true,
             addedAt: Date.now(),
             available: true,
+            isActive: false,
           },
         ],
       };
+      tdState.activeDirectoryId = dirId;
       tdState.workspaces = [...existing.map((w) => ({ ...w, isActive: false })), entry];
-      return ok(entry);
+      return ok(markActiveDirectories(entry));
     },
     async workspaceRemoveDirectory(workspaceId: string, directoryId: string) {
       const existing = tdState.workspaces ?? [];
@@ -470,6 +499,7 @@ export function testDoubleCommands(): CommandSet {
       target.labelFull = names || null;
       target.directoryPresent = remaining.some((d) => d.available);
       const workspaceClosed = remaining.length === 0;
+      if (tdState.activeDirectoryId === directoryId) tdState.activeDirectoryId = null;
       if (workspaceClosed) target.isActive = false;
       const result: RemoveDirectoryResultDto = { workspaceClosed };
       return ok(result);
@@ -480,6 +510,7 @@ export function testDoubleCommands(): CommandSet {
         ?.directories?.find((d) => d.id === directoryId);
       if (!dir) return err("workspace.directory_not_found", `directory #${directoryId} not found`);
       dir.mounted = true;
+      if (dir.available) tdState.activeDirectoryId = directoryId;
       return ok(null);
     },
     async workspaceUnmountDirectory(workspaceId: string, directoryId: string) {
@@ -488,6 +519,7 @@ export function testDoubleCommands(): CommandSet {
         ?.directories?.find((d) => d.id === directoryId);
       if (!dir) return err("workspace.directory_not_found", `directory #${directoryId} not found`);
       dir.mounted = false;
+      if (tdState.activeDirectoryId === directoryId) tdState.activeDirectoryId = null;
       return ok(null);
     },
     async workspaceSwitch(id: string) {
@@ -499,11 +531,23 @@ export function testDoubleCommands(): CommandSet {
         w.isFocused = w.id === id;
         w.isOpen = w.id === id ? true : w.isOpen;
       }
-      return ok(target);
+      return ok(markActiveDirectories(target));
     },
     async workspaceGetOpen() {
       const open = (tdState.workspaces ?? []).find((w) => w.isActive);
-      return ok(open ?? null);
+      return ok(open ? markActiveDirectories(open) : null);
+    },
+    async workspaceFocusDirectory(workspaceId: string, directoryId: string) {
+      const open = (tdState.workspaces ?? []).find((w) => w.isActive);
+      if (!open || open.id !== workspaceId)
+        return err("workspace.not_found", `workspace #${workspaceId} not found`);
+      const dir = (open.directories ?? []).find((d) => d.id === directoryId && d.mounted);
+      if (!dir)
+        return err("workspace.directory_not_found", `directory #${directoryId} not found`);
+      if (!dir.available)
+        return err("workspace.directory_missing", `directory #${directoryId} missing on disk`);
+      tdState.activeDirectoryId = directoryId;
+      return ok(markActiveDirectories(open));
     },
     async pinWorkspace(_id: string) {
       return ok(null);

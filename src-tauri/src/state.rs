@@ -140,6 +140,13 @@ pub struct AppState {
     /// Workspace registry service handle. Constructed from `db_path` at boot;
     /// each call opens a fresh connection (cheap to clone — just a PathBuf).
     pub workspace_registry: WorkspaceRegistry,
+    /// In-memory active (focused) work directory of the open workspace:
+    /// `(workspace_id, directory_id)`. Session state only — restart falls
+    /// back to the first available directory (ADR-0021 interim single-root
+    /// semantics). The id-mismatch guard gives free per-workspace memory:
+    /// switching away and back keeps the slot intact until another workspace
+    /// takes it.
+    pub active_directory: Arc<std::sync::RwLock<Option<(String, String)>>>,
     /// Secret store backing provider keyring references. OS keyring in prod;
     /// tests/demo inject an in-memory store.
     pub secrets: Arc<dyn SecretStore>,
@@ -242,7 +249,32 @@ impl AppState {
             .map_err(join_err)??
         };
         let workspace_resolve_ms = settings_started.elapsed().as_millis() as u64;
+        // ADR-0021: the active registry row may be a v2 workspace whose
+        // root_path column is a placeholder uuid — prefer the workspace's
+        // first available work directory (added_at order); it matches what
+        // `workspace_for` resolves at runtime.
+        let active_directory_root = {
+            let path = db_path.clone();
+            let ws_id = active_from_registry.as_ref().map(|e| e.id.clone());
+            tokio::task::spawn_blocking(move || -> Option<PathBuf> {
+                let ws_id = ws_id?;
+                let db = nuomi_core::store::Db::open(&path).ok()?;
+                let dirs =
+                    nuomi_core::store::repos::work_directories::list_by_workspace_with_availability(
+                        &db.0,
+                        &ws_id,
+                    )
+                    .ok()?;
+                dirs.iter()
+                    .find(|d| d.available)
+                    .map(|d| PathBuf::from(&d.directory.abs_path))
+            })
+            .await
+            .ok()
+            .flatten()
+        };
         let workspace_root = env_root
+            .or(active_directory_root)
             .or_else(|| active_from_registry.map(|e| PathBuf::from(e.root_path)))
             .or_else(|| persisted.map(PathBuf::from))
             .unwrap_or(default_workspace);
@@ -285,6 +317,7 @@ impl AppState {
             workspace_root: std::sync::Arc::new(std::sync::RwLock::new(workspace_root)),
             workspace_env_configured,
             workspace_registry: registry,
+            active_directory: Arc::new(std::sync::RwLock::new(None)),
             secrets,
             run_cancels: RunCancelRegistry::default(),
             session_cancels: SessionCancelRegistry::default(),
@@ -337,6 +370,85 @@ impl AppState {
         GitService::new(self.current_workspace())
     }
 
+    /// The in-memory active (focused) work directory of the open workspace.
+    pub fn active_directory(&self) -> Option<(String, String)> {
+        self.active_directory
+            .read()
+            .expect("active directory lock poisoned")
+            .clone()
+    }
+
+    /// Sets the active (focused) work directory of the open workspace and
+    /// swaps the in-memory sandbox root to it. Availability was validated by
+    /// the caller; the registry `is_active` flag is owned by the v2 service
+    /// (`focus_and_sync`), so this deliberately skips the legacy best-effort
+    /// activate in [`AppState::switch_workspace`].
+    pub fn set_active_directory(&self, workspace_id: &str, directory_id: &str, abs_path: &str) {
+        *self
+            .active_directory
+            .write()
+            .expect("active directory lock poisoned") =
+            Some((workspace_id.to_string(), directory_id.to_string()));
+        self.set_workspace_root(PathBuf::from(abs_path));
+    }
+
+    /// Clears the active-directory slot when it references `workspace_id`
+    /// (optionally only when it is exactly `directory_id`); silent no-op
+    /// otherwise. The resolver's fallback chain picks the first available
+    /// directory on the next access.
+    pub fn clear_active_directory(&self, workspace_id: &str, directory_id: Option<&str>) {
+        let mut slot = self
+            .active_directory
+            .write()
+            .expect("active directory lock poisoned");
+        if let Some((ws, dir)) = slot.as_ref() {
+            let dir_matches = match directory_id {
+                Some(d) => d == dir.as_str(),
+                None => true,
+            };
+            if ws == workspace_id && dir_matches {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Swaps the in-memory sandbox root without registry side effects.
+    pub fn set_workspace_root(&self, path: PathBuf) {
+        let mut root = self
+            .workspace_root
+            .write()
+            .expect("workspace lock poisoned");
+        *root = path;
+    }
+
+    /// Resolves the effective sandbox root for `workspace_id` (ADR-0021):
+    /// the active work directory first, then the first mounted+available
+    /// directory (added_at order), then the legacy `root_path` column (v1
+    /// rows). Active directories must be mounted — unmounted ones are not
+    /// part of the visible set.
+    fn resolve_workspace_root(&self, workspace_id: &str, legacy_root: &str) -> CoreResult<PathBuf> {
+        let active = self.active_directory();
+        let db = nuomi_core::store::Db::open(self.db_path.as_ref())?;
+        let dirs = nuomi_core::store::repos::work_directories::list_by_workspace_with_availability(
+            &db.0,
+            workspace_id,
+        )?;
+        if let Some((ws, dir_id)) = active {
+            if ws == workspace_id {
+                if let Some(d) = dirs
+                    .iter()
+                    .find(|d| d.directory.id == dir_id && d.available && d.directory.mounted)
+                {
+                    return Ok(PathBuf::from(&d.directory.abs_path));
+                }
+            }
+        }
+        if let Some(d) = dirs.iter().find(|d| d.available && d.directory.mounted) {
+            return Ok(PathBuf::from(&d.directory.abs_path));
+        }
+        Ok(PathBuf::from(legacy_root))
+    }
+
     /// Resolves a `WorkspaceService` for an explicit workspace id (ADR 0017).
     /// Returns the active workspace service when `workspace_id` is `None`
     /// (backward-compatible with pre-ADR-0017 callers). Returns
@@ -358,7 +470,8 @@ impl AppState {
                             id.to_string(),
                         ))
                     })?;
-                Ok(WorkspaceService::new(PathBuf::from(entry.root_path))?)
+                let root = self.resolve_workspace_root(id, &entry.root_path)?;
+                Ok(WorkspaceService::new(root)?)
             }
             None => self.workspace(),
         }
@@ -381,7 +494,8 @@ impl AppState {
                             id.to_string(),
                         ))
                     })?;
-                Ok(GitService::new(PathBuf::from(entry.root_path)))
+                let root = self.resolve_workspace_root(id, &entry.root_path)?;
+                Ok(GitService::new(root))
             }
             None => Ok(self.git()),
         }
