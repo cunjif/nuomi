@@ -14,6 +14,7 @@ pub mod presets;
 pub mod reference_pre_check;
 pub mod role_director;
 pub mod scheduler_service;
+pub mod session_context;
 pub mod single_role_materializer;
 pub mod team_former;
 pub mod team_runner;
@@ -70,6 +71,10 @@ pub use role_director::{
 pub use scheduler_service::{
     next_after, parse_schedule, CronExpr, FieldSet, ScheduleSpec, SchedulerError, SchedulerHandle,
     SchedulerRunner,
+};
+pub use session_context::{
+    get_session_context_usage, optimize_session_prompt, SessionContextError, SessionContextSection,
+    SessionContextUsage,
 };
 pub use single_role_materializer::{materialize_single_role, RoleOverlay, SingleRoleContext};
 pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMember};
