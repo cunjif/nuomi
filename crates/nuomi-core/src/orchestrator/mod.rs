@@ -13,7 +13,7 @@ pub use delegation::{
     DelegateExecutor, DelegationBroker, DelegationError, DelegationEvent, DelegationOutcome,
     DelegationTask, TaskId, TaskStatus,
 };
-pub use group_chat::{GroupChatExecutor, GroupChatOutcome, HANDOFF_TOOL};
+pub use group_chat::{GroupChatExecutor, GroupChatOutcome, GroupDeltaBridge, HANDOFF_TOOL};
 pub use input::{ProviderResolver, TeamRunInput};
 pub use pipeline::{PipelineExecutor, PipelineOutcome, PipelineStep};
 pub use router::RouterExecutor;

@@ -518,6 +518,7 @@ impl NuomiKernel {
                 model: effective_model,
                 external_session_id: external_session_id.clone(),
                 role_id: overlay_role_id.clone(),
+                session_id: Some(session_id.to_string()),
                 ..LoopConfig::default()
             },
         )
@@ -571,8 +572,11 @@ impl NuomiKernel {
         // same persistence phase: one spawn_blocking round-trip,
         // check-then-update so the derived name is written exactly once.
         let auto_title = derive_title(task);
-        let mut fresh: Vec<ChatMessage> =
-            result.transcript.get(history_len..).unwrap_or_default().to_vec();
+        let mut fresh: Vec<ChatMessage> = result
+            .transcript
+            .get(history_len..)
+            .unwrap_or_default()
+            .to_vec();
         if let (Some(seq), Some(ref excerpt)) = (quoted_event_seq, &quoted_excerpt) {
             for msg in fresh.iter_mut() {
                 if msg.role == MessageRole::User && msg.quoted_event_seq.is_none() {
@@ -747,12 +751,7 @@ impl NuomiKernel {
                             }
                         }
                         appended.push(repos::events::append(
-                            conn,
-                            "session",
-                            &sid,
-                            "message",
-                            &payload,
-                            now,
+                            conn, "session", &sid, "message", &payload, now,
                         )?);
                     }
                     MessageRole::Assistant => {

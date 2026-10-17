@@ -36,6 +36,10 @@ pub struct LoopConfig {
     /// CLI Agent 外部会话 id（ADR 0012 D8），传入 ChatRequest 以让 CLI
     /// adapter 在后续轮次生成 resume 参数。非 CLI provider 忽略。
     pub external_session_id: Option<String>,
+    /// Session this loop runs in — scopes the `session.cancelled` bus event
+    /// so the shell bridge can route it onto `event://session/{id}`
+    /// (ADR-0002 session topics require a `sessionId` in the payload).
+    pub session_id: Option<String>,
 }
 
 impl Default for LoopConfig {
@@ -47,6 +51,7 @@ impl Default for LoopConfig {
             role_id: None,
             cache_scope: None,
             external_session_id: None,
+            session_id: None,
         }
     }
 }
@@ -280,7 +285,15 @@ impl LoopEngine {
                     Some(words.join(" "))
                 }
             };
-            if let Ok(hits) = mem.recall(keyword, self.config.memory_tag.clone(), self.config.role_id.clone(), 5).await {
+            if let Ok(hits) = mem
+                .recall(
+                    keyword,
+                    self.config.memory_tag.clone(),
+                    self.config.role_id.clone(),
+                    5,
+                )
+                .await
+            {
                 if !hits.is_empty() {
                     let digest = hits
                         .iter()
@@ -299,10 +312,13 @@ impl LoopEngine {
         let mut last_cli_session_id: Option<String> = None;
         while steps < self.config.max_steps {
             if self.cancelled() {
-                ctx.publish(Event::new(
-                    "session.cancelled",
-                    serde_json::json!({ "steps": steps }),
-                ));
+                // Session-scoped payload: the shell bridge drops session
+                // topics that carry no `sessionId` (they cannot be routed).
+                let mut payload = serde_json::json!({ "steps": steps });
+                if let Some(sid) = &self.config.session_id {
+                    payload["sessionId"] = serde_json::json!(sid);
+                }
+                ctx.publish(Event::new("session.cancelled", payload));
                 return Ok(LoopRunResult {
                     transcript,
                     final_text: String::new(),
@@ -603,6 +619,7 @@ mod tests {
                 role_id: None,
                 cache_scope: None,
                 external_session_id: None,
+                session_id: None,
             },
         );
         let result = engine
@@ -618,9 +635,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path: Arc<str> = Arc::from(dir.path().join("t.db").to_string_lossy().to_string());
         let mem = MemoryService::new(db_path.clone());
-        mem.remember("user prefers rust".into(), None, vec![], "note", false, None)
-            .await
-            .unwrap();
+        mem.remember(
+            "user prefers rust".into(),
+            None,
+            vec![],
+            "note",
+            false,
+            None,
+        )
+        .await
+        .unwrap();
 
         let provider = Arc::new(FakeLlm::new("fake", vec![FakeLlm::response("done")]));
         let ctx = Context::default();
@@ -752,6 +776,35 @@ mod tests {
             .unwrap();
         assert_eq!(result.steps, 0);
         assert!(result.final_text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelled_event_carries_session_id_for_routing() {
+        let provider = Arc::new(FakeLlm::new("fake", vec![FakeLlm::response("unused")]));
+        let token = CancellationToken::new();
+        token.cancel();
+        let engine = LoopEngine::new(
+            provider,
+            LoopConfig {
+                session_id: Some("s-cxl".into()),
+                ..LoopConfig::default()
+            },
+        )
+        .with_cancel(token);
+        let ctx = Context::default();
+        let mut rx = ctx.subscribe();
+        let tools = ToolRegistry::new();
+        let _ = engine.run(&ctx, &tools, None, None, "task").await.unwrap();
+
+        let mut ev = rx.recv().await.expect("bus must carry events for the run");
+        while ev.topic != "session.cancelled" {
+            ev = rx
+                .recv()
+                .await
+                .expect("session.cancelled must be published on cancel");
+        }
+        assert_eq!(ev.payload["sessionId"], "s-cxl");
+        assert_eq!(ev.payload["steps"], 0);
     }
 
     #[tokio::test]

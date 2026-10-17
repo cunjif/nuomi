@@ -166,7 +166,8 @@ pub(crate) async fn record_turn(
         }
     }
     let sid = session_id.to_string();
-    wb.with_db(move |c| repos::events::append(c, "session", &sid, "message", &payload, now_ms()))
+    let record = wb
+        .with_db(move |c| repos::events::append(c, "session", &sid, "message", &payload, now_ms()))
         .await
         .map_err(|e| super::OrchestratorError::Store(e.to_string()))?;
 
@@ -178,6 +179,10 @@ pub(crate) async fn record_turn(
                 "roleId": role.id,
                 "roleName": role.name,
                 "content": body,
+                // Authoritative events-table seq: lets the frontend dedupe
+                // the live copy once history replay lands (ADR-0002 wire
+                // contract documented in src/lib/events/types.ts).
+                "seq": record.seq,
             }),
         ));
     }
@@ -189,6 +194,7 @@ pub(crate) async fn record_turn(
 /// the session aggregate, so group-chat speaker selection is auditable and
 /// replayable. Does not write to the whiteboard — a selector pick is an
 /// orchestration decision, not a shared note.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn record_selector_decision(
     wb: &WhiteBoardService,
     session_id: &str,
@@ -196,6 +202,7 @@ pub(crate) async fn record_selector_decision(
     candidates: Vec<String>,
     chosen_index: usize,
     chosen_role_id: Option<&str>,
+    chosen_role_name: Option<&str>,
     converged: bool,
 ) -> Result<(), super::OrchestratorError> {
     let payload = serde_json::json!({
@@ -203,17 +210,32 @@ pub(crate) async fn record_selector_decision(
         "candidates": candidates,
         "chosen_index": chosen_index,
         "chosen_role_id": chosen_role_id,
+        "chosen_role_name": chosen_role_name,
         "converged": converged,
     });
     let payload_for_bus = payload.clone();
     let sid = session_id.to_string();
-    wb.with_db(move |c| repos::events::append(c, "session", &sid, "selector_decision", &payload, now_ms()))
+    let record = wb
+        .with_db(move |c| {
+            repos::events::append(c, "session", &sid, "selector_decision", &payload, now_ms())
+        })
         .await
         .map_err(|e| super::OrchestratorError::Store(e.to_string()))?;
     if let Some(bus) = &wb.bus {
+        // `sessionId` is mandatory on the session channel: without it the
+        // ADR-0002 bridge drops the event (it cannot route safely).
         bus.publish(crate::harness::Event::new(
             "session.selector_decision",
-            payload_for_bus,
+            serde_json::json!({
+                "sessionId": session_id,
+                "seq": record.seq,
+                "strategy": payload_for_bus["strategy"],
+                "candidates": payload_for_bus["candidates"],
+                "chosenIndex": payload_for_bus["chosen_index"],
+                "chosenRoleId": payload_for_bus["chosen_role_id"],
+                "chosenRoleName": payload_for_bus["chosen_role_name"],
+                "converged": payload_for_bus["converged"],
+            }),
         ));
     }
     Ok(())
@@ -353,5 +375,102 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| e.kind == "whiteboard" && e.payload["noteId"] == note.id));
+    }
+
+    /// Seeds a session row and returns a bus-attached WhiteBoardService.
+    async fn bus_attached_board() -> (
+        WhiteBoardService,
+        crate::harness::EventBus,
+        String,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wb-live.db").to_string_lossy().to_string();
+        let conn = crate::store::Db::open(&path).unwrap();
+        crate::store::migrations::run(&conn.0).unwrap();
+        repos::sessions::insert(
+            &conn.0,
+            &crate::domain::Session::new_chat(SESSION.into(), String::new(), 1),
+        )
+        .unwrap();
+        for rid in [ROLE_A, ROLE_B] {
+            conn.0
+                .execute(
+                    "INSERT INTO roles (id, name, created_at, updated_at) VALUES (?1, ?1, 1, 1)",
+                    (rid,),
+                )
+                .unwrap();
+        }
+        drop(conn);
+        let bus = crate::harness::EventBus::default();
+        let wb = WhiteBoardService::new(path.as_str()).with_bus(bus.clone());
+        (wb, bus, path, dir)
+    }
+
+    #[tokio::test]
+    async fn record_turn_bus_payload_carries_authoritative_seq() {
+        let (wb, bus, _path, _dir) = bus_attached_board().await;
+        let mut rx = bus.subscribe();
+        let role: crate::domain::Role = serde_json::from_value(json!({
+            "id": ROLE_A,
+            "name": "Alpha",
+            "provider_ids": [],
+            "tool_allowlist": [],
+            "required_capabilities": [],
+            "params": {},
+            "builtin": false,
+            "generated": false,
+            "ephemeral": false,
+            "created_at": 1,
+            "updated_at": 1
+        }))
+        .unwrap();
+
+        super::record_turn(&wb, SESSION, &role, "message", "hello team", None, None)
+            .await
+            .unwrap();
+
+        // Ordering: the whiteboard mirror lands first (seq 1), then the
+        // durable message record (seq 2) whose bus payload carries the
+        // authoritative events-table seq for frontend dedupe.
+        let first = rx.recv().await.unwrap();
+        assert_eq!(first.topic, "session.whiteboard");
+        let second = rx.recv().await.unwrap();
+        assert_eq!(second.topic, "session.message");
+        assert_eq!(second.payload["sessionId"], SESSION);
+        assert_eq!(second.payload["roleId"], ROLE_A);
+        assert_eq!(second.payload["roleName"], "Alpha");
+        assert_eq!(second.payload["content"], "hello team");
+        assert_eq!(second.payload["seq"], 2);
+    }
+
+    #[tokio::test]
+    async fn selector_decision_bus_payload_routes_and_identifies_speaker() {
+        let (wb, bus, _path, _dir) = bus_attached_board().await;
+        let mut rx = bus.subscribe();
+
+        super::record_selector_decision(
+            &wb,
+            SESSION,
+            "round_robin",
+            vec![ROLE_A.into(), ROLE_B.into()],
+            0,
+            Some(ROLE_A),
+            Some("Alpha"),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let ev = rx.recv().await.unwrap();
+        assert_eq!(ev.topic, "session.selector_decision");
+        // `sessionId` is what the ADR-0002 bridge needs to route the event
+        // onto `event://session/{id}`; without it the event is dropped.
+        assert_eq!(ev.payload["sessionId"], SESSION);
+        assert_eq!(ev.payload["seq"], 1);
+        assert_eq!(ev.payload["strategy"], "round_robin");
+        assert_eq!(ev.payload["chosenRoleId"], ROLE_A);
+        assert_eq!(ev.payload["chosenRoleName"], "Alpha");
+        assert_eq!(ev.payload["converged"], false);
     }
 }

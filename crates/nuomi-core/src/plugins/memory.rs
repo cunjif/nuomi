@@ -183,7 +183,10 @@ impl MemoryService {
     pub async fn enforce_retention(&self, retention_days: u32) -> Result<u64, StoreError> {
         let cutoff = domain::now_ms() - (retention_days as i64) * 86_400_000;
         self.with_db(move |c| {
-            let n = c.execute("DELETE FROM memory_entries WHERE created_at < ?1", params![cutoff])?;
+            let n = c.execute(
+                "DELETE FROM memory_entries WHERE created_at < ?1",
+                params![cutoff],
+            )?;
             Ok(n as u64)
         })
         .await

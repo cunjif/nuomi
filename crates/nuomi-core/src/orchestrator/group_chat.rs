@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 
 use crate::domain::{AutoRemember, RoleMemoryConfig, Team};
 use crate::plugins::MemoryService;
-use crate::providers::{ChatMessage, ChatRequest, ToolCall, ToolDef};
+use crate::providers::{
+    ChatMessage, ChatRequest, ChatResponse, LlmProvider, StreamEvent, ToolCall, ToolDef,
+};
 
 use super::input::{ProviderResolver, TeamRunInput};
 use super::selector::{GroupMember, GroupState};
@@ -19,6 +21,11 @@ use super::OrchestratorError;
 
 /// Internal tool the model calls to hand control to another member.
 pub const HANDOFF_TOOL: &str = "handoff_to_next";
+
+/// Live-stream sink for one speaker turn: `(role_id, role_name, delta)`.
+/// Wired by the caller (team_runner) to publish `session.delta` events so
+/// group-chat views render streaming utterances per agent (SPEC 5.8.1-4).
+pub type GroupDeltaBridge = Arc<dyn Fn(&str, &str, &str) + Send + Sync>;
 
 fn handoff_tool_def() -> ToolDef {
     ToolDef {
@@ -78,6 +85,9 @@ pub struct GroupChatExecutor {
     /// written after each utterance when the role opts in (ADR 0019 extended
     /// to group chat). `None` keeps the legacy no-memory behaviour.
     memory: Option<MemoryService>,
+    /// Optional live-stream sink: every text delta of the current speaker is
+    /// forwarded here before the utterance completes.
+    delta_bridge: Option<GroupDeltaBridge>,
 }
 
 impl GroupChatExecutor {
@@ -85,6 +95,7 @@ impl GroupChatExecutor {
         Self {
             selector,
             memory: None,
+            delta_bridge: None,
         }
     }
 
@@ -92,6 +103,12 @@ impl GroupChatExecutor {
     /// per-agent memories and persists utterances when configured.
     pub fn with_memory(mut self, memory: MemoryService) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// Attaches a live-stream sink for per-agent deltas (SPEC 5.8.1-4).
+    pub fn with_delta_bridge(mut self, bridge: GroupDeltaBridge) -> Self {
+        self.delta_bridge = Some(bridge);
         self
     }
 
@@ -136,6 +153,11 @@ impl GroupChatExecutor {
                     } else {
                         Some(state.members[chosen].role_id.as_str())
                     };
+                    let chosen_role_name = if converged_signal || chosen >= state.members.len() {
+                        None
+                    } else {
+                        Some(state.members[chosen].name.as_str())
+                    };
                     let _ = record_selector_decision(
                         wb,
                         &input.session_id,
@@ -143,6 +165,7 @@ impl GroupChatExecutor {
                         candidates,
                         chosen,
                         chosen_role_id,
+                        chosen_role_name,
                         converged_signal,
                     )
                     .await;
@@ -172,13 +195,33 @@ impl GroupChatExecutor {
             let role = input.require_role(&state.members[speaker].role_id)?;
             let provider = providers.resolve(role);
             let request = Self::build_request(input, role, &state, wb, &self.memory).await?;
-            let response = provider
-                .complete(&request)
+            let response = Self::stream_turn(&provider, &request, role, self.delta_bridge.as_ref())
                 .await
                 .map_err(|e| OrchestratorError::Provider(e.to_string()))?;
+            // Non-SSE endpoints answer a streaming request with an empty SSE
+            // body (no `data:` lines → no deltas, empty Completed). Fall back
+            // to one-shot completion so utterances never go silent — parity
+            // with the pre-streaming behaviour.
+            let response = if response.content.is_empty() && response.tool_calls.is_empty() {
+                provider
+                    .complete(&request)
+                    .await
+                    .map_err(|e| OrchestratorError::Provider(e.to_string()))?
+            } else {
+                response
+            };
 
             state.push_turn(speaker, response.content.clone());
-            record_turn(wb, &input.session_id, role, "message", &response.content, None, None).await?;
+            record_turn(
+                wb,
+                &input.session_id,
+                role,
+                "message",
+                &response.content,
+                None,
+                None,
+            )
+            .await?;
 
             // Per-agent memory write (ADR 0019 extended to group chat): when
             // the speaking role opts into auto_remember, persist its own
@@ -197,7 +240,14 @@ impl GroupChatExecutor {
                         let text = response.content.clone();
                         tokio::spawn(async move {
                             let _ = mem
-                                .remember(text, Some(sid), tags, "group_chat_utterance", false, Some(rid))
+                                .remember(
+                                    text,
+                                    Some(sid),
+                                    tags,
+                                    "group_chat_utterance",
+                                    false,
+                                    Some(rid),
+                                )
                                 .await;
                         });
                     }
@@ -248,6 +298,37 @@ impl GroupChatExecutor {
             transcript: state.turns,
             converged,
             rounds,
+        })
+    }
+
+    /// Consumes one speaker turn as a live stream: every `TextDelta` is
+    /// forwarded to the delta bridge (live `session.delta` mirroring) and the
+    /// terminal `Completed` event yields the assembled response. If a
+    /// provider ends its stream without `Completed`, the deltas collected so
+    /// far are assembled defensively.
+    async fn stream_turn(
+        provider: &Arc<dyn LlmProvider>,
+        request: &ChatRequest,
+        role: &crate::domain::Role,
+        bridge: Option<&GroupDeltaBridge>,
+    ) -> Result<ChatResponse, crate::providers::ProviderError> {
+        use futures::StreamExt;
+        let mut stream = provider.stream(request);
+        let mut assembled = String::new();
+        while let Some(event) = stream.next().await {
+            match event? {
+                StreamEvent::TextDelta(delta) => {
+                    assembled.push_str(&delta);
+                    if let Some(cb) = bridge {
+                        cb(&role.id, &role.name, &delta);
+                    }
+                }
+                StreamEvent::Completed(response) => return Ok(response),
+            }
+        }
+        Ok(ChatResponse {
+            content: assembled,
+            ..ChatResponse::default()
         })
     }
 

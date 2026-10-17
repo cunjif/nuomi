@@ -205,8 +205,8 @@ pub async fn run_team(
     }
 
     let mut wb = WhiteBoardService::new(db_path.clone());
-    if let Some(bus) = bus {
-        wb = wb.with_bus(bus);
+    if let Some(ref bus) = bus {
+        wb = wb.with_bus(bus.clone());
     }
 
     let input = TeamRunInput {
@@ -265,8 +265,32 @@ pub async fn run_team(
                 } else {
                     Arc::new(LlmSelector::new(default_provider, input.model.clone()))
                 };
+            // Live-stream bridge (SPEC 5.8.1-4): publish every speaker delta
+            // as a `session.delta` event carrying the speaking agent's
+            // identity so group-chat views can render per-agent streaming.
+            let delta_bridge: crate::orchestrator::GroupDeltaBridge = if let Some(ref bus) = bus {
+                let bus = bus.clone();
+                let sid = session_id.to_string();
+                let counter = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+                Arc::new(move |role_id: &str, role_name: &str, delta: &str| {
+                    let seq = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    bus.publish(crate::harness::Event::new(
+                        "session.delta",
+                        serde_json::json!({
+                            "sessionId": sid,
+                            "text": delta,
+                            "seq": seq,
+                            "roleId": role_id,
+                            "roleName": role_name,
+                        }),
+                    ));
+                })
+            } else {
+                Arc::new(|_role_id: &str, _role_name: &str, _delta: &str| {})
+            };
             let outcome = GroupChatExecutor::new(selector)
                 .with_memory(MemoryService::new(db_path.clone()))
+                .with_delta_bridge(delta_bridge)
                 .run(&input, &resolver, &wb)
                 .await?;
             Ok(TeamRunOutcome {

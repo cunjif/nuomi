@@ -145,7 +145,16 @@ impl RouterExecutor {
             .await
             .map_err(|e| OrchestratorError::Provider(e.to_string()))?;
 
-        record_turn(wb, &input.session_id, &role, "finding", &response.content, None, None).await?;
+        record_turn(
+            wb,
+            &input.session_id,
+            &role,
+            "finding",
+            &response.content,
+            None,
+            None,
+        )
+        .await?;
 
         // GC hook: a successfully used temp role is removed immediately;
         // failed attempts are left for the run-end ephemeral GC

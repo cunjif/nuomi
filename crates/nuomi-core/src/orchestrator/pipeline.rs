@@ -62,7 +62,16 @@ impl PipelineExecutor {
 
             // Durable side effects after the model answer: whiteboard note +
             // append-only event (persist-before-anything-else discipline).
-            record_turn(wb, &input.session_id, role, "finding", &response.content, None, None).await?;
+            record_turn(
+                wb,
+                &input.session_id,
+                role,
+                "finding",
+                &response.content,
+                None,
+                None,
+            )
+            .await?;
 
             current = response.content.clone();
             steps.push(PipelineStep {
