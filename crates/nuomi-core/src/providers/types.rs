@@ -23,6 +23,19 @@ pub struct ToolCall {
     pub arguments: serde_json::Value,
 }
 
+/// An image attached to a user message (multimodal input, task 4.1 /
+/// spec 5.3.1-2). Translated by each client into its vendor wire format
+/// (OpenAI `image_url`, Anthropic `image`); providers without vision
+/// support never receive one — the upper layer (steward context builder)
+/// degrades to a textual placeholder instead.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatImagePart {
+    /// MIME type, e.g. `image/png`.
+    pub mime_type: String,
+    /// Raw base64 payload (no data-URI prefix).
+    pub base64: String,
+}
+
 /// A message in the unified conversation format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -40,6 +53,11 @@ pub struct ChatMessage {
     /// Excerpt of the quoted message (auto-extracted by backend).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quoted_excerpt: Option<String>,
+    /// Images attached to a user message (multimodal input). Empty for all
+    /// existing call sites — `skip_serializing_if` keeps persisted payloads
+    /// byte-identical with the pre-multimodal format.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_parts: Vec<ChatImagePart>,
 }
 
 impl ChatMessage {
@@ -51,6 +69,7 @@ impl ChatMessage {
             tool_call_id: None,
             quoted_event_seq: None,
             quoted_excerpt: None,
+            image_parts: Vec::new(),
         }
     }
     pub fn user(content: impl Into<String>) -> Self {
@@ -61,6 +80,19 @@ impl ChatMessage {
             tool_call_id: None,
             quoted_event_seq: None,
             quoted_excerpt: None,
+            image_parts: Vec::new(),
+        }
+    }
+    /// User message with attached images (multimodal input, task 4.1).
+    pub fn user_with_images(content: impl Into<String>, image_parts: Vec<ChatImagePart>) -> Self {
+        Self {
+            role: MessageRole::User,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            quoted_event_seq: None,
+            quoted_excerpt: None,
+            image_parts,
         }
     }
     pub fn user_with_quote(
@@ -75,6 +107,7 @@ impl ChatMessage {
             tool_call_id: None,
             quoted_event_seq: Some(quoted_event_seq),
             quoted_excerpt: Some(quoted_excerpt.into()),
+            image_parts: Vec::new(),
         }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
@@ -85,6 +118,7 @@ impl ChatMessage {
             tool_call_id: None,
             quoted_event_seq: None,
             quoted_excerpt: None,
+            image_parts: Vec::new(),
         }
     }
     pub fn tool_result(call_id: impl Into<String>, content: impl Into<String>) -> Self {
@@ -95,6 +129,7 @@ impl ChatMessage {
             tool_call_id: Some(call_id.into()),
             quoted_event_seq: None,
             quoted_excerpt: None,
+            image_parts: Vec::new(),
         }
     }
 }
@@ -192,5 +227,45 @@ impl ChatRequest {
             cache_scope: None,
             external_session_id: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_message_deserializes_legacy_payload_without_image_parts() {
+        // Old persisted JSON (pre-multimodal) carries no image_parts key —
+        // `serde(default)` must keep deserialization working.
+        let legacy = r#"{"role":"user","content":"hi"}"#;
+        let m: ChatMessage = serde_json::from_str(legacy).unwrap();
+        assert_eq!(m.role, MessageRole::User);
+        assert_eq!(m.content, "hi");
+        assert!(m.image_parts.is_empty());
+    }
+
+    #[test]
+    fn chat_message_skips_image_parts_when_empty() {
+        let s = serde_json::to_string(&ChatMessage::user("hi")).unwrap();
+        assert_eq!(s, r#"{"role":"user","content":"hi"}"#);
+    }
+
+    #[test]
+    fn chat_message_roundtrips_image_parts() {
+        let m = ChatMessage::user_with_images(
+            "看看",
+            vec![ChatImagePart {
+                mime_type: "image/png".into(),
+                base64: "aGk=".into(),
+            }],
+        );
+        let s = serde_json::to_string(&m).unwrap();
+        assert!(
+            s.contains(r#""image_parts":[{"mime_type":"image/png","base64":"aGk="}]"#),
+            "got: {s}"
+        );
+        let back: ChatMessage = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, m);
     }
 }

@@ -97,7 +97,26 @@ pub(crate) fn build_body(request: &ChatRequest, stream: bool) -> Value {
     for m in &request.messages {
         match m.role {
             MessageRole::System | MessageRole::User => {
-                messages.push(json!({ "role": "user", "content": m.content }));
+                // Multimodal input (task 4.1): images force the content-array
+                // form (`text` + `image` blocks with base64 sources). Without
+                // images the plain string form stays — byte-level compatible
+                // with the pre-multimodal wire format.
+                if m.image_parts.is_empty() {
+                    messages.push(json!({ "role": "user", "content": m.content }));
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": m.content })];
+                    for img in &m.image_parts {
+                        blocks.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": img.mime_type,
+                                "data": img.base64,
+                            },
+                        }));
+                    }
+                    messages.push(json!({ "role": "user", "content": blocks }));
+                }
             }
             MessageRole::Tool => {
                 // Tool results are user-turn content blocks in Anthropic protocol.
@@ -378,5 +397,51 @@ fn finalize_tool_args(state: &mut ChatResponse) {
             Value::String(s) => serde_json::from_str(s).unwrap_or(Value::Null),
             other => other.clone(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::types::ChatImagePart;
+
+    #[test]
+    fn user_images_translate_to_anthropic_blocks() {
+        let mut request = ChatRequest::simple("claude", "sys", "看看这张图");
+        request.messages[0].image_parts = vec![ChatImagePart {
+            mime_type: "image/jpeg".into(),
+            base64: "aGk=".into(),
+        }];
+        let body = build_body(&request, false);
+        // Anthropic keeps the system prompt top-level; messages[0] is the
+        // user turn carrying the content blocks.
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0], json!({ "type": "text", "text": "看看这张图" }));
+        assert_eq!(
+            content[1],
+            json!({
+                "type": "image",
+                "source": { "type": "base64", "media_type": "image/jpeg", "data": "aGk=" },
+            })
+        );
+    }
+
+    #[test]
+    fn empty_images_keep_plain_string_content() {
+        let request = ChatRequest::simple("claude", "sys", "hi");
+        let body = build_body(&request, false);
+        // Byte-level compatibility: without images the wire body equals the
+        // pre-multimodal legacy shape exactly (plain string content, forced
+        // max_tokens default).
+        let legacy = json!({
+            "model": "claude",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "stream": false,
+            "system": "sys",
+            "max_tokens": 4096,
+        });
+        assert_eq!(body, legacy);
+        assert!(body["messages"][0]["content"].is_string());
     }
 }

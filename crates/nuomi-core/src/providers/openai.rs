@@ -51,7 +51,24 @@ pub(crate) fn build_body(request: &ChatRequest, stream: bool) -> Value {
     for m in &request.messages {
         match m.role {
             MessageRole::System => messages.push(json!({ "role": "system", "content": m.content })),
-            MessageRole::User => messages.push(json!({ "role": "user", "content": m.content })),
+            MessageRole::User => {
+                // Multimodal input (task 4.1): images force the content-array
+                // form (`text` + `image_url` blocks with data URIs). Without
+                // images the plain string form stays — byte-level compatible
+                // with the pre-multimodal wire format.
+                if m.image_parts.is_empty() {
+                    messages.push(json!({ "role": "user", "content": m.content }));
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": m.content })];
+                    for img in &m.image_parts {
+                        blocks.push(json!({
+                            "type": "image_url",
+                            "image_url": { "url": format!("data:{};base64,{}", img.mime_type, img.base64) },
+                        }));
+                    }
+                    messages.push(json!({ "role": "user", "content": blocks }));
+                }
+            }
             MessageRole::Assistant => {
                 let mut msg = json!({ "role": "assistant", "content": m.content });
                 if !m.tool_calls.is_empty() {
@@ -314,6 +331,7 @@ impl LlmProvider for OpenAiCompatibleClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::types::ChatImagePart;
 
     #[test]
     fn cache_scope_maps_to_prompt_cache_key_only_when_set() {
@@ -325,5 +343,60 @@ mod tests {
         let request = ChatRequest::simple("gpt", "sys", "hi");
         let body = build_body(&request, false);
         assert!(body.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn user_images_translate_to_openai_content_array() {
+        let mut request = ChatRequest::simple("gpt-4o", "sys", "这张图是什么？");
+        request.messages[0].image_parts = vec![
+            ChatImagePart {
+                mime_type: "image/png".into(),
+                base64: "aGk=".into(),
+            },
+            ChatImagePart {
+                mime_type: "image/jpeg".into(),
+                base64: "eW8=".into(),
+            },
+        ];
+        let body = build_body(&request, false);
+        // messages[0] is the system block; the user turn carries the blocks.
+        let content = &body["messages"][1]["content"];
+        assert!(content.is_array());
+        assert_eq!(
+            content[0],
+            json!({ "type": "text", "text": "这张图是什么？" })
+        );
+        assert_eq!(
+            content[1],
+            json!({
+                "type": "image_url",
+                "image_url": { "url": "data:image/png;base64,aGk=" },
+            })
+        );
+        assert_eq!(
+            content[2],
+            json!({
+                "type": "image_url",
+                "image_url": { "url": "data:image/jpeg;base64,eW8=" },
+            })
+        );
+    }
+
+    #[test]
+    fn empty_images_keep_plain_string_content() {
+        let request = ChatRequest::simple("gpt", "sys", "hi");
+        let body = build_body(&request, false);
+        // Byte-level compatibility: without images the wire body equals the
+        // pre-multimodal legacy shape exactly (plain string content).
+        let legacy = json!({
+            "model": "gpt",
+            "messages": [
+                { "role": "system", "content": "sys" },
+                { "role": "user", "content": "hi" },
+            ],
+            "stream": false,
+        });
+        assert_eq!(body, legacy);
+        assert!(body["messages"][1]["content"].is_string());
     }
 }

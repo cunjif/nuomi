@@ -197,6 +197,7 @@ mod tests {
                 tool_call_id: None,
                 quoted_event_seq: None,
                 quoted_excerpt: None,
+                image_parts: vec![],
             }],
             tools: vec![],
             temperature: None,

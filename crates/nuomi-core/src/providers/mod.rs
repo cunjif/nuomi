@@ -22,7 +22,8 @@ pub use openai::OpenAiCompatibleClient;
 pub use pool::{client_for_endpoint, shared_client, warm, warm_from_store, WarmResult};
 pub use secrets::{MemorySecretStore, OsKeyring, SecretStore};
 pub use types::{
-    ChatMessage, ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall, ToolDef, Usage,
+    ChatImagePart, ChatMessage, ChatRequest, ChatResponse, MessageRole, StreamEvent, ToolCall,
+    ToolDef, Usage,
 };
 
 use thiserror::Error;
