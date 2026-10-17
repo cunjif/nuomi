@@ -33,6 +33,9 @@ dirs = "5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Regex for steward data cleansing redaction patterns (K-Steward-5).
 regex = "1"
+# Steward attachment text extraction (steward_workbench_v2 4.3): PDF via
+# pdf-extract; Office (docx/xlsx/pptx) via zip + XML text nodes below.
+pdf-extract.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

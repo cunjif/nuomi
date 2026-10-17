@@ -42,6 +42,9 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 
+# steward attachment text extraction (steward_workbench_v2 4.3)
+pdf-extract = "0.7"
+
 # misc
 # keyring v3 requires explicit native backend features; without them it
 # silently falls back to an in-memory mock (EntryOnly persistence) where
