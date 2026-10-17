@@ -1,0 +1,115 @@
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { injectIpcCommands } from "../../lib/ipc/client";
+import { testDoubleCommands } from "../../lib/ipc/test-double";
+import { renderWithProviders } from "../../test/helpers";
+import { useToastStore } from "../../lib/store/toastStore";
+import { BindingEditor } from "./BindingEditor";
+import type { BindingConfigDto } from "../../lib/ipc/bindings.gen";
+
+describe("BindingEditor — provider/CLI binding", () => {
+  it("renders binding mode select with current mode", () => {
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+
+    const select = screen.getByDisplayValue("未绑定");
+    expect(select).toBeTruthy();
+  });
+
+  it("shows Provider select when mode is provider", () => {
+    const binding: BindingConfigDto = { mode: "provider", providerId: "p1", agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+    expect(screen.getByText("选择 Provider...")).toBeTruthy();
+  });
+
+  it("shows CLI Agent select when mode is cli", () => {
+    const binding: BindingConfigDto = { mode: "cli", providerId: null, agentProfileId: "a1" };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+    expect(screen.getByText("选择 CLI Agent...")).toBeTruthy();
+  });
+
+  it("does not show Provider or CLI Agent select when mode is none", () => {
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+    expect(screen.queryByText("选择 Provider...")).toBeNull();
+    expect(screen.queryByText("选择 CLI Agent...")).toBeNull();
+  });
+
+  it("disables save button when binding is unchanged", () => {
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+    expect((screen.getByText("保存") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("enables save button when mode is changed", () => {
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+
+    const modeSelect = screen.getByDisplayValue("未绑定");
+    fireEvent.change(modeSelect, { target: { value: "provider" } });
+
+    expect((screen.getByText("保存") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("calls stewardUpdateBinding on save", async () => {
+    const base = testDoubleCommands();
+    const updateBinding = vi.fn(base.stewardUpdateBinding);
+    injectIpcCommands({ ...base, stewardUpdateBinding: updateBinding });
+
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+
+    const modeSelect = screen.getByDisplayValue("未绑定");
+    fireEvent.change(modeSelect, { target: { value: "cli" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(updateBinding).toHaveBeenCalledWith("s1", "cli", null, null),
+    );
+  });
+
+  it("toasts success on binding save", async () => {
+    const base = testDoubleCommands();
+    const updateBinding = vi.fn(base.stewardUpdateBinding);
+    injectIpcCommands({ ...base, stewardUpdateBinding: updateBinding });
+
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+
+    fireEvent.change(screen.getByDisplayValue("未绑定"), {
+      target: { value: "provider" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts).toHaveLength(1),
+    );
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      kind: "success",
+      message: "绑定已更新",
+    });
+  });
+
+  it("toasts failure and keeps edits when binding save fails", async () => {
+    const base = testDoubleCommands();
+    const updateBinding = vi.fn(async () => {
+      throw new Error("registry unavailable");
+    });
+    injectIpcCommands({ ...base, stewardUpdateBinding: updateBinding });
+
+    const binding: BindingConfigDto = { mode: "none", providerId: null, agentProfileId: null };
+    renderWithProviders(<BindingEditor sessionId="s1" binding={binding} />);
+
+    fireEvent.change(screen.getByDisplayValue("未绑定"), {
+      target: { value: "provider" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts).toHaveLength(1),
+    );
+    expect(useToastStore.getState().toasts[0]?.kind).toBe("error");
+    expect(useToastStore.getState().toasts[0]?.message).toContain("绑定失败");
+    expect(screen.getByDisplayValue("Provider")).toBeTruthy();
+  });
+});
