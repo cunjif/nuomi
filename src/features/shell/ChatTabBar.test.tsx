@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { seedConversation } from "../../lib/ipc/test-double";
+import { seedConversation, seedStewardSession } from "../../lib/ipc/test-double";
 import { useUiStore } from "../../lib/store/uiStore";
 import { stubLocalStorage } from "../../test/stubStorage";
 import { renderWithProviders } from "../../test/helpers";
@@ -48,5 +48,16 @@ describe("ChatTabBar — tab separators", () => {
     // middle of the 40px chip instead of hugging its baseline.
     expect(classes).toContain("self-center");
     expect(rule).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("never renders a chat tab for the steward session (spec 5.2 isolation)", async () => {
+    useUiStore.setState({ openSessionIds: ["c1"] });
+    seedConversation({ id: "c1", title: "会话一" });
+    seedStewardSession({ id: "steward-1", title: "新管家会话" });
+    renderWithProviders(<ChatTabBar />);
+
+    // Tab titles resolve from the (steward-excluded) conversation listing.
+    expect(await screen.findByText("会话一")).toBeTruthy();
+    expect(screen.queryByText("新管家会话")).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
@@ -14,7 +14,13 @@ import { QuotePreviewBar } from "../conversation/composer/QuotePreviewBar";
 import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
-import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { ChatStatusPill } from "./ChatStatusPill";
+import { TurnNotice, type TurnNoticeKind } from "./TurnNotice";
+
+interface TurnNoticeState {
+  kind: TurnNoticeKind;
+  summary?: string;
+}
 
 /** U9 conversation surface: bubble stream + composer + live token stream. */
 export function ChatView(): ReactNode {
@@ -29,6 +35,12 @@ export function ChatView(): ReactNode {
   const [quotedEventSeq, setQuotedEventSeq] = useState<number | null>(null);
   const [quotedExcerpt, setQuotedExcerpt] = useState<string | null>(null);
   const [rollbackTargetSeq, setRollbackTargetSeq] = useState<number | null>(null);
+  // Terminal turn outcome shown inline where the pill sat (SPEC 5.8.1-5,
+  // 5.8.3-1/3): stopped / failed / interrupted.
+  const [turnNotice, setTurnNotice] = useState<TurnNoticeState | null>(null);
+  const [turnStopped, setTurnStopped] = useState(false);
+  const stoppedRef = useRef(false);
+  const lastInputRef = useRef("");
 
   // `finalText` is the non-streaming fallback bubble for the turn that just
   // completed. It belongs to one session: ChatView stays mounted across
@@ -36,6 +48,9 @@ export function ChatView(): ReactNode {
   // answer would be appended to the newly selected transcript.
   useEffect(() => {
     setFinalText(null);
+    setTurnNotice(null);
+    setTurnStopped(false);
+    stoppedRef.current = false;
   }, [sessionId]);
 
   const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
@@ -43,6 +58,17 @@ export function ChatView(): ReactNode {
     () => ({ sessionId, focusedWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
     [sessionId, focusedWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
   );
+
+  // SPEC 5.8.1-5a: stop the in-flight turn. The pill closes immediately
+  // (stopped prop) and the "stopped" notice renders without waiting for
+  // the backend to acknowledge the cancellation.
+  const stopTurn = useCallback(() => {
+    if (sessionId === null) return;
+    stoppedRef.current = true;
+    setTurnStopped(true);
+    setTurnNotice({ kind: "stopped" });
+    void ipc.stopConversation(sessionId);
+  }, [sessionId]);
 
   const submitMut = useMutation({
     mutationFn: (input: string) => {
@@ -56,8 +82,24 @@ export function ChatView(): ReactNode {
         return result;
       });
     },
+    onMutate: (input) => {
+      stoppedRef.current = false;
+      setTurnStopped(false);
+      setTurnNotice(null);
+      lastInputRef.current = input;
+    },
     onSuccess: (result) => {
       const hadLive = stream.hasLiveActivity();
+      if (stoppedRef.current) {
+        // User-stopped turn (SPEC 5.8.1-5a): no final-text insertion, no
+        // empty-response toast — the "stopped" notice stays.
+        stream.clearLive();
+        stream.clearOptimistic();
+        if (sessionId !== null) {
+          void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+        }
+        return;
+      }
       if (!hadLive && result.finalText.length > 0) setFinalText(result.finalText);
       stream.clearLive();
       // P1-3: clear the optimistic bubble now that the turn has completed
@@ -78,9 +120,27 @@ export function ChatView(): ReactNode {
     },
     onError: (e) => {
       stream.clearOptimistic();
+      if (!stoppedRef.current) {
+        // Failed with nothing received → failure notice with summary
+        // (SPEC 5.8.3-1c); failed mid-stream → keep the received text and
+        // flag the interruption (SPEC 5.8.3-3c).
+        const interrupted = stream.hasLiveActivity();
+        setTurnNotice({
+          kind: interrupted ? "interrupted" : "failed",
+          summary: interrupted ? undefined : describeError(e),
+        });
+      }
       toast.error(`${t("chat.sendFailed")}: ${describeError(e)}`);
     },
   });
+  // SPEC 5.8.3-1c/3c: retry re-sends the last input. The live buffers are
+  // cleared first so a partially-received interrupted reply cannot splice
+  // onto the fresh answer.
+  const retryTurn = (): void => {
+    if (lastInputRef.current === "") return;
+    stream.clearLive();
+    submitMut.mutate(lastInputRef.current);
+  };
 
   // ADR 0015: message queue — enqueue when agent is busy.
   const queueQuery = useQuery({
@@ -134,7 +194,10 @@ export function ChatView(): ReactNode {
         <AsyncBoundary
           isLoading={stream.isLoading}
           error={stream.error}
-          isEmpty={entries.length === 0}
+          // A terminal turn notice (stopped/failed/interrupted) must stay
+          // visible even when the transcript is empty — the empty state
+          // must not swallow it.
+          isEmpty={entries.length === 0 && turnNotice === null}
           emptyLabel={t("chat.noMessages")}
           onRetry={stream.retry}
         >
@@ -154,13 +217,23 @@ export function ChatView(): ReactNode {
             }}
             onRollback={(seq) => setRollbackTargetSeq(seq)}
           />
-          <AgentStatusIndicator
-            agentName="AI"
-            agentColor="var(--color-ink-accent, #6366f1)"
+          <ChatStatusPill
             isPending={submitMut.isPending}
-            hasFirstToken={stream.hasStreamText}
+            hasStreamText={stream.hasStreamText}
             hasError={submitMut.isError}
+            entries={stream.entries}
+            stopped={turnStopped}
+            onStop={stopTurn}
           />
+          {turnNotice !== null && (
+            <div className="py-1" data-testid="turn-notice-slot">
+              <TurnNotice
+                kind={turnNotice.kind}
+                summary={turnNotice.summary}
+                onRetry={retryTurn}
+              />
+            </div>
+          )}
         </AsyncBoundary>
       </div>
       <Composer

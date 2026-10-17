@@ -1,11 +1,13 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { emitTestEvent } from "../../lib/events/transport";
 import { sessionChannel } from "../../lib/events/types";
 import { seedConversation, tdState } from "../../lib/ipc/test-double";
 import { renderWithProviders } from "../../test/helpers";
+import { ipc } from "../../lib/ipc/client";
+import { useToastStore } from "../../lib/store/toastStore";
 import "../../i18n";
 import { ChatView } from "./ChatView";
 import { useUiStore } from "../../lib/store/uiStore";
@@ -295,5 +297,109 @@ describe("ChatView — live token stream (AC10)", () => {
       await qc.invalidateQueries({ queryKey: ["sessionEvents", "s8"] });
     });
     await waitFor(() => expect(screen.getAllByText("已持久化")).toHaveLength(1));
+  });
+});
+
+describe("ChatView — stop & failure notices (SPEC 5.8.1-5, 5.8.3)", () => {
+  const INPUT_PLACEHOLDER = "输入消息，Enter 发送（Shift+Enter 换行）";
+  type SubmitResult = Awaited<ReturnType<typeof ipc.submitTask>>;
+  let resolveSubmit!: (value: SubmitResult) => void;
+  let rejectSubmit!: (reason?: unknown) => void;
+
+  function setup(session: string): void {
+    seedConversation({ id: session, title: "t", createdAt: 1, updatedAt: 1 });
+    useUiStore.getState().selectSession(session);
+    vi.spyOn(ipc, "submitTask").mockImplementation(
+      () =>
+        new Promise<SubmitResult>((resolve, reject) => {
+          resolveSubmit = resolve;
+          rejectSubmit = reject;
+        }) as unknown as ReturnType<typeof ipc.submitTask>,
+    );
+  }
+
+  async function submitViaComposer(text: string): Promise<void> {
+    const input = await screen.findByPlaceholderText(INPUT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useUiStore.setState({ selectedSessionId: null });
+  });
+
+  it("closes the pill, shows the stopped notice and inserts no late reply (5a)", async () => {
+    setup("cs1");
+    const stopSpy = vi.spyOn(ipc, "stopConversation").mockResolvedValue(null);
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+    await submitViaComposer("帮忙看看");
+
+    // The pill appears after the 300ms render delay.
+    expect(await screen.findByTestId("status-pill")).toBeTruthy();
+
+    fireEvent.click(within(screen.getByTestId("status-pill")).getByRole("button", { name: "停止" }));
+
+    // Immediate close + stopped notice, stop dispatched to the backend.
+    await waitFor(() => expect(screen.queryByTestId("status-pill")).toBeNull());
+    expect(screen.getByTestId("turn-notice").getAttribute("data-kind")).toBe("stopped");
+    expect(screen.getByText("⏹ 已停止")).toBeTruthy();
+    expect(stopSpy).toHaveBeenCalledWith("cs1");
+
+    // The cancelled turn settles with a (hypothetically late) reply —
+    // nothing may be inserted and no empty-response toast may fire.
+    await act(async () => {
+      resolveSubmit({ finalText: "迟到的回复", steps: 1, truncated: false, sessionId: "cs1" });
+    });
+    await waitFor(() => expect(screen.queryByText("迟到的回复")).toBeNull());
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+    expect(screen.getByTestId("turn-notice").getAttribute("data-kind")).toBe("stopped");
+  });
+
+  it("flags a failed turn with the error summary and a retry button (5.8.3-1c)", async () => {
+    setup("cs2");
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+    await submitViaComposer("提问");
+
+    await act(async () => {
+      rejectSubmit(new Error("provider unreachable"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("turn-notice").getAttribute("data-kind")).toBe("failed"),
+    );
+    expect(screen.getByText(/Agent 执行失败/)).toBeTruthy();
+    expect(screen.getByText(/provider unreachable/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+  });
+
+  it("keeps received text and flags the interruption when the stream breaks (5.8.3-3c)", async () => {
+    setup("cs3");
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+    await submitViaComposer("提问");
+
+    act(() => {
+      emitTestEvent(sessionChannel("cs3"), {
+        type: "session.delta",
+        sessionId: "cs3",
+        payload: { sessionId: "cs3", text: "已接收的部分" },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("已接收的部分")).toBeInTheDocument());
+
+    await act(async () => {
+      rejectSubmit(new Error("connection reset"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("turn-notice").getAttribute("data-kind")).toBe("interrupted"),
+    );
+    expect(screen.getByText(/回复已中断/)).toBeTruthy();
+    // Received content survives the interruption.
+    expect(screen.getByText("已接收的部分")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 });

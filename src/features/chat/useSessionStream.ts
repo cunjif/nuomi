@@ -24,6 +24,19 @@ export interface ChatEntry {
   quotedExcerpt?: string;
 }
 
+/** Live per-agent stream in a group chat (delta carrying `roleName`). */
+export interface GroupStream {
+  roleId: string;
+  roleName: string;
+  text: string;
+}
+
+/** Speaker picked by the selector for the upcoming utterance. */
+export interface ActiveSpeaker {
+  roleId?: string;
+  roleName?: string;
+}
+
 export const STREAM_ENTRY_ID = "__streaming__";
 
 export function toEntries(events: EventDto[]): ChatEntry[] {
@@ -70,6 +83,12 @@ export function useSessionStream(sessionId: string | null): {
   /** Optimistic user bubble shown before the persisted round-trip lands. */
   addOptimistic: (text: string) => void;
   clearOptimistic: () => void;
+  /** Group-chat live stream of the currently speaking agent (SPEC 5.8.1-4). */
+  groupStream: GroupStream | null;
+  /** Agent the selector nominated for the next utterance; null on converge. */
+  activeSpeaker: ActiveSpeaker | null;
+  /** Highest persisted message seq seen live (turn-transition signal). */
+  lastMessageSeq: number;
 } {
   const qc = useQueryClient();
   const historyQuery = useQuery({
@@ -80,6 +99,10 @@ export function useSessionStream(sessionId: string | null): {
   const [streamText, setStreamText] = useState("");
   const [liveEntries, setLiveEntries] = useState<ChatEntry[]>([]);
   const [optimisticText, setOptimisticText] = useState<string | null>(null);
+  const [groupStream, setGroupStream] = useState<GroupStream | null>(null);
+  const [activeSpeaker, setActiveSpeaker] = useState<ActiveSpeaker | null>(null);
+  /** Highest persisted message seq seen live (drives turn-transition UI). */
+  const [lastMessageSeq, setLastMessageSeq] = useState(0);
   const liveActivityRef = useRef(false);
   const lastSeqRef = useRef(0);
   /** Highest persisted message seq already swapped into the live buffer. */
@@ -116,14 +139,29 @@ export function useSessionStream(sessionId: string | null): {
         if (p === null) continue;
         if (ev.type === "session.delta") {
           liveActivityRef.current = true;
-          setStreamText((prev) => prev + asString(p.text));
+          const deltaRoleName = asString(p.roleName);
+          if (deltaRoleName !== "") {
+            // Group-chat delta (SPEC 5.8.1-4): accumulate per agent; a new
+            // speaker resets the buffer so each utterance streams apart.
+            const deltaRoleId = asString(p.roleId);
+            setGroupStream((prev) =>
+              prev !== null && prev.roleId === deltaRoleId
+                ? { ...prev, text: prev.text + asString(p.text) }
+                : { roleId: deltaRoleId, roleName: deltaRoleName, text: asString(p.text) },
+            );
+          } else {
+            setStreamText((prev) => prev + asString(p.text));
+          }
         } else if (ev.type === "session.message") {
           // Persisted authority arriving live. Append as a completed entry
           // so multiple messages in one batch all survive — overwriting
           // streamText would drop earlier ones (e.g. group-chat turns).
           const msgSeq = typeof p.seq === "number" ? p.seq : null;
           if (msgSeq !== null && msgSeq <= lastMessageSeqRef.current) continue;
-          if (msgSeq !== null) lastMessageSeqRef.current = msgSeq;
+          if (msgSeq !== null) {
+            lastMessageSeqRef.current = msgSeq;
+            setLastMessageSeq(msgSeq);
+          }
           liveActivityRef.current = true;
           const deltaTo = typeof p.deltaTo === "number" ? p.deltaTo : null;
           if (deltaTo !== null && sessionId !== null) {
@@ -131,10 +169,12 @@ export function useSessionStream(sessionId: string | null): {
           } else if (sessionId !== null) {
             flow.dropPendingDeltas(sessionId);
           }
-          // The durable text takes over from the streaming buffer.
+          // The durable text takes over from the streaming buffers.
           setStreamText("");
+          setGroupStream(null);
           const role = asString(p.role);
-          if (role === "user" || role === "assistant") {
+          const roleName = asString(p.role_name) || asString(p.roleName) || undefined;
+          if (role === "user" || role === "assistant" || (role === "" && roleName !== undefined)) {
             const quotedEventSeq =
               typeof p.quoted_event_seq === "number" ? p.quoted_event_seq : undefined;
             setLiveEntries((prev) => [
@@ -142,13 +182,24 @@ export function useSessionStream(sessionId: string | null): {
               {
                 id: `live-m${msgSeq ?? prev.length}`,
                 kind: "message",
-                role,
-                roleName: asString(p.role_name) || undefined,
+                role: role === "" ? "assistant" : role,
+                roleName,
                 text: asString(p.content),
                 quotedEventSeq,
                 quotedExcerpt: quotedEventSeq !== undefined ? asString(p.quoted_excerpt) || undefined : undefined,
               },
             ]);
+          }
+        } else if (ev.type === "session.selector_decision") {
+          // Group-chat speaker nomination (SPEC 5.8.1-4): who speaks next.
+          // The convergence signal ends the discussion — no speaker follows.
+          if (p.converged === true) {
+            setActiveSpeaker(null);
+          } else {
+            setActiveSpeaker({
+              roleId: asString(p.chosenRoleId) || undefined,
+              roleName: asString(p.chosenRoleName) || undefined,
+            });
           }
         } else if (ev.type === "tool.call") {
           liveActivityRef.current = true;
@@ -193,6 +244,9 @@ export function useSessionStream(sessionId: string | null): {
     setStreamText("");
     setLiveEntries([]);
     setOptimisticText(null);
+    setGroupStream(null);
+    setActiveSpeaker(null);
+    setLastMessageSeq(0);
   }, [flow, sessionId]);
 
   const entries = useMemo(() => {
@@ -249,6 +303,10 @@ export function useSessionStream(sessionId: string | null): {
     liveActivityRef.current = false;
     setStreamText("");
     setLiveEntries([]);
+    // Group buffer included: a retried turn may re-nominate the SAME
+    // speaker, and the per-agent accumulator would otherwise splice the
+    // fresh utterance onto the interrupted one.
+    setGroupStream(null);
   }, []);
 
   const addOptimistic = useCallback((text: string) => setOptimisticText(text), []);
@@ -264,5 +322,8 @@ export function useSessionStream(sessionId: string | null): {
     clearLive,
     addOptimistic,
     clearOptimistic,
+    groupStream,
+    activeSpeaker,
+    lastMessageSeq,
   };
 }

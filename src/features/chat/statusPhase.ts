@@ -1,12 +1,15 @@
-import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 
-// ---------- 3.2: phase type & copy constants ----------
+// ---------- phase type & copy constants ----------
+// Verbatim mechanism from the retired AgentStatusIndicator: time-heuristic
+// phases (0-2s instantiating, 2-4s preparing, 4s+ thinking) with rotating
+// fun copy per phase. Consumers (ChatStatusPill, group-chat rolling pill)
+// feed it isPending/hasFirstToken and may override via backendPhase once
+// real backend phase events exist.
 
 export type AgentStatusPhase = "instantiating" | "preparing" | "thinking";
 
-const STATUS_COPY: Record<AgentStatusPhase, string[]> = {
+export const STATUS_COPY: Record<AgentStatusPhase, string[]> = {
   instantiating: [
     "chat.status.instantiating.1",
     "chat.status.instantiating.2",
@@ -35,9 +38,12 @@ const STATUS_COPY: Record<AgentStatusPhase, string[]> = {
 };
 
 const STATUS_ROTATION_INTERVAL_MS = 4000;
-const STATUS_RENDER_DELAY_MS = 300;
 
-// ---------- 3.3: phase detection & copy rotation hook ----------
+/** Delay before the waiting pill first renders — skips the flash on very
+ *  fast responses (spec 5.8.1-1a: the pill appears within 300ms). */
+export const STATUS_RENDER_DELAY_MS = 300;
+
+// ---------- phase detection & copy rotation hook ----------
 
 /**
  * Determines the current status phase and rotating copy key based on
@@ -99,56 +105,4 @@ export function useStatusPhase(
   if (!isPending || hasFirstToken) return null;
   const keys = STATUS_COPY[phase];
   return { phase, copyKey: keys[copyIndex % keys.length]! };
-}
-
-// ---------- 3.4: AgentStatusIndicator component ----------
-
-/**
- * Renders "{avatar} {status copy}" while a RoleAgent is pending and no
- * first token has arrived. Delays 300ms before first render to avoid
- * flicker on very fast responses. Unmounts immediately on first token
- * or error.
- */
-export function AgentStatusIndicator({
-  agentName,
-  agentColor,
-  isPending,
-  hasFirstToken,
-  hasError,
-}: {
-  agentName: string;
-  agentColor: string;
-  isPending: boolean;
-  hasFirstToken: boolean;
-  hasError: boolean;
-}): ReactNode {
-  const { t } = useTranslation();
-  const [visible, setVisible] = useState(false);
-  const status = useStatusPhase(isPending, hasFirstToken);
-
-  // 300ms render delay — skip if first token arrives quickly.
-  useEffect(() => {
-    if (isPending && !hasFirstToken && !hasError) {
-      const timer = setTimeout(() => setVisible(true), STATUS_RENDER_DELAY_MS);
-      return () => clearTimeout(timer);
-    }
-    setVisible(false);
-  }, [isPending, hasFirstToken, hasError]);
-
-  if (!visible || !status || hasError) return null;
-
-  const initial = agentName.charAt(0).toUpperCase();
-
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink-muted">
-      <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-xs font-semibold text-surface"
-        style={{ backgroundColor: agentColor }}
-        aria-label={agentName}
-      >
-        {initial}
-      </span>
-      <span className="animate-pulse">{t(status.copyKey)}</span>
-    </div>
-  );
 }
