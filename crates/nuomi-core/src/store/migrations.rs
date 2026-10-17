@@ -281,6 +281,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0035_steward_main_role_seed.sql"
         )),
     ),
+    (
+        36,
+        "0036_work_directories",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0036_work_directories.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -716,19 +724,19 @@ mod tests {
     #[test]
     fn migrations_steward_tables_idempotent_on_empty_db() {
         let conn = Connection::open_in_memory().unwrap();
-        // First run: applies all migrations 0001-0035
+        // First run: applies all migrations 0001-0036
         run(&conn).unwrap();
         let v1: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v1, 35);
+        assert_eq!(v1, 36);
 
-        // Second run: no-op (user_version already 35)
+        // Second run: no-op (user_version already 36)
         run(&conn).unwrap();
         let v2: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v2, 35);
+        assert_eq!(v2, 36);
 
         // Steward tables exist and are empty (except roles331 seeds 5 builtin roles)
         let steward_sessions: i64 = conn
@@ -802,5 +810,117 @@ mod tests {
             )
             .unwrap();
         assert_eq!(builtin, 5);
+    }
+
+    // ---- migration 0036: work_directories (ADR-0021 lossless upgrade)
+
+    #[test]
+    fn migrations_0036_lossless_upgrade_from_0035() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Build a pre-0036 database (0035 state) with two workspaces,
+        // sessions owned by them, and a layout snapshot.
+        run_migrations_to(&conn, 35);
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w1', 'C:\\proj\\alpha', 'paper-yellow', 100, 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w2', 'C:\\proj\\beta', 'paper-blue', 200, 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, workspace_id)
+             VALUES ('s1', 'alpha chat', 1, 1, 'w1'),
+                    ('s2', 'beta chat', 2, 2, 'w2')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workspace_layout_snapshot (id, mode, focused_workspace_id, captured_at)
+             VALUES (1, 'single', 'w1', 1)",
+            [],
+        )
+        .unwrap();
+
+        // Apply 0036 (run continues from user_version 35).
+        run(&conn).unwrap();
+
+        // Each workspace has exactly one work directory backfilled from
+        // root_path, mounted, with added_at = created_at.
+        let dirs: Vec<(String, String, i64, i64)> = conn
+            .prepare("SELECT workspace_id, abs_path, mounted, added_at FROM work_directories ORDER BY workspace_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(
+            (dirs[0].0.as_str(), dirs[0].1.as_str(), dirs[0].2),
+            ("w1", "C:\\proj\\alpha", 1)
+        );
+        assert_eq!(dirs[0].3, 100, "added_at inherits workspaces.created_at");
+        assert_eq!(
+            (dirs[1].0.as_str(), dirs[1].1.as_str(), dirs[1].2),
+            ("w2", "C:\\proj\\beta", 1)
+        );
+        assert_eq!(dirs[1].3, 200);
+
+        // Sessions keep their workspace ownership untouched.
+        let owners: Vec<(String, String)> = conn
+            .prepare("SELECT id, workspace_id FROM sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            owners,
+            vec![("s1".into(), "w1".into()), ("s2".into(), "w2".into())]
+        );
+
+        // Layout snapshot untouched.
+        let snapshot_mode: String = conn
+            .query_row(
+                "SELECT mode FROM workspace_layout_snapshot WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot_mode, "single");
+
+        // workspaces rows untouched (root_path preserved — append-only rule).
+        let ws_count: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ws_count, 2);
+
+        // Idempotent: a second run does not create more directories.
+        run(&conn).unwrap();
+        let dir_count: i64 = conn
+            .query_row("SELECT count(*) FROM work_directories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(dir_count, 2);
+    }
+
+    #[test]
+    fn migrations_0036_skips_workspaces_with_empty_root_path() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations_to(&conn, 35);
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w-empty', '', 'paper-yellow', 100, 0, 0)",
+            [],
+        )
+        .unwrap();
+        run(&conn).unwrap();
+        let dir_count: i64 = conn
+            .query_row("SELECT count(*) FROM work_directories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(dir_count, 0, "empty root_path yields no work directory");
     }
 }
