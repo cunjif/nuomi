@@ -28,8 +28,9 @@ interface OpenSetDto {
 }
 
 export function WorkspaceBar() {
-  const { openWorkspaceIds, focusedWorkspaceId, pinnedWorkspaceIds, focusWorkspace, closeWorkspace } =
-    useUiStore();
+  // Single-open (ADR-0021): the bar lists the open workspace only; the
+  // dedicated switch surface lands with task 6.7.
+  const { activeWorkspaceId, switchToWorkspace } = useUiStore();
 
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
@@ -42,9 +43,9 @@ export function WorkspaceBar() {
     refetchInterval: 5000,
   });
 
-  // Drag-drop: accept directory drops to register + open a workspace (task 8.4).
-  // The backend WorkspaceGuard validates blacklists (system dirs, .nuomi, etc.)
-  // — rejected paths surface as IPC errors which we silently ignore here.
+  // Drag-drop: accept directory drops to open them under the two-level model
+  // (ADR-0021). The backend WorkspaceGuard validates blacklists (system dirs,
+  // .nuomi, etc.) — rejected paths surface as IPC errors we silently ignore.
   const dropRef = useRef(false);
   useEffect(() => {
     if (dropRef.current) return;
@@ -56,8 +57,7 @@ export function WorkspaceBar() {
         getCurrentWebview().onDragDropEvent((event) => {
           if (event.payload.type !== "drop") return;
           for (const path of event.payload.paths) {
-            void invoke<{ id: string }>("add_workspace", { path })
-              .then((entry) => void useUiStore.getState().openWorkspace(entry.id))
+            void useUiStore.getState().openDirectory(path)
               .catch(() => { /* blacklisted or invalid — silently ignore */ });
           }
         }),
@@ -72,12 +72,12 @@ export function WorkspaceBar() {
   );
 
   const openWorkspaces = (workspaces ?? []).filter((w) =>
-    openWorkspaceIds.includes(w.id),
+    w.id === activeWorkspaceId,
   );
 
   const sorted = [...openWorkspaces].sort((a, b) => {
-    const aPinned = pinnedWorkspaceIds.includes(a.id) ? 1 : 0;
-    const bPinned = pinnedWorkspaceIds.includes(b.id) ? 1 : 0;
+    const aPinned = a.isPinned ? 1 : 0;
+    const bPinned = b.isPinned ? 1 : 0;
     if (aPinned !== bPinned) return bPinned - aPinned;
     return 0;
   });
@@ -90,13 +90,13 @@ export function WorkspaceBar() {
       style={{ contain: "inline-size" }}
     >
       {sorted.map((ws) => {
-        const isFocused = focusedWorkspaceId === ws.id;
-        const isPinned = pinnedWorkspaceIds.includes(ws.id);
+        const isFocused = activeWorkspaceId === ws.id;
+        const isPinned = ws.isPinned === true;
         const unreadCount = unreadMap.get(ws.id) ?? 0;
         return (
           <button
             key={ws.id}
-            onClick={() => focusWorkspace(ws.id)}
+            onClick={() => void switchToWorkspace(ws.id)}
             style={{ contain: "layout style" }}
             className={`group flex items-center gap-1.5 px-3 py-1 rounded-t-md text-sm transition-colors ${
               isFocused
@@ -121,7 +121,12 @@ export function WorkspaceBar() {
               <span
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeWorkspace(ws.id, true);
+                  // Retirement shim (alive for one version cycle): v2 closes
+                  // via removing the last directory or switching; the
+                  // dedicated surface lands with task 6.7.
+                  void invoke("close_workspace", { id: ws.id, force: true })
+                    .then(() => useUiStore.getState().syncOpenWorkspace())
+                    .catch(() => { /* close failures surface via open-state sync */ });
                 }}
                 className="ml-1 text-xs text-paper-muted opacity-0 group-hover:opacity-100 hover:text-paper-fg"
               >

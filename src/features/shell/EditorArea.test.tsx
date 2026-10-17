@@ -142,8 +142,8 @@ describe("EditorArea — workspace sidebar toolbar", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
     const dialog = await screen.findByRole("dialog", { name: "切换工作区" });
-    // Clicking a non-focused workspace row activates it (openWorkspace) and closes.
-    fireEvent.click(within(dialog).getByText("D:\\other"));
+    // Clicking a non-focused workspace row activates it (switchToWorkspace) and closes.
+    fireEvent.click(await within(dialog).findByText("D:\\other"));
 
     await waitFor(() => {
       expect(tdState.workspaces.find((w) => w.id === "ws-other")?.isFocused).toBe(true);

@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "../../components/ui/Spinner";
 import { ipc } from "../../lib/ipc/client";
-import { invoke } from "@tauri-apps/api/core";
 import { ErrorBoundary } from "../../components/ui/ErrorBoundary";
 import { useUiStore, type View, type LayoutMode } from "../../lib/store/uiStore";
 import { ApprovalsView } from "../approvals/ApprovalsView";
@@ -109,33 +108,13 @@ function useGlobalNavShortcuts(): void {
       if (target) activateChatTab(target);
       return;
     }
-    // Ctrl+Alt+Tab / Ctrl+Alt+Shift+Tab: cycle focused workspace (migrated from Ctrl+Tab).
-    if (e.ctrlKey && e.altKey && !e.metaKey && e.code === "Tab") {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const { openWorkspaceIds, focusWorkspace } = useUiStore.getState();
-      if (openWorkspaceIds.length < 2) return;
-      const focused = useUiStore.getState().focusedWorkspaceId;
-      const idx = focused ? openWorkspaceIds.indexOf(focused) : -1;
-      const next = e.shiftKey
-        ? (idx <= 0 ? openWorkspaceIds.length - 1 : idx - 1)
-        : (idx < 0 || idx >= openWorkspaceIds.length - 1 ? 0 : idx + 1);
-      const target = openWorkspaceIds[next];
-      if (target) void focusWorkspace(target);
-      return;
-    }
-    // Alt+1..Alt+8: focus the Nth open workspace (task 8.1).
+    // Alt+1..Alt+8 / Alt+H / Alt+E (multi-workspace cycling retired with
+    // ADR-0021 single-open; Alt+H/E area toggles stay).
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       const digit = e.code.match(/^Digit([1-8])$/);
       if (digit) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        const { openWorkspaceIds, focusWorkspace } = useUiStore.getState();
-        const n = parseInt(digit[1] ?? "0", 10) - 1;
-        if (n < openWorkspaceIds.length) {
-          const target = openWorkspaceIds[n];
-          if (target) void focusWorkspace(target);
-        }
         return;
       }
       if (e.code === "KeyH") {
@@ -161,7 +140,6 @@ function useGlobalNavShortcuts(): void {
 export function Shell(): ReactNode {
   const view = useUiStore((s) => s.view);
   const activeArea = useUiStore((s) => s.activeArea);
-  const openWorkspaceIds = useUiStore((s) => s.openWorkspaceIds);
   const layoutMode = useUiStore((s) => s.layoutMode);
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   useGlobalNavShortcuts();
@@ -184,9 +162,9 @@ export function Shell(): ReactNode {
             // Unblock the gated workspace query immediately instead of
             // waiting out the current retry backoff.
             void queryClient.invalidateQueries({ queryKey: ["workspace"] });
-            // Sync the frontend open-set mirror from the backend (which has
-            // already restored the layout snapshot during boot).
-            void useUiStore.getState().syncFromOpenSet();
+            // Sync the frontend open-workspace mirror from the backend
+            // (which already restored the layout snapshot during boot).
+            void useUiStore.getState().syncOpenWorkspace();
           }),
           listen<string>("kernel-failed", (e) => {
             setBootFailed(e.payload);
@@ -211,8 +189,10 @@ export function Shell(): ReactNode {
   }, []);
 
   // Drag-drop workspace registration (migrated from WorkspaceBar): accept
-  // directory drops to register + open a workspace. The backend WorkspaceGuard
-  // validates blacklists — rejected paths surface as IPC errors (silently ignored).
+  // directory drops to open them under the two-level model (ADR-0021): empty
+  // state → open/create the owning workspace; open workspace → the directory
+  // joins it. The backend WorkspaceGuard validates blacklists — rejected
+  // paths surface as IPC errors (silently ignored).
   const dropRef = useRef(false);
   useEffect(() => {
     if (dropRef.current) return;
@@ -224,8 +204,7 @@ export function Shell(): ReactNode {
         getCurrentWebview().onDragDropEvent((event) => {
           if (event.payload.type !== "drop") return;
           for (const path of event.payload.paths) {
-            void invoke<{ id: string }>("add_workspace", { path })
-              .then((entry) => void useUiStore.getState().openWorkspace(entry.id))
+            void useUiStore.getState().openDirectory(path)
               .catch(() => { /* blacklisted or invalid — silently ignore */ });
           }
         }),
@@ -294,7 +273,7 @@ export function Shell(): ReactNode {
               as one continuous surface, so nothing separates them. */}
           <div className="mb-2 min-h-0 flex-1 overflow-hidden rounded-b-lg border-r border-b border-ink-muted/30 bg-surface-raised">
             <ErrorBoundary key={activeArea === "workbench" ? "workbench" : view}>
-              {renderMainContent({ activeArea, view, openWorkspaceIds, layoutMode, activeWorkspaceId })}
+              {renderMainContent({ activeArea, view, layoutMode, activeWorkspaceId })}
             </ErrorBoundary>
           </div>
         </main>
@@ -306,38 +285,33 @@ export function Shell(): ReactNode {
 }
 
 /**
- * Dispatches the main content area based on the multi-workspace layout state
- * (task 6.7.1). Precedence:
+ * Dispatches the main content area based on the single-open layout state
+ * (ADR-0021; originally task 6.7.1). Precedence:
  * 1. layoutMode "overview" → OverviewGrid (or EmptyStateGuide if no open ws)
- * 2. layoutMode "split" → SplitView (or EmptyStateGuide if no open ws)
+ * 2. layoutMode "split" → SplitView (unreachable under single-open — write
+ *    path retired in task 6.6; render branch removed in task 6.8)
  * 3. layoutMode "single" (default) → the existing mutually-exclusive surface
  *    (WorkbenchArea or the active view) — preserves legacy single-workspace behavior
  */
 function renderMainContent({
   activeArea,
   view,
-  openWorkspaceIds,
   layoutMode,
   activeWorkspaceId,
 }: {
   activeArea: string;
   view: View;
-  openWorkspaceIds: string[];
   layoutMode: LayoutMode;
   activeWorkspaceId: string | null;
 }): ReactNode {
   if (layoutMode === "overview") {
-    return openWorkspaceIds.length === 0 ? <EmptyStateGuide /> : <OverviewGrid />;
+    return activeWorkspaceId === null ? <EmptyStateGuide /> : <OverviewGrid />;
   }
   if (layoutMode === "split") {
-    if (openWorkspaceIds.length === 0) return <EmptyStateGuide />;
-    return (
-      <SplitView
-        renderWorkspace={(wsId, paneIndex) =>
-          activeArea === "workbench" ? <WorkbenchArea workspaceId={wsId} paneIndex={paneIndex} /> : renderView(view, wsId)
-        }
-      />
-    );
+    if (activeWorkspaceId === null) return <EmptyStateGuide />;
+    // Unreachable in practice (the split write path is retired, ADR-0021):
+    // the stub stays until task 6.8 removes the branch + component.
+    return <SplitView />;
   }
   // layoutMode === "single"
   if (activeArea === "workbench") {

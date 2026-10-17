@@ -98,8 +98,7 @@ export function WorkspaceListDialog({
     try {
       const selected = await pickFolder({ directory: true, multiple: false });
       if (!selected) return;
-      const entry = await ipc.addWorkspace(selected);
-      await useUiStore.getState().openWorkspace(entry.id);
+      await useUiStore.getState().openDirectory(selected);
       invalidate();
       toast.success(t("workspace.added"));
     } catch (e) {
@@ -109,7 +108,7 @@ export function WorkspaceListDialog({
 
   const handleActivate = async (id: string): Promise<void> => {
     try {
-      await useUiStore.getState().openWorkspace(id);
+      await useUiStore.getState().switchToWorkspace(id);
       invalidate();
       toast.success(t("workspace.switched"));
       onClose();

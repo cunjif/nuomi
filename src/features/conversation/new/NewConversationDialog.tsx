@@ -43,8 +43,8 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
   const [title, setTitle] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],

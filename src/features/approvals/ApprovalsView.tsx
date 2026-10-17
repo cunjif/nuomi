@@ -19,9 +19,9 @@ import { useViewScope } from "../common/useViewScope";
 export function ApprovalsView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const { scope, setScope } = useViewScope("approvals");
-  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const effectiveWorkspaceId = workspaceId ?? activeWorkspaceId;
   const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const approvalsQuery = useQuery({
     queryKey: ["approvals", workspaceFilter],

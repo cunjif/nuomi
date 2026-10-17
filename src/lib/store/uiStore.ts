@@ -3,7 +3,7 @@
  * here — server data lives in TanStack Query).
  */
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "../ipc/client";
 import { measureAsync } from "../perf/metrics";
 
 export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins" | "steward";
@@ -112,18 +112,17 @@ interface UiState {
   /** Per-workspace editor state buckets (ADR 0017). Keyed by workspace id. */
   editorByWorkspace: Record<string, WorkspaceEditorState>;
   runDrawerTaskId: string | null;
-  /** Currently active workspace id (mirrors the backend active workspace). */
+  /**
+   * The single open workspace id (ADR-0021 single-open); null = empty state.
+   * Also the pointer for the workbench's editor bucket.
+   */
   activeWorkspaceId: string | null;
-  /** Open workspace ids ordered by most-recently-focused. */
-  openWorkspaceIds: string[];
-  /** Focused workspace id (the one the user is currently interacting with). */
-  focusedWorkspaceId: string | null;
-  /** Pinned workspace ids (always restored on startup). */
-  pinnedWorkspaceIds: string[];
-  /** Current layout mode for the main content area. */
+  /**
+   * Current layout mode for the main content area. The `split` write path is
+   * retired with ADR-0021 (single-open makes it unreachable); the render
+   * branch stays until task 6.8 removes the component.
+   */
   layoutMode: LayoutMode;
-  /** Split-screen workspace ids (two workspaces shown side-by-side). */
-  splitWorkspaceIds: [string, string] | null;
   /** Conversation list workspace filter ("all" = cross-workspace aggregation). */
   conversationWorkspaceFilter: "all" | string;
   setConversationWorkspaceFilter: (filter: "all" | string) => void;
@@ -167,30 +166,35 @@ interface UiState {
   ) => void;
   /** Looks up the cross-workspace ref for a tab, if any. */
   crossRefFor: (workspaceId: string, path: string) => { sourceWorkspaceId: string; sourcePath: string } | null;
-  /** Sets the active workspace id (called after IPC activate/add succeeds). */
+  /** Sets the open workspace id (called after IPC open/switch succeeds). */
   setActiveWorkspaceId: (id: string | null) => void;
   /**
-   * Switches the active workspace. Per-workspace editor state lives in
-   * `editorByWorkspace` buckets, so switching only flips `activeWorkspaceId`
-   * — each workspace's tabs/selection are independently preserved (ADR 0017).
+   * Flips the local active-workspace pointer. Per-workspace editor state
+   * lives in `editorByWorkspace` buckets, so switching only flips
+   * `activeWorkspaceId` — each workspace's tabs/selection are independently
+   * preserved (ADR 0017).
    */
   switchWorkspace: (workspaceId: string) => void;
-  /** Opens a workspace (adds to open set + focuses). Calls IPC openWorkspace. */
-  openWorkspace: (id: string) => Promise<void>;
-  /** Closes a workspace (removes from open set). Calls IPC closeWorkspace. */
-  closeWorkspace: (id: string, force: boolean) => Promise<void>;
-  /** Focuses an already-open workspace. Calls IPC focusWorkspace. */
-  focusWorkspace: (id: string) => Promise<void>;
-  /** Sets the layout mode and persists via IPC. */
-  setLayoutMode: (mode: LayoutMode) => Promise<void>;
-  /** Sets split-screen workspace ids and persists via IPC. */
-  setSplitWorkspaceIds: (ids: [string, string] | null) => Promise<void>;
-  /** Pins a workspace. Calls IPC pinWorkspace. */
-  pinWorkspace: (id: string) => Promise<void>;
-  /** Unpins a workspace. Calls IPC unpinWorkspace. */
-  unpinWorkspace: (id: string) => Promise<void>;
-  /** Syncs the local open-set mirror from the backend (call on startup). */
-  syncFromOpenSet: () => Promise<void>;
+  /**
+   * Opens a directory under the two-level model (ADR-0021): empty state →
+   * opens (or creates) the path's owning workspace; open workspace → the
+   * directory joins it and auto-focuses. Calls IPC workspaceAddDirectory.
+   */
+  openDirectory: (path: string) => Promise<void>;
+  /**
+   * Switches to another workspace (single-open transition): the backend
+   * saves the outgoing snapshot, closes it and opens the target. Editor
+   * buckets stay in memory (ADR 0017), so switching back restores state.
+   * Calls IPC workspaceSwitch.
+   */
+  switchToWorkspace: (id: string) => Promise<void>;
+  /**
+   * Sets the layout mode and persists via IPC. `split` is retired with
+   * ADR-0021 — the type excludes it.
+   */
+  setLayoutMode: (mode: Exclude<LayoutMode, "split">) => Promise<void>;
+  /** Syncs the open-workspace mirror from the backend (call on startup). */
+  syncOpenWorkspace: () => Promise<void>;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -202,11 +206,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   editorByWorkspace: {},
   runDrawerTaskId: null,
   activeWorkspaceId: null,
-  openWorkspaceIds: [],
-  focusedWorkspaceId: null,
-  pinnedWorkspaceIds: [],
   layoutMode: "single",
-  splitWorkspaceIds: null,
   conversationWorkspaceFilter: "all",
   setConversationWorkspaceFilter: (filter) => set({ conversationWorkspaceFilter: filter }),
   /**
@@ -415,72 +415,28 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
   switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId }),
-  openWorkspace: async (id) => {
-    await measureAsync("workspace.open", () => invoke("open_workspace", { id }), { workspaceId: id });
-    set((s) => ({
-      openWorkspaceIds: s.openWorkspaceIds.includes(id)
-        ? s.openWorkspaceIds
-        : [...s.openWorkspaceIds, id],
-      focusedWorkspaceId: id,
-      activeWorkspaceId: id,
-    }));
-  },
-  closeWorkspace: async (id, force) => {
-    const result = await measureAsync(
-      "workspace.close",
-      () => invoke<{ closedId: string; newFocusedId: string | null }>("close_workspace", { id, force }),
-      { workspaceId: id, force },
+  openDirectory: async (path) => {
+    const entry = await measureAsync(
+      "workspace.add_directory",
+      () => ipc.workspaceAddDirectory(path),
+      { path },
     );
-    set((s) => ({
-      openWorkspaceIds: s.openWorkspaceIds.filter((w) => w !== id),
-      focusedWorkspaceId: result.newFocusedId,
-      activeWorkspaceId: result.newFocusedId,
-    }));
+    set({ activeWorkspaceId: entry.id });
   },
-  focusWorkspace: async (id) => {
-    // Optimistic update for ≤150ms UI response.
-    set({ focusedWorkspaceId: id, activeWorkspaceId: id });
-    await measureAsync("workspace.focus", () => invoke("focus_workspace", { id }), { workspaceId: id });
+  switchToWorkspace: async (id) => {
+    await measureAsync(
+      "workspace.switch",
+      () => ipc.workspaceSwitch(id),
+      { workspaceId: id },
+    );
+    set({ activeWorkspaceId: id });
   },
   setLayoutMode: async (mode) => {
     set({ layoutMode: mode });
-    await invoke("set_layout_snapshot", {
-      mode,
-      splitWorkspaceIds: useUiStore.getState().splitWorkspaceIds,
-    });
+    await ipc.setLayoutSnapshot(mode, null);
   },
-  setSplitWorkspaceIds: async (ids) => {
-    set({ splitWorkspaceIds: ids });
-    await invoke("set_layout_snapshot", {
-      mode: ids ? "split" : "single",
-      splitWorkspaceIds: ids,
-    });
-  },
-  pinWorkspace: async (id) => {
-    await invoke("pin_workspace", { id });
-    set((s) => ({
-      pinnedWorkspaceIds: s.pinnedWorkspaceIds.includes(id)
-        ? s.pinnedWorkspaceIds
-        : [...s.pinnedWorkspaceIds, id],
-    }));
-  },
-  unpinWorkspace: async (id) => {
-    await invoke("unpin_workspace", { id });
-    set((s) => ({
-      pinnedWorkspaceIds: s.pinnedWorkspaceIds.filter((w) => w !== id),
-    }));
-  },
-  syncFromOpenSet: async () => {
-    const openSet = await invoke<{
-      openWorkspaces: { workspaceId: string; isFocused: boolean }[];
-      focusedWorkspaceId: string | null;
-      pinnedWorkspaceIds: string[];
-    }>("get_open_set");
-    set({
-      openWorkspaceIds: openSet.openWorkspaces.map((w) => w.workspaceId),
-      focusedWorkspaceId: openSet.focusedWorkspaceId,
-      activeWorkspaceId: openSet.focusedWorkspaceId,
-      pinnedWorkspaceIds: openSet.pinnedWorkspaceIds,
-    });
+  syncOpenWorkspace: async () => {
+    const open = await ipc.workspaceGetOpen();
+    set({ activeWorkspaceId: open?.id ?? null });
   },
 }));

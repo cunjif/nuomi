@@ -65,10 +65,10 @@ export function GroupConversationView(): ReactNode {
    *  failed-vs-interrupted discriminator (SPEC 5.8.3-1 vs 5.8.3-3). */
   const sawActivityRef = useRef(false);
 
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const commandContext = useMemo<CommandContext>(
-    () => ({ sessionId, focusedWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
-    [sessionId, focusedWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
+    () => ({ sessionId, activeWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
+    [sessionId, activeWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
   );
 
   const { entries, groupStream, activeSpeaker, lastMessageSeq, addOptimistic, clearOptimistic, clearLive } =

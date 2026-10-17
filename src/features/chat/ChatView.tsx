@@ -53,10 +53,10 @@ export function ChatView(): ReactNode {
     stoppedRef.current = false;
   }, [sessionId]);
 
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const commandContext = useMemo<CommandContext>(
-    () => ({ sessionId, focusedWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
-    [sessionId, focusedWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
+    () => ({ sessionId, activeWorkspaceId, ipc, queryClient: qc, navigate, selectSession, toggleTheme: cycleTheme, toast, t }),
+    [sessionId, activeWorkspaceId, qc, navigate, selectSession, cycleTheme, t],
   );
 
   // SPEC 5.8.1-5a: stop the in-flight turn. The pill closes immediately

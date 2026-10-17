@@ -29,9 +29,9 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
     { taskId: string; taskTitle: string; plan: TeamPlanDto } | null
   >(null);
   const setRunDrawerTask = useUiStore((s) => s.setRunDrawerTask);
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const { scope, setScope } = useViewScope("board");
-  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const effectiveWorkspaceId = workspaceId ?? activeWorkspaceId;
   const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const tasksQuery = useQuery({ queryKey: ["tasks", null, workspaceFilter], queryFn: () => ipc.listTasks(null, workspaceFilter) });
 

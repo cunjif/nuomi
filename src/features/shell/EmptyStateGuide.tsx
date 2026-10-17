@@ -9,7 +9,7 @@ interface RecentWorkspaceDto {
 }
 
 export function EmptyStateGuide() {
-  const { openWorkspace } = useUiStore();
+  const { openDirectory, switchToWorkspace } = useUiStore();
 
   const { data: recentWorkspaces } = useQuery({
     queryKey: ["recent-workspaces"],
@@ -20,8 +20,7 @@ export function EmptyStateGuide() {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ directory: true });
     if (typeof selected === "string") {
-      const entry = await invoke<{ id: string }>("add_workspace", { path: selected });
-      openWorkspace(entry.id);
+      await openDirectory(selected);
     }
   };
 
@@ -46,7 +45,7 @@ export function EmptyStateGuide() {
             {recentWorkspaces.map((ws) => (
               <button
                 key={ws.workspaceId}
-                onClick={() => openWorkspace(ws.workspaceId)}
+                onClick={() => void switchToWorkspace(ws.workspaceId)}
                 className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-paper-bg/60 text-sm text-left"
               >
                 {ws.isPinned && <span className="text-xs text-paper-accent">★</span>}

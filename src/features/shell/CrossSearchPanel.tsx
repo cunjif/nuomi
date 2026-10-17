@@ -22,7 +22,6 @@ export function CrossSearchPanel() {
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const openFile = useUiStore((s) => s.openFile);
   const registerCrossRef = useUiStore((s) => s.registerCrossRef);
-  const focusWorkspace = useUiStore((s) => s.focusWorkspace);
 
   const search = useCallback(async () => {
     if (!query.trim()) return;
@@ -42,7 +41,6 @@ export function CrossSearchPanel() {
   const handleOpenMatch = (sourceWorkspaceId: string, relativePath: string): void => {
     if (activeWorkspaceId === null) return;
     const targetWs = activeWorkspaceId;
-    void focusWorkspace(targetWs);
     openFile(relativePath, targetWs);
     if (sourceWorkspaceId !== targetWs) {
       registerCrossRef(targetWs, relativePath, sourceWorkspaceId, relativePath);

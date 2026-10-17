@@ -12,15 +12,16 @@ interface WorkspaceEntryDto {
 }
 
 export function OverviewGrid() {
-  const { openWorkspaceIds, focusWorkspace, setLayoutMode } = useUiStore();
+  const { activeWorkspaceId, switchToWorkspace, setLayoutMode } = useUiStore();
 
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
     queryFn: () => invoke<WorkspaceEntryDto[]>("list_workspaces"),
   });
 
+  // Single-open (ADR-0021): the overview lists the open workspace only.
   const openWorkspaces = (workspaces ?? []).filter((w) =>
-    openWorkspaceIds.includes(w.id),
+    w.id === activeWorkspaceId,
   );
 
   if (openWorkspaces.length === 0) return null;
@@ -35,8 +36,8 @@ export function OverviewGrid() {
           <button
             key={ws.id}
             onClick={() => {
-              focusWorkspace(ws.id);
-              setLayoutMode("single");
+              void switchToWorkspace(ws.id);
+              void setLayoutMode("single");
             }}
             className="flex flex-col gap-2 p-4 rounded-lg border border-paper-line/40 bg-paper-bg hover:border-paper-accent/60 transition-colors text-left"
           >

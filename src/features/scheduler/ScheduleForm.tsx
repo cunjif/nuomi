@@ -16,7 +16,7 @@ interface ScheduleFormProps {
 export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const [name, setName] = useState("");
   const [cronExpr, setCronExpr] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
@@ -54,7 +54,7 @@ export function ScheduleForm({ onDone }: ScheduleFormProps): ReactNode {
       className="mb-2 flex flex-wrap items-end gap-2 rounded border border-ink-muted/40 bg-surface-raised p-2"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!focusedWorkspaceId) {
+        if (!activeWorkspaceId) {
           toast.error(t("scheduler.noFocusedWorkspace"));
           return;
         }

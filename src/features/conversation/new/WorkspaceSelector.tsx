@@ -17,7 +17,7 @@ export interface WorkspaceSelectorProps {
  */
 export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSelectorProps): ReactNode {
   const { t } = useTranslation();
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
 
   const workspacesQuery = useQuery({
     queryKey: ["workspaces"],
@@ -44,7 +44,7 @@ export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSe
     );
   }
 
-  const effectiveSelected = selectedWorkspaceId ?? focusedWorkspaceId ?? workspaces[0]?.id ?? null;
+  const effectiveSelected = selectedWorkspaceId ?? activeWorkspaceId ?? workspaces[0]?.id ?? null;
 
   return (
     <div className="flex flex-col gap-1 rounded border border-ink-muted/40 bg-surface-raised p-2">

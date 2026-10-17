@@ -19,9 +19,9 @@ export function SchedulerView({ workspaceId }: { workspaceId: string | null }): 
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
-  const focusedWorkspaceId = useUiStore((s) => s.focusedWorkspaceId);
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const { scope, setScope } = useViewScope("scheduler");
-  const effectiveWorkspaceId = workspaceId ?? focusedWorkspaceId;
+  const effectiveWorkspaceId = workspaceId ?? activeWorkspaceId;
   const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
   const schedulesQuery = useQuery({ queryKey: ["schedules", workspaceFilter], queryFn: () => ipc.listSchedules(workspaceFilter) });
 
