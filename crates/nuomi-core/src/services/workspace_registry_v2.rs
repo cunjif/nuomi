@@ -22,7 +22,7 @@ use uuid::Uuid;
 use super::codebase_memory_migrator;
 use super::nuomi_dir;
 use super::workspace_guard;
-use super::workspace_migration;
+use super::workspace_label;
 use super::workspace_palette;
 use crate::store::repos::events;
 use crate::store::repos::work_directories::{self, WorkDirectoryStatus};
@@ -73,8 +73,8 @@ impl From<codebase_memory_migrator::MigrationError> for RegistryV2Error {
 }
 
 /// A workspace with its directories and derived availability — the read model
-/// returned by v2 operations. Workspace labels are derived separately (task
-/// 6.4) and will extend this view.
+/// returned by v2 operations. Workspace labels are derived separately via
+/// [`workspace_label::derive_label`] (task 6.4) and will extend this view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceView {
     pub entry: WorkspaceEntry,
@@ -164,7 +164,7 @@ impl WorkspaceRegistryV2 {
             open_single(&conn, &owned.workspace_id)?;
             return self.view_of(&conn, &owned.workspace_id);
         }
-        let display = workspace_migration::derive_display_name(&abs_path, &[])
+        let display = workspace_label::derive_display_name(&abs_path, &[])
             .ok_or_else(|| RegistryV2Error::InvalidPath(abs_path.clone()))?;
         let id = Uuid::now_v7().to_string();
         let entry = WorkspaceEntry {
@@ -445,7 +445,7 @@ fn derive_display(
         .into_iter()
         .map(|d| d.display_name)
         .collect();
-    workspace_migration::derive_display_name(abs_path, &existing)
+    workspace_label::derive_display_name(abs_path, &existing)
         .ok_or_else(|| RegistryV2Error::InvalidPath(abs_path.to_string()))
 }
 

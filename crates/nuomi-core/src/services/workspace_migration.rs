@@ -23,6 +23,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::codebase_memory_migrator;
+use super::workspace_label;
 use super::workspace_palette;
 use crate::store::repos::events;
 use crate::store::repos::settings;
@@ -256,7 +257,7 @@ pub(crate) fn migrate_work_directories(
         // be parsed, preserving the original row and appending an audit event.
         let mut valid: Vec<(DirectoryRow, String, String)> = Vec::new();
         for row in group {
-            match split_display_name(&row.abs_path) {
+            match workspace_label::split_display_name(&row.abs_path) {
                 Some((display, prefix)) => valid.push((row, display, prefix)),
                 None => {
                     report.skipped += 1;
@@ -279,7 +280,11 @@ pub(crate) fn migrate_work_directories(
         }
 
         // Disambiguate same-workspace display-name collisions.
-        let display_names = disambiguate(&valid);
+        let pairs: Vec<(String, String)> = valid
+            .iter()
+            .map(|(_, display, prefix)| (display.clone(), prefix.clone()))
+            .collect();
+        let display_names = workspace_label::disambiguate_names(&pairs);
 
         for ((row, _, _), display) in valid.iter().zip(display_names) {
             let new_id = Uuid::now_v7().to_string();
@@ -293,108 +298,6 @@ pub(crate) fn migrate_work_directories(
     }
 
     Ok(report)
-}
-
-/// Splits an absolute path into `(display_name, prefix)` where `display_name`
-/// is the final path segment (cross-platform separators, trailing slashes
-/// trimmed) and `prefix` is everything before it. Returns `None` when the
-/// path has no usable final segment (empty or separators only).
-fn split_display_name(abs_path: &str) -> Option<(String, String)> {
-    let trimmed = abs_path.trim_end_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return None;
-    }
-    match trimmed.rfind(['/', '\\']) {
-        Some(pos) => Some((trimmed[pos + 1..].to_string(), trimmed[..pos].to_string())),
-        None => Some((trimmed.to_string(), String::new())),
-    }
-}
-
-/// Derives the display name for a directory being added to a workspace whose
-/// existing display names are `existing`: the final path segment, with the
-/// same two-level collision disambiguation the boot-time correction uses
-/// (`name (parent)` then `name (full-prefix)`), so no two directories in one
-/// workspace ever share a display name. Only the newcomer is renamed —
-/// existing names stay stable. Returns `None` when the path has no usable
-/// final segment.
-pub(crate) fn derive_display_name(abs_path: &str, existing: &[String]) -> Option<String> {
-    let (display, prefix) = split_display_name(abs_path)?;
-    if !existing.iter().any(|n| n == &display) {
-        return Some(display);
-    }
-    let level1 = match parent_segment(&prefix) {
-        Some(parent) => format!("{} ({})", display, parent),
-        None => display.clone(),
-    };
-    if !existing.iter().any(|n| n == &level1) {
-        return Some(level1);
-    }
-    if !prefix.is_empty() {
-        return Some(format!("{} ({})", display, prefix));
-    }
-    // Unreachable in practice: a colliding bare display with an empty prefix
-    // implies an identical abs_path, which the UNIQUE constraint forbids.
-    Some(level1)
-}
-
-/// Resolves same-display-name collisions within one workspace. Two levels:
-/// first `name (parent-segment)`; if still ambiguous, `name (full-prefix)` —
-/// the full prefix is guaranteed unique because `abs_path` is unique within
-/// the workspace and the trailing segment is identical across the group.
-fn disambiguate(rows: &[(DirectoryRow, String, String)]) -> Vec<String> {
-    let mut names: Vec<String> = rows.iter().map(|(_, display, _)| display.clone()).collect();
-
-    // Collect indices per display name to find collision groups.
-    let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (idx, (_, display, _)) in rows.iter().enumerate() {
-        groups.entry(display.as_str()).or_default().push(idx);
-    }
-    for (_, indices) in groups {
-        if indices.len() < 2 {
-            continue;
-        }
-        // Level 1: append the parent segment, e.g. `foo (a)`. A row whose
-        // prefix is empty keeps the bare name (cannot collide within the
-        // group: identical bare display + empty prefix would mean identical
-        // abs_path, which the UNIQUE constraint forbids).
-        let level1: Vec<String> = indices
-            .iter()
-            .map(|&i| match parent_segment(&rows[i].2) {
-                Some(parent) => format!("{} ({})", rows[i].1, parent),
-                None => rows[i].1.clone(),
-            })
-            .collect();
-        let unique = {
-            let mut seen = std::collections::BTreeSet::new();
-            level1.iter().all(|s| seen.insert(s.clone()))
-        };
-        if unique {
-            for (&slot, name) in indices.iter().zip(level1) {
-                names[slot] = name;
-            }
-        } else {
-            // Level 2: append the full prefix — unique by construction.
-            for &slot in &indices {
-                let (_, display, prefix) = &rows[slot];
-                if !prefix.is_empty() {
-                    names[slot] = format!("{} ({})", display, prefix);
-                }
-            }
-        }
-    }
-    names
-}
-
-/// Returns the final segment of a path prefix, e.g. `C:\proj\a` → `a`.
-fn parent_segment(prefix: &str) -> Option<String> {
-    let trimmed = prefix.trim_end_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(match trimmed.rfind(['/', '\\']) {
-        Some(pos) => trimmed[pos + 1..].to_string(),
-        None => trimmed.to_string(),
-    })
 }
 
 fn reparent_migrated_sessions(
@@ -781,42 +684,6 @@ mod tests {
         );
         assert!(is_valid_uuid(&dir_id));
         assert_eq!(display, "legacy");
-    }
-
-    // ---- derive_display_name (incremental add path, consumed by registry v2)
-
-    #[test]
-    fn derive_display_name_bare_when_no_collision() {
-        assert_eq!(derive_display_name("C:\\a\\foo", &[]).unwrap(), "foo");
-        assert_eq!(
-            derive_display_name("C:\\a\\foo", &["bar".into(), "baz".into()]).unwrap(),
-            "foo"
-        );
-        // Trailing slash and mixed separators.
-        assert_eq!(
-            derive_display_name("/home/user/beta/", &["foo".into()]).unwrap(),
-            "beta"
-        );
-    }
-
-    #[test]
-    fn derive_display_name_escalates_through_two_levels() {
-        // Level 1: parent segment suffix.
-        assert_eq!(
-            derive_display_name("C:\\b\\foo", &["foo".into()]).unwrap(),
-            "foo (b)"
-        );
-        // Level 2: parent collides with an existing level-1 name.
-        assert_eq!(
-            derive_display_name("C:\\a\\foo", &["foo".into(), "foo (a)".into()]).unwrap(),
-            "foo (C:\\a)"
-        );
-    }
-
-    #[test]
-    fn derive_display_name_unparseable_returns_none() {
-        assert!(derive_display_name("", &[]).is_none());
-        assert!(derive_display_name("\\\\\\", &[]).is_none());
     }
 
     // ---- boot-time open-set seeding respects single-open (ADR-0021)

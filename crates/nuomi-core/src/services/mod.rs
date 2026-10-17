@@ -20,6 +20,7 @@ pub mod team_former;
 pub mod team_runner;
 pub mod workspace;
 pub mod workspace_guard;
+pub mod workspace_label;
 pub mod workspace_layout;
 pub mod workspace_migration;
 pub mod workspace_open_set;
@@ -82,6 +83,7 @@ pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMem
 pub use team_runner::{materialize, run_team, MaterializedProviders, TeamRunOutcome};
 pub use workspace::{FileEntry, WorkspaceError, WorkspaceService};
 pub use workspace_guard::{canonicalize as guard_canonicalize, is_blacklisted, PathGuardError};
+pub use workspace_label::{derive_label, WorkspaceLabel};
 pub use workspace_layout::{LayoutError, RestoreOutcome, WorkspaceLayoutService};
 pub use workspace_migration::{
     run_if_needed as run_workspace_migration, MigrationOrchestrationError, MigrationOutcome,
