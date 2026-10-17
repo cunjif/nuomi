@@ -4,8 +4,8 @@
 use async_trait::async_trait;
 use nuomi_core::domain::{new_id, Role, Team, TeamTopology};
 use nuomi_core::orchestrator::{
-    GroupChatExecutor, GroupState, OrchestratorError, ProviderResolver, RoundRobinSelector,
-    SpeakerSelector, TeamRunInput, WhiteBoardService, HANDOFF_TOOL,
+    GroupChatExecutor, GroupDeltaBridge, GroupState, OrchestratorError, ProviderResolver,
+    RoundRobinSelector, SpeakerSelector, TeamRunInput, WhiteBoardService, HANDOFF_TOOL,
 };
 use nuomi_core::providers::{ChatResponse, FakeLlm, LlmProvider, ToolCall};
 use serde_json::{json, Value};
@@ -182,26 +182,30 @@ async fn handoff_transfers_control_and_syncs_context() {
         ]
     );
 
-    // Events: since ADR-0002 mirroring, each turn persists a `whiteboard`
-    // note mirror followed by its `message` record, seq-ordered.
+    // Events: since ADR-0002 mirroring, each selector decision persists a
+    // `selector_decision` record (the opening pick, and the final
+    // convergence signal) and each turn persists a `whiteboard` note mirror
+    // followed by its `message` record, seq-ordered.
     let db = nuomi_core::store::Db::open(&db_path).unwrap();
     let events =
         nuomi_core::store::repos::events::list_by_aggregate(&db.0, "session", &session_id, None)
             .unwrap();
-    assert_eq!(events.len(), 6);
+    assert_eq!(events.len(), 8);
     assert_eq!(
         events.iter().map(|e| e.seq).collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5, 6]
+        vec![1, 2, 3, 4, 5, 6, 7, 8]
     );
     assert_eq!(
         events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
         vec![
+            "selector_decision",
             "whiteboard",
             "message",
             "whiteboard",
             "message",
             "whiteboard",
-            "message"
+            "message",
+            "selector_decision"
         ]
     );
     let message_bodies: Vec<&str> = events
@@ -437,4 +441,53 @@ async fn round_robin_baseline_contrast() {
     for pair in outcome2.transcript.windows(2) {
         assert_ne!(pair[0].speaker, pair[1].speaker);
     }
+}
+
+/// SPEC 5.8.1-4: with a delta bridge attached, every speaker's text deltas
+/// are forwarded with the agent's identity, in turn order — the live signal
+/// group-chat views use to fade the waiting pill into a streaming avatar.
+#[tokio::test]
+async fn delta_bridge_receives_per_agent_deltas() {
+    let a = role("A", "p0");
+    let b = role("B", "p1");
+    let session_id = new_id();
+
+    let llm0 = Arc::new(FakeLlm::new("p0", vec![FakeLlm::response("alpha says hi")]));
+    let llm1 = Arc::new(FakeLlm::new("p1", vec![FakeLlm::response("beta says bye")]));
+    let input = TeamRunInput {
+        session_id: session_id.clone(),
+        task: "t".into(),
+        roles: vec![a.clone(), b.clone()],
+        team: team(&[&a, &b], json!({ "max_rounds": 2 })),
+        model: "m".into(),
+        workspace_id: None,
+    };
+    let (wb, _path) = seeded_board(&session_id, &input.roles).await;
+    let providers = resolver(
+        vec![("p0".into(), llm0), ("p1".into(), llm1)],
+        Arc::new(FakeLlm::new("d", vec![])),
+    );
+
+    let calls = Arc::new(std::sync::Mutex::new(Vec::<(String, String, String)>::new()));
+    let sink = calls.clone();
+    let bridge: GroupDeltaBridge = Arc::new(move |role_id: &str, role_name: &str, delta: &str| {
+        sink.lock().unwrap().push((
+            role_id.to_string(),
+            role_name.to_string(),
+            delta.to_string(),
+        ));
+    });
+
+    let executor = GroupChatExecutor::new(Arc::new(RoundRobinSelector)).with_delta_bridge(bridge);
+    let outcome = executor.run(&input, &providers, &wb).await.expect("run");
+    assert_eq!(outcome.rounds, 2);
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        *calls,
+        vec![
+            (a.id.clone(), "A".to_string(), "alpha says hi".to_string()),
+            (b.id.clone(), "B".to_string(), "beta says bye".to_string()),
+        ]
+    );
 }

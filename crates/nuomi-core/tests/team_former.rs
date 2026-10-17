@@ -55,6 +55,15 @@ fn connect(store: &Store) -> rusqlite::Connection {
     conn
 }
 
+/// User-authored roles only — migrations 0031/0035 seed six builtin
+/// steward roles, which must not count against write-assertions.
+fn user_role_count(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT count(*) FROM roles WHERE builtin = 0", [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
+
 fn provider_config(id: &str, name: &str, base_url: &str, master: bool) -> ProviderConfig {
     ProviderConfig {
         id: id.into(),
@@ -468,7 +477,7 @@ async fn invalid_plan_after_retry_writes_nothing() {
 
     // Zero writes: baseline of one seeded role, no teams at all.
     let conn = connect(&store);
-    assert_eq!(repos::roles::count(&conn).unwrap(), 1);
+    assert_eq!(user_role_count(&conn), 1);
     assert_eq!(repos::teams::count(&conn).unwrap(), 0);
 }
 
@@ -525,7 +534,7 @@ async fn first_bad_plan_is_retried_then_succeeds() {
     assert_eq!(formed.rationale, "second try");
     assert_eq!(formed.team.member_role_ids.len(), 2);
     let conn = connect(&store);
-    assert_eq!(repos::roles::count(&conn).unwrap(), 2);
+    assert_eq!(user_role_count(&conn), 2);
     assert_eq!(repos::teams::count(&conn).unwrap(), 1);
 }
 
@@ -568,7 +577,7 @@ async fn unknown_provider_reference_fails_before_any_write() {
     }
 
     let conn = connect(&store);
-    assert_eq!(repos::roles::count(&conn).unwrap(), 0);
+    assert_eq!(user_role_count(&conn), 0);
     assert_eq!(repos::teams::count(&conn).unwrap(), 0);
 }
 
@@ -607,7 +616,7 @@ async fn member_count_bounds_are_enforced() {
     }
     {
         let conn = connect(&below_store);
-        assert_eq!(repos::roles::count(&conn).unwrap(), 0);
+        assert_eq!(user_role_count(&conn), 0);
         assert_eq!(repos::teams::count(&conn).unwrap(), 0);
     }
 
@@ -654,7 +663,7 @@ async fn member_count_bounds_are_enforced() {
     }
     {
         let conn = connect(&above_store);
-        assert_eq!(repos::roles::count(&conn).unwrap(), 0);
+        assert_eq!(user_role_count(&conn), 0);
         assert_eq!(repos::teams::count(&conn).unwrap(), 0);
     }
 }

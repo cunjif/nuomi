@@ -128,6 +128,22 @@ async fn canned_server(content: &'static str) -> MockServer {
     server
 }
 
+/// Mock SSE endpoint streaming `content` as a single text delta.
+async fn sse_server(content: &'static str) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(format!(
+                    "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{content}\"}}}}]}}\n\ndata: [DONE]\n\n"
+                )),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
 type Captured = Arc<Mutex<Vec<String>>>;
 
 /// Relay endpoint: echoes the last message content back prefixed with
@@ -404,6 +420,94 @@ async fn group_chat_round_robin_respects_max_rounds_and_records_whiteboard() {
         .expect("bus event within timeout")
         .expect("event received");
     assert_eq!(event.topic, "session.whiteboard");
+}
+
+/// SPEC 5.8.1-4: a streaming group chat publishes one `session.delta` per
+/// speaker delta on the kernel bus, carrying the speaking agent's identity,
+/// between the selector decision and the durable turn records.
+#[tokio::test]
+async fn group_chat_streams_per_agent_deltas_on_bus() {
+    let session_id = "sess-group-stream";
+    let store = seed_store(session_id);
+    let bus = EventBus::default();
+    let mut rx = bus.subscribe();
+    let chat_server = sse_server("streamed point").await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-main", "main model", chat_server.uri().as_str(), true),
+        )
+        .unwrap();
+        for rid in ["s1", "s2"] {
+            repos::roles::insert(&conn, &role_row(rid, &format!("voice-{rid}"), None, &[]))
+                .unwrap();
+        }
+        repos::teams::insert(
+            &conn,
+            &team_row(
+                "team-stream",
+                "stream table",
+                TeamTopology::GroupChat,
+                &["s1", "s2"],
+                json!({ "max_rounds": 2, "selector": "round_robin" }),
+            ),
+        )
+        .unwrap();
+    }
+
+    let outcome = run_team(
+        store.db_path.clone(),
+        Some(bus),
+        "team-stream",
+        session_id,
+        "discuss the plan",
+        secrets_for(&["kr-p-main"]).await,
+        None,
+        None,
+    )
+    .await
+    .expect("group chat run");
+
+    assert_eq!(outcome.rounds, 2);
+    assert_eq!(outcome.final_output, "streamed point");
+
+    // Per round the bus sees: selector_decision → session.delta →
+    // whiteboard → message; two rounds = eight events total.
+    let mut topics = Vec::new();
+    let mut deltas = Vec::new();
+    for _ in 0..8 {
+        let event = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("bus event within timeout")
+            .expect("event received");
+        if event.topic == "session.delta" {
+            deltas.push(event.payload.clone());
+        } else {
+            topics.push(event.topic.clone());
+        }
+    }
+    assert_eq!(
+        topics,
+        vec![
+            "session.selector_decision",
+            "session.whiteboard",
+            "session.message",
+            "session.selector_decision",
+            "session.whiteboard",
+            "session.message",
+        ]
+    );
+    assert_eq!(deltas.len(), 2);
+    assert_eq!(deltas[0]["sessionId"], session_id);
+    assert_eq!(deltas[0]["text"], "streamed point");
+    assert_eq!(deltas[0]["roleId"], "s1");
+    assert_eq!(deltas[0]["roleName"], "voice-s1");
+    assert_eq!(deltas[0]["seq"], 1);
+    assert_eq!(deltas[1]["roleId"], "s2");
+    assert_eq!(deltas[1]["roleName"], "voice-s2");
+    assert_eq!(deltas[1]["seq"], 2);
 }
 
 #[tokio::test]

@@ -69,7 +69,18 @@ async fn ui_empty_title_session_derives_on_first_message() {
 
     // Send the first non-empty message.
     kernel
-        .run_task_in_session(sid, "hello world", None, None, None, None, None, None, None, None)
+        .run_task_in_session(
+            sid,
+            "hello world",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -96,7 +107,18 @@ async fn cli_placeholder_title_session_derives_on_first_message() {
     assert!(is_unnamed_title(DEFAULT_SESSION_TITLE));
 
     kernel
-        .run_task_in_session(sid, "first task", None, None, None, None, None, None, None, None)
+        .run_task_in_session(
+            sid,
+            "first task",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -118,7 +140,18 @@ async fn legacy_empty_title_session_derives_on_next_message() {
     insert_session(&db_path, sid, "");
 
     kernel
-        .run_task_in_session(sid, "a new message", None, None, None, None, None, None, None, None)
+        .run_task_in_session(
+            sid,
+            "a new message",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -142,7 +175,18 @@ async fn user_named_session_is_protected_from_derivation() {
     assert!(!is_unnamed_title(user_title));
 
     kernel
-        .run_task_in_session(sid, "some message", None, None, None, None, None, None, None, None)
+        .run_task_in_session(
+            sid,
+            "some message",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -223,7 +267,18 @@ async fn whitespace_first_message_preserves_unnamed_state() {
 
     // Send a whitespace-only first message.
     kernel
-        .run_task_in_session(sid, "   \n\t  ", None, None, None, None, None, None, None, None)
+        .run_task_in_session(
+            sid,
+            "   \n\t  ",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
