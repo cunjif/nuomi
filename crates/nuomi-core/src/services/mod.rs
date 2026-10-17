@@ -25,6 +25,7 @@ pub mod workspace_migration;
 pub mod workspace_open_set;
 pub mod workspace_palette;
 pub mod workspace_registry;
+pub mod workspace_registry_v2;
 
 pub use crate::store::repos::workspace_layout_snapshot::LayoutMode;
 pub use ai_commit_service::{
@@ -92,4 +93,7 @@ pub use workspace_palette::{color_for, hash as palette_hash, ColorTag, PALETTE};
 pub use workspace_registry::{
     RegistryError, RemoveResult as WorkspaceRemoveResult, WorkspaceEntryWithPresence,
     WorkspaceRegistry,
+};
+pub use workspace_registry_v2::{
+    RegistryV2Error, RemoveDirectoryResult, WorkspaceRegistryV2, WorkspaceView,
 };

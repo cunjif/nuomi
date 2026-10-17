@@ -310,6 +310,33 @@ fn split_display_name(abs_path: &str) -> Option<(String, String)> {
     }
 }
 
+/// Derives the display name for a directory being added to a workspace whose
+/// existing display names are `existing`: the final path segment, with the
+/// same two-level collision disambiguation the boot-time correction uses
+/// (`name (parent)` then `name (full-prefix)`), so no two directories in one
+/// workspace ever share a display name. Only the newcomer is renamed —
+/// existing names stay stable. Returns `None` when the path has no usable
+/// final segment.
+pub(crate) fn derive_display_name(abs_path: &str, existing: &[String]) -> Option<String> {
+    let (display, prefix) = split_display_name(abs_path)?;
+    if !existing.iter().any(|n| n == &display) {
+        return Some(display);
+    }
+    let level1 = match parent_segment(&prefix) {
+        Some(parent) => format!("{} ({})", display, parent),
+        None => display.clone(),
+    };
+    if !existing.iter().any(|n| n == &level1) {
+        return Some(level1);
+    }
+    if !prefix.is_empty() {
+        return Some(format!("{} ({})", display, prefix));
+    }
+    // Unreachable in practice: a colliding bare display with an empty prefix
+    // implies an identical abs_path, which the UNIQUE constraint forbids.
+    Some(level1)
+}
+
 /// Resolves same-display-name collisions within one workspace. Two levels:
 /// first `name (parent-segment)`; if still ambiguous, `name (full-prefix)` —
 /// the full prefix is guaranteed unique because `abs_path` is unique within
@@ -402,9 +429,11 @@ fn reparent_migrated_tasks_runs(
 }
 
 /// Ensures the legacy `is_active = 1` workspace is present in
-/// `workspace_open_state` (migration 0024 backfill). Idempotent — skips rows
-/// that already exist. Called on every boot to cover databases created before
-/// 0024 was applied.
+/// `workspace_open_state` (migration 0024 backfill). Idempotent. Called on
+/// every boot to cover databases created before 0024 was applied. Seeds only
+/// when the open set is completely empty: under the v2 single-open model
+/// (ADR-0021) this boot pass must never add a second row, so a stale
+/// `is_active` flag next to an already-open workspace is ignored.
 fn ensure_active_in_open_set(conn: &Connection) -> Result<(), MigrationOrchestrationError> {
     let now = crate::domain::now_ms();
     conn.execute(
@@ -412,7 +441,7 @@ fn ensure_active_in_open_set(conn: &Connection) -> Result<(), MigrationOrchestra
          SELECT id, ?1, ?1, 1
          FROM workspaces
          WHERE is_active = 1
-           AND NOT EXISTS (SELECT 1 FROM workspace_open_state WHERE workspace_id = workspaces.id)",
+           AND NOT EXISTS (SELECT 1 FROM workspace_open_state)",
         rusqlite::params![now],
     )
     .map_err(StoreError::Sqlite)?;
@@ -752,5 +781,89 @@ mod tests {
         );
         assert!(is_valid_uuid(&dir_id));
         assert_eq!(display, "legacy");
+    }
+
+    // ---- derive_display_name (incremental add path, consumed by registry v2)
+
+    #[test]
+    fn derive_display_name_bare_when_no_collision() {
+        assert_eq!(derive_display_name("C:\\a\\foo", &[]).unwrap(), "foo");
+        assert_eq!(
+            derive_display_name("C:\\a\\foo", &["bar".into(), "baz".into()]).unwrap(),
+            "foo"
+        );
+        // Trailing slash and mixed separators.
+        assert_eq!(
+            derive_display_name("/home/user/beta/", &["foo".into()]).unwrap(),
+            "beta"
+        );
+    }
+
+    #[test]
+    fn derive_display_name_escalates_through_two_levels() {
+        // Level 1: parent segment suffix.
+        assert_eq!(
+            derive_display_name("C:\\b\\foo", &["foo".into()]).unwrap(),
+            "foo (b)"
+        );
+        // Level 2: parent collides with an existing level-1 name.
+        assert_eq!(
+            derive_display_name("C:\\a\\foo", &["foo".into(), "foo (a)".into()]).unwrap(),
+            "foo (C:\\a)"
+        );
+    }
+
+    #[test]
+    fn derive_display_name_unparseable_returns_none() {
+        assert!(derive_display_name("", &[]).is_none());
+        assert!(derive_display_name("\\\\\\", &[]).is_none());
+    }
+
+    // ---- boot-time open-set seeding respects single-open (ADR-0021)
+
+    #[test]
+    fn boot_seed_skips_when_open_set_nonempty() {
+        let conn = db();
+        // Stale legacy state: A still flagged active, B already open.
+        seed_workspace(&conn, "wa");
+        seed_workspace(&conn, "wb");
+        conn.execute("UPDATE workspaces SET is_active = 1 WHERE id = 'wa'", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO workspace_open_state (workspace_id, opened_at, last_focused_at, is_focused)
+             VALUES ('wb', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let outcome = run_if_needed(&conn).unwrap();
+        assert!(matches!(outcome, MigrationOutcome::Skipped));
+        let open_ids: Vec<String> = conn
+            .prepare("SELECT workspace_id FROM workspace_open_state")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        // 单开：不再为 stale is_active 补行
+        assert_eq!(open_ids, vec!["wb".to_string()]);
+    }
+
+    #[test]
+    fn boot_seed_fills_empty_open_set_with_active_workspace() {
+        let conn = db();
+        seed_workspace(&conn, "wa");
+        conn.execute("UPDATE workspaces SET is_active = 1 WHERE id = 'wa'", [])
+            .unwrap();
+        let outcome = run_if_needed(&conn).unwrap();
+        assert!(matches!(outcome, MigrationOutcome::Skipped));
+        let focused: String = conn
+            .query_row(
+                "SELECT workspace_id FROM workspace_open_state WHERE is_focused = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(focused, "wa");
     }
 }
