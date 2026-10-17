@@ -1,6 +1,6 @@
 # ADR 0021: 工作区两级模型重构（单开工作区 ⊃ 多工作目录）
 
-- **状态**: Proposed
+- **状态**: Accepted（2026-10-17 用户确认全部 8 项决策）
 - **日期**: 2026-10-17
 - **决策者**: user + conductor
 - **前置设计**: `.codeartsdoer/specs/steward_workbench_v2/design.md` §2.1.3.3、§2.3.2.2

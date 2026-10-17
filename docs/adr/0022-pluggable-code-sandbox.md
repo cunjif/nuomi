@@ -1,6 +1,6 @@
 # ADR 0022: 插件化代码运行沙箱（内置插件壳 + SandboxExecutor trait + CubeSandbox 默认执行器）
 
-- **状态**: Proposed
+- **状态**: Accepted（2026-10-17 用户确认全部 7 项决策；实施顺序 6→7 串行）
 - **日期**: 2026-10-17
 - **决策者**: user + conductor
 - **前置设计**: `.codeartsdoer/specs/steward_workbench_v2/design.md` §2.1.3.4、§2.3.2.2
