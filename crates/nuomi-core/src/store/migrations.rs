@@ -289,6 +289,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0036_work_directories.sql"
         )),
     ),
+    (
+        37,
+        "0037_sandbox_tasks",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0037_sandbox_tasks.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -724,19 +732,19 @@ mod tests {
     #[test]
     fn migrations_steward_tables_idempotent_on_empty_db() {
         let conn = Connection::open_in_memory().unwrap();
-        // First run: applies all migrations 0001-0036
+        // First run: applies all migrations 0001-0037
         run(&conn).unwrap();
         let v1: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v1, 36);
+        assert_eq!(v1, 37);
 
-        // Second run: no-op (user_version already 36)
+        // Second run: no-op (user_version already 37)
         run(&conn).unwrap();
         let v2: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v2, 36);
+        assert_eq!(v2, 37);
 
         // Steward tables exist and are empty (except roles331 seeds 5 builtin roles)
         let steward_sessions: i64 = conn
@@ -922,5 +930,115 @@ mod tests {
             .query_row("SELECT count(*) FROM work_directories", [], |r| r.get(0))
             .unwrap();
         assert_eq!(dir_count, 0, "empty root_path yields no work directory");
+    }
+
+    // ---- migration 0037: sandbox_tasks (ADR-0022 lossless upgrade)
+
+    #[test]
+    fn migrations_0037_lossless_upgrade_from_0036() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Build a 0036-state database with a workspace, a work directory
+        // backfilled from root_path, and a session.
+        run_migrations_to(&conn, 36);
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w1', 'C:\\proj\\alpha', 'paper-yellow', 100, 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_directories (id, workspace_id, abs_path, display_name, mounted, added_at)
+             VALUES ('d1', 'w1', 'C:\\proj\\alpha', 'alpha', 1, 100)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, workspace_id)
+             VALUES ('s1', 'alpha chat', 1, 1, 'w1')",
+            [],
+        )
+        .unwrap();
+
+        // Apply 0037 (run continues from user_version 36).
+        run(&conn).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 37);
+
+        // Existing tables and rows are untouched (zero change to prior state).
+        let ws_count: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ws_count, 1);
+        let dir_count: i64 = conn
+            .query_row("SELECT count(*) FROM work_directories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(dir_count, 1);
+        let session_owner: String = conn
+            .query_row(
+                "SELECT workspace_id FROM sessions WHERE id = 's1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_owner, "w1");
+
+        // sandbox_tasks exists and starts empty; a row round-trips with the
+        // full 0037 column set (task spec + lifecycle audit fields).
+        let empty: i64 = conn
+            .query_row("SELECT count(*) FROM sandbox_tasks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(empty, 0);
+        conn.execute(
+            "INSERT INTO sandbox_tasks (id, task_type, runtime, status, source, authorized_dirs, limits, stdout, stderr, artifact_ref, artifact_retryable, exit_info, duration_ms, created_at, finished_at)
+             VALUES ('t1', 'run_code', 'python', 'succeeded', 'print(1)',
+                     '[\"C:\\\\proj\\\\alpha\"]', '{\"timeout_secs\":120}', '1\n', '', null, 0, 'code=0', 42, 1000, 1042)",
+            [],
+        )
+        .unwrap();
+        let (task_type, status, artifact_retryable, duration_ms): (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT task_type, status, artifact_retryable, duration_ms FROM sandbox_tasks WHERE id = 't1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                task_type.as_str(),
+                status.as_str(),
+                artifact_retryable,
+                duration_ms
+            ),
+            ("run_code", "succeeded", 0, 42)
+        );
+
+        // CHECK constraints reject values outside the enumerated sets.
+        let bad_type: Result<usize, _> = conn.execute(
+            "INSERT INTO sandbox_tasks (id, task_type, runtime, status, source, authorized_dirs, limits, created_at)
+             VALUES ('t2', 'evil', 'python', 'queued', 'x', '[]', '{}', 1)",
+            [],
+        );
+        assert!(
+            bad_type.is_err(),
+            "task_type CHECK must reject unknown kinds"
+        );
+        let bad_status: Result<usize, _> = conn.execute(
+            "INSERT INTO sandbox_tasks (id, task_type, runtime, status, source, authorized_dirs, limits, created_at)
+             VALUES ('t3', 'run_code', 'python', 'paused', 'x', '[]', '{}', 1)",
+            [],
+        );
+        assert!(
+            bad_status.is_err(),
+            "status CHECK must reject unknown states"
+        );
+
+        // Idempotent: a second run applies nothing new (no duplicate effects).
+        run(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM sandbox_tasks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
