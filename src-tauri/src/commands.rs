@@ -6215,6 +6215,11 @@ pub struct WorkspaceEntryDto {
     /// The workspace's work directories with availability flags.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub directories: Option<Vec<WorkDirectoryDto>>,
+    /// Whether a `migration_report` event flags this workspace (skipped
+    /// during the 0036 correction) — anomalous workspaces are surfaced
+    /// disabled in switch/recent lists (spec 5.5.3-2c).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anomaly: Option<bool>,
 }
 
 /// A work directory of a workspace (two-level model, ADR-0021).
@@ -6288,6 +6293,16 @@ pub struct RecentWorkspaceDto {
     pub workspace_id: String,
     pub last_used_at: i64,
     pub is_pinned: bool,
+    /// Derived workspace label (same derivation as `list_workspaces`,
+    /// ADR-0021 — display names joined with `-`, truncated at 4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Full label (tooltip variant).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_full: Option<String>,
+    /// Migration-anomaly flag: the workspace carries a `migration_report`
+    /// event and should render disabled in the recent list (spec 5.5.3-2c).
+    pub anomaly: bool,
 }
 
 /// Result of opening a workspace.
@@ -6414,6 +6429,10 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                 .into_iter()
                 .map(|r| (r.workspace_id.clone(), r))
                 .collect();
+            let anomaly_ids: std::collections::HashSet<String> =
+                repos::events::list_aggregate_ids_of_kind(&db.0, "workspace", "migration_report")?
+                    .into_iter()
+                    .collect();
             list.into_iter()
                 .map(|wp| {
                     let os = open_state.get(&wp.entry.id);
@@ -6423,6 +6442,7 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                     )?;
                     let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
                     let label = nuomi_core::services::derive_label(&dir_entries);
+                    let anomaly = anomaly_ids.contains(&wp.entry.id);
                     // Active-directory marking only for the open workspace —
                     // the resolver chain (slotted, else first mounted+available).
                     let active_id = os.and_then(|_| {
@@ -6453,6 +6473,7 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                         label: optional_label(&label.label),
                         label_full: optional_label(&label.label_full),
                         directories: Some(work_directory_dtos(&dirs, active_id.as_deref())),
+                        anomaly: Some(anomaly),
                     })
                 })
                 .collect()
@@ -6548,6 +6569,9 @@ fn workspace_view_to_dto(
         label: optional_label(&label.label),
         label_full: optional_label(&label.label_full),
         directories: Some(work_directory_dtos(&view.directories, active_directory_id)),
+        // The open workspace passed the v2 open gate (directories exist), so
+        // migration anomalies only surface via list/recent views.
+        anomaly: None,
     }
 }
 
@@ -6611,6 +6635,7 @@ pub async fn impl_add_workspace(
         label: None,
         label_full: None,
         directories: None,
+        anomaly: None,
     })
 }
 
@@ -6682,6 +6707,7 @@ pub async fn impl_activate_workspace(
         label: None,
         label_full: None,
         directories: None,
+        anomaly: None,
     })
 }
 
@@ -6709,6 +6735,7 @@ pub async fn impl_get_active_workspace(
             label: None,
             label_full: None,
             directories: None,
+            anomaly: None,
         }
     }))
 }
@@ -7143,12 +7170,32 @@ pub async fn impl_get_recent_workspaces(
     tokio::task::spawn_blocking(move || -> Result<Vec<RecentWorkspaceDto>, IpcError> {
         let db = Db::open(&db_path)?;
         let entries = repos::workspace_recent::list(&db.0, limit as usize)?;
+        let anomaly_ids: std::collections::HashSet<String> =
+            repos::events::list_aggregate_ids_of_kind(&db.0, "workspace", "migration_report")?
+                .into_iter()
+                .collect();
         Ok(entries
             .into_iter()
-            .map(|e| RecentWorkspaceDto {
-                workspace_id: e.workspace_id,
-                last_used_at: e.last_used_at,
-                is_pinned: e.is_pinned,
+            .map(|e| {
+                // Same label derivation as list_workspaces: directory
+                // display names joined with `-` (ADR-0021, derived). Empty
+                // when the recent row's workspace has no directory rows.
+                let dirs = repos::work_directories::list_by_workspace_with_availability(
+                    &db.0,
+                    &e.workspace_id,
+                )
+                .unwrap_or_default();
+                let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
+                let label = nuomi_core::services::derive_label(&dir_entries);
+                let anomaly = anomaly_ids.contains(&e.workspace_id);
+                RecentWorkspaceDto {
+                    workspace_id: e.workspace_id,
+                    last_used_at: e.last_used_at,
+                    is_pinned: e.is_pinned,
+                    label: optional_label(&label.label),
+                    label_full: optional_label(&label.label_full),
+                    anomaly,
+                }
             })
             .collect())
     })

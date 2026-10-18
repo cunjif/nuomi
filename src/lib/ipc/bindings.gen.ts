@@ -1768,7 +1768,21 @@ export type PruneRecordDto = { occurredAt: number; budgetTokens: number; approxT
 /**
  * A recent workspace entry.
  */
-export type RecentWorkspaceDto = { workspaceId: string; lastUsedAt: number; isPinned: boolean }
+export type RecentWorkspaceDto = { workspaceId: string; lastUsedAt: number; isPinned: boolean; 
+/**
+ * Derived workspace label (same derivation as `list_workspaces`,
+ * ADR-0021 — display names joined with `-`, truncated at 4).
+ */
+label?: string | null; 
+/**
+ * Full label (tooltip variant).
+ */
+labelFull?: string | null; 
+/**
+ * Migration-anomaly flag: the workspace carries a `migration_report`
+ * event and should render disabled in the recent list (spec 5.5.3-2c).
+ */
+anomaly: boolean }
 export type RedactPatternInput = { pattern: string; replacement: string }
 export type RefineConfigDto = { triggerFailures: number; minEditStrategy: RefineStrategyDto; evidenceThreshold: number; rollbackEnabled: boolean }
 export type RefineStrategyDto = "prompt_note" | "memory" | "skill" | "sub_agent_spec"
@@ -1953,7 +1967,13 @@ labelFull?: string | null;
 /**
  * The workspace's work directories with availability flags.
  */
-directories?: WorkDirectoryDto[] | null }
+directories?: WorkDirectoryDto[] | null; 
+/**
+ * Whether a `migration_report` event flags this workspace (skipped
+ * during the 0036 correction) — anomalous workspaces are surfaced
+ * disabled in switch/recent lists (spec 5.5.3-2c).
+ */
+anomaly?: boolean | null }
 /**
  * Workspace contract: the active sandbox root plus whether the workspace has
  * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env

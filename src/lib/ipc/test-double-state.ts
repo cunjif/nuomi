@@ -11,6 +11,7 @@ import type {
   FileEntryDto,
   IntegrationDto,
   ProviderDto,
+  RecentWorkspaceDto,
   RoleDto,
   RunDto,
   ScheduleDto,
@@ -55,6 +56,12 @@ interface DoubleState {
   workspaceConfigured: boolean;
   /** Registered workspaces for the multi-workspace test double. */
   workspaces: import("./bindings.gen").WorkspaceEntryDto[];
+  /**
+   * Explicit recent-workspace seeds for `getRecentWorkspaces`. `null` means
+   * "derive from `workspaces`" (label from directory display names, mirroring
+   * the Rust derivation); an array — including an empty one — is served as-is.
+   */
+  recentWorkspaces: RecentWorkspaceDto[] | null;
   /** Session-state active (focused) work directory of the open workspace. */
   activeDirectoryId: string | null;
   /** path → entry; dirs have content === null */
@@ -90,6 +97,7 @@ export const tdState: DoubleState = {
   workspaceRoot: "C:\\workspace",
   workspaceConfigured: true,
   workspaces: [],
+  recentWorkspaces: null,
   activeDirectoryId: null,
   files: new Map(),
   stewardSessionIds: new Set(),
@@ -212,6 +220,7 @@ export function tdReset(): void {
   tdState.workspaceRoot = "C:\\workspace";
   tdState.workspaceConfigured = true;
   tdState.workspaces.length = 0;
+  tdState.recentWorkspaces = null;
   tdState.activeDirectoryId = null;
   tdState.files.clear();
   tdState.stewardSessionIds.clear();

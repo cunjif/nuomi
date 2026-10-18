@@ -809,3 +809,132 @@ async fn workspace_v2_focus_directory() {
         .expect_err("stale directory must be rejected");
     assert_eq!(ipc_code(&err), "workspace.directory_missing");
 }
+
+#[tokio::test]
+async fn workspace_v2_recent_list_derived_labels() {
+    let (state, dir) = boot(vec![]).await;
+
+    // ws1 with two directories; opening it touches workspace_recent.
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    let ws1 = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(&beta).unwrap();
+    commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+        .await
+        .unwrap();
+
+    // A second workspace used afterwards.
+    let gamma = dir.path().join("gamma");
+    std::fs::create_dir_all(&gamma).unwrap();
+    let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    commands::impl_close_workspace(&state, ws2.id.clone(), false)
+        .await
+        .unwrap();
+
+    // Recent entries carry the derived label, not the placeholder uuid
+    // root path (spec 5.5.1-2a): directory display names joined with `-`.
+    let recent = commands::impl_get_recent_workspaces(&state, 10)
+        .await
+        .unwrap();
+    let r1 = recent
+        .iter()
+        .find(|r| r.workspace_id == ws1.id)
+        .expect("opening ws1 must touch workspace_recent");
+    assert_eq!(r1.label.as_deref(), Some("alpha-beta"));
+    assert_eq!(r1.label_full.as_deref(), Some("alpha-beta"));
+    assert!(!r1.is_pinned);
+    assert!(!r1.anomaly);
+    assert!(r1.last_used_at > 0);
+    let r2 = recent.iter().find(|r| r.workspace_id == ws2.id).unwrap();
+    assert_eq!(r2.label.as_deref(), Some("gamma"));
+    assert_eq!(r2.label_full.as_deref(), Some("gamma"));
+
+    // Switch back to ws1 and strip both directories: the last removal
+    // auto-closes the workspace, and the surviving recent entry loses its
+    // label (empty derivation → None, the UI falls back to the workspace id).
+    let switched = commands::impl_workspace_switch(&state, ws1.id.clone())
+        .await
+        .unwrap();
+    let dirs = switched.directories.as_ref().unwrap();
+    let (alpha_id, beta_id) = (dirs[0].id.clone(), dirs[1].id.clone());
+    commands::impl_workspace_remove_directory(&state, ws1.id.clone(), alpha_id)
+        .await
+        .unwrap();
+    let r = commands::impl_workspace_remove_directory(&state, ws1.id.clone(), beta_id)
+        .await
+        .unwrap();
+    assert!(r.workspace_closed);
+
+    let recent = commands::impl_get_recent_workspaces(&state, 10)
+        .await
+        .unwrap();
+    let r1 = recent.iter().find(|r| r.workspace_id == ws1.id).unwrap();
+    assert_eq!(r1.label, None);
+    assert_eq!(r1.label_full, None);
+}
+
+#[tokio::test]
+async fn workspace_v2_migration_anomaly_flags() {
+    let (state, dir) = boot(vec![]).await;
+
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    let ws1 = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+        .await
+        .unwrap();
+    let gamma = dir.path().join("gamma");
+    std::fs::create_dir_all(&gamma).unwrap();
+    let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    commands::impl_close_workspace(&state, ws2.id.clone(), false)
+        .await
+        .unwrap();
+
+    // Seed a `migration_report` event on ws1 the same way migration 0036's
+    // correction pass does (path_invalid issue).
+    let db = nuomi_core::store::Db::open(&state.db_path).unwrap();
+    let payload = serde_json::json!({
+        "migration": "0036_work_directories",
+        "directory_id": "placeholder",
+        "abs_path": alpha.to_string_lossy().to_string(),
+        "issue": "path_invalid",
+    });
+    nuomi_core::store::repos::events::append(
+        &db.0,
+        "workspace",
+        &ws1.id,
+        "migration_report",
+        &payload,
+        1,
+    )
+    .unwrap();
+
+    // The recent list flags the anomalous workspace (spec 5.5.3-2c).
+    let recent = commands::impl_get_recent_workspaces(&state, 10)
+        .await
+        .unwrap();
+    let r1 = recent.iter().find(|r| r.workspace_id == ws1.id).unwrap();
+    assert!(r1.anomaly);
+    assert_eq!(r1.label.as_deref(), Some("alpha"));
+    let r2 = recent.iter().find(|r| r.workspace_id == ws2.id).unwrap();
+    assert!(!r2.anomaly);
+
+    // list_workspaces carries the same flag; healthy rows are Some(false).
+    let listed = commands::impl_list_workspaces(&state).await.unwrap();
+    let e1 = listed.iter().find(|w| w.id == ws1.id).unwrap();
+    assert_eq!(e1.anomaly, Some(true));
+    let e2 = listed.iter().find(|w| w.id == ws2.id).unwrap();
+    assert_eq!(e2.anomaly, Some(false));
+}

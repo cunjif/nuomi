@@ -561,8 +561,25 @@ export function testDoubleCommands(): CommandSet {
     async setLayoutSnapshot(_mode: string, _splitWorkspaceIds: [string, string] | null) {
       return ok(null);
     },
-    async getRecentWorkspaces(_limit: number) {
-      return ok([] as RecentWorkspaceDto[]);
+    async getRecentWorkspaces(limit: number) {
+      if (tdState.recentWorkspaces !== null) {
+        return ok(tdState.recentWorkspaces.slice(0, limit).map((r) => ({ ...r })));
+      }
+      // Derived fallback mirrors the Rust derivation: label from directory
+      // display names, pinned/anomaly passed through from the workspace rows.
+      const derived = tdState.workspaces.map((w) => {
+        const names = (w.directories ?? []).map((d) => d.displayName).join("-");
+        const label = names || w.label || null;
+        return {
+          workspaceId: w.id,
+          lastUsedAt: w.createdAt,
+          isPinned: w.isPinned ?? false,
+          label,
+          labelFull: label,
+          anomaly: w.anomaly ?? false,
+        } satisfies RecentWorkspaceDto;
+      });
+      return ok(derived.slice(0, limit));
     },
     async crossWorkspaceSearch(_query: string, _matchContent: boolean) {
       return ok({ groups: [], skippedWorkspaceIds: [] } as CrossSearchOutcomeDto);

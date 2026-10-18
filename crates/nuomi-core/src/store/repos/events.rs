@@ -71,6 +71,29 @@ pub fn list_by_aggregate(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Distinct aggregate ids of `aggregate_type` that have at least one
+/// (rollback-visible) event of `kind`. Used for anomaly marking — e.g.
+/// workspaces flagged by a `migration_report` event (spec 5.5.3-2c).
+pub fn list_aggregate_ids_of_kind(
+    conn: &Connection,
+    aggregate_type: &str,
+    kind: &str,
+) -> Result<Vec<String>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT e.aggregate_id
+         FROM events e
+         WHERE e.aggregate_type = ?1 AND e.kind = ?2
+           AND NOT EXISTS (
+               SELECT 1 FROM event_rollbacks r
+               WHERE r.aggregate_type = e.aggregate_type
+                 AND r.aggregate_id = e.aggregate_id
+                 AND e.seq BETWEEN r.from_seq AND r.to_seq
+           )",
+    )?;
+    let rows = stmt.query_map(params![aggregate_type, kind], |row| row.get(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
     let payload: String = row.get(4)?;
     Ok(EventRecord {
