@@ -77,4 +77,42 @@ describe("ChatTab", () => {
     expect(onClose).toHaveBeenCalledWith("s1");
     expect(onActivate).not.toHaveBeenCalled();
   });
+
+  it("renders the workspace color dot and a label-prefixed tooltip when workspace props are set", () => {
+    renderWithProviders(
+      <ChatTab
+        sessionId="s1"
+        kind="chat"
+        title="Hello"
+        workspaceColor="#e76f51"
+        workspaceLabel="alpha-beta"
+        active={false}
+        onActivate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const tab = screen.getByRole("tab");
+    expect(tab.getAttribute("title")).toBe("alpha-beta — Hello");
+    const dot = tab.querySelector('[data-testid="chat-tab-workspace-dot"]');
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveStyle({ backgroundColor: "#e76f51" });
+  });
+
+  it("hides the workspace dot and keeps the bare title tooltip when workspace props are null", () => {
+    renderWithProviders(
+      <ChatTab
+        sessionId="s1"
+        kind="chat"
+        title="Hello"
+        workspaceColor={null}
+        workspaceLabel={null}
+        active={false}
+        onActivate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const tab = screen.getByRole("tab");
+    expect(tab.getAttribute("title")).toBe("Hello");
+    expect(tab.querySelector('[data-testid="chat-tab-workspace-dot"]')).toBeNull();
+  });
 });

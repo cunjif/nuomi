@@ -1,6 +1,6 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { seedConversation, seedStewardSession } from "../../lib/ipc/test-double";
+import { seedConversation, seedStewardSession, tdState } from "../../lib/ipc/test-double";
 import { useUiStore } from "../../lib/store/uiStore";
 import { stubLocalStorage } from "../../test/stubStorage";
 import { renderWithProviders } from "../../test/helpers";
@@ -52,5 +52,77 @@ describe("ConversationsList — steward session isolation (spec 5.2)", () => {
     const stewardCheckbox = checkboxes.find((c) => c.closest("li")?.textContent?.includes("新管家会话"));
     expect(stewardCheckbox).toBeUndefined();
     expect(screen.getByLabelText(/全选/)).toBeTruthy();
+  });
+});
+
+describe("ConversationsList — workspace filter (spec 5.5.1-7a, ADR-0021 task 6.9)", () => {
+  function seedWorkspaces(): void {
+    tdState.workspaces.push(
+      {
+        id: "ws1",
+        rootPath: "/tmp/alpha",
+        colorTag: "paper-yellow",
+        createdAt: 1,
+        isActive: true,
+        directoryPresent: true,
+        label: "alpha-beta",
+        labelFull: "alpha-beta",
+      },
+      {
+        id: "ws2",
+        rootPath: "/tmp/gamma",
+        colorTag: "paper-blue",
+        createdAt: 1,
+        isActive: false,
+        directoryPresent: true,
+        label: "gamma",
+        labelFull: "gamma",
+      },
+    );
+  }
+
+  it("filtering by a multi-directory workspace shows sessions from both directories", async () => {
+    seedWorkspaces();
+    seedConversation({ id: "im-a", title: "alpha期会话", workspaceId: "ws1" });
+    seedConversation({ id: "im-b", title: "beta期会话", workspaceId: "ws1" });
+    seedConversation({ id: "im-c", title: "gamma会话", workspaceId: "ws2" });
+    renderWithProviders(<ConversationsList />);
+
+    // "all" aggregates across workspaces.
+    expect(await screen.findByText("alpha期会话")).toBeTruthy();
+    expect(screen.getByText("beta期会话")).toBeTruthy();
+    expect(screen.getByText("gamma会话")).toBeTruthy();
+
+    // Filtering by ws1 (two work directories) surfaces BOTH directories'
+    // sessions — the ownership key is the workspace id, not the directory.
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "ws1" } });
+    expect(await screen.findByText("alpha期会话")).toBeTruthy();
+    expect(screen.getByText("beta期会话")).toBeTruthy();
+    expect(screen.queryByText("gamma会话")).toBeNull();
+  });
+
+  it("switching the filter to the other workspace shows only its sessions", async () => {
+    seedWorkspaces();
+    seedConversation({ id: "im-a", title: "alpha期会话", workspaceId: "ws1" });
+    seedConversation({ id: "im-c", title: "gamma会话", workspaceId: "ws2" });
+    renderWithProviders(<ConversationsList />);
+
+    await screen.findByText("alpha期会话");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "ws2" } });
+
+    expect(await screen.findByText("gamma会话")).toBeTruthy();
+    expect(screen.queryByText("alpha期会话")).toBeNull();
+  });
+
+  it("labels filter options with the derived workspace label instead of the root path", async () => {
+    seedWorkspaces();
+    renderWithProviders(<ConversationsList />);
+
+    const combo = await screen.findByRole("combobox");
+    await waitFor(() => {
+      expect(combo.querySelector('option[value="ws1"]')).not.toBeNull();
+    });
+    expect(combo.querySelector('option[value="ws1"]')?.textContent).toBe("alpha-beta");
+    expect(combo.querySelector('option[value="ws2"]')?.textContent).toBe("gamma");
   });
 });
