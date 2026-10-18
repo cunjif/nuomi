@@ -14,6 +14,7 @@ import { SettingsView } from "../settings/SettingsView";
 import { TraceView } from "../trace/TraceView";
 import { GitView } from "../git/GitView";
 import { PluginsView } from "../plugins/PluginsView";
+import { SandboxView } from "../sandbox/SandboxView";
 import { StewardView } from "../steward/StewardView";
 import { AreaNav } from "./AreaNav";
 import { ChatTabBar } from "./ChatTabBar";
@@ -325,6 +326,8 @@ function renderView(view: View, workspaceId: string | null): ReactNode {
       return <TraceView />;
     case "git":
       return <GitView workspaceId={workspaceId} />;
+    case "sandbox":
+      return <SandboxView />;
     case "approvals":
       return <ApprovalsView workspaceId={workspaceId} />;
     case "scheduler":

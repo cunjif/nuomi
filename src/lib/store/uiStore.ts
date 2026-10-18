@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { ipc } from "../ipc/client";
 import { measureAsync } from "../perf/metrics";
 
-export type View = "chat" | "board" | "trace" | "git" | "approvals" | "scheduler" | "settings" | "plugins" | "steward";
+export type View = "chat" | "board" | "trace" | "git" | "sandbox" | "approvals" | "scheduler" | "settings" | "plugins" | "steward";
 
 /**
  * Which surface owns the main content area: the conversation view (whatever

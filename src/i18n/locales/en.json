@@ -69,6 +69,7 @@
     "navBoard": "Board",
     "navTrace": "Trace",
     "navGit": "Git",
+    "navSandbox": "Sandbox",
     "navApprovals": "Approvals",
     "navScheduler": "Scheduler",
     "navSettings": "Settings",
@@ -1064,7 +1065,13 @@
     "git_command_not_allowed": "That git command is not allowed",
     "plugin_install_failed": "Plugin install failed: {{message}}",
     "plugin_uninstall_failed": "Plugin uninstall failed: {{message}}",
-    "plugin_open_dir_failed": "Could not open plugins folder: {{message}}"
+    "plugin_open_dir_failed": "Could not open plugins folder: {{message}}",
+    "sandbox.unavailable": "Sandbox unavailable — check the sandbox plugin configuration",
+    "sandbox.dir_not_authorized": "Directory not authorized for the sandbox",
+    "sandbox.runtime_unknown": "Unknown sandbox runtime",
+    "sandbox.limit_invalid": "Invalid resource limits",
+    "sandbox.task_not_found": "Sandbox task not found or already removed",
+    "sandbox.internal": "Sandbox internal error"
   },
   "nav": {
     "areaLabel": "Main area",
@@ -1088,6 +1095,51 @@
     "openFromHint": "Open in current workspace (from {{name}})",
     "selectWorkspaceHint": "Select a workspace first",
     "pullToCurrent": "↗ pull to current"
+  },
+  "sandbox": {
+    "title": "Code Sandbox",
+    "newRun": "New run",
+    "newBuild": "Build app",
+    "empty": "No sandbox tasks yet — start with \"New run\".",
+    "noSelection": "Select a task to view details",
+    "unavailable": "Sandbox unavailable: check the sandbox plugin configuration",
+    "listLabel": "Sandbox task list",
+    "detailLabel": "Sandbox task detail",
+    "runCodeTitle": "Run code",
+    "buildTitle": "Build app",
+    "buildHint": "The build target resolves automatically to the active workspace's mounted directories; signing keys stay in the host keyring and never enter the sandbox.",
+    "buildScript": "Build script",
+    "runtime": "Runtime",
+    "authorizedDirs": "Authorized directories (none by default)",
+    "noMountedDirs": "The active workspace has no mounted directories",
+    "code": "Code",
+    "run": "Run",
+    "build": "Build",
+    "submitOk": "Task submitted",
+    "cancelTask": "Cancel task",
+    "cancelRequested": "Cancellation requested",
+    "duration": "{{ms}} ms",
+    "artifact": "Artifact",
+    "artifactMissing": "Artifact transfer failed",
+    "artifactRetry": "Retry transfer",
+    "artifactRetryOk": "Artifact transfer succeeded",
+    "artifactRetryPending": "Artifact transfer still pending — retry again later",
+    "limitsTimeout": "Timeout (s)",
+    "limitsCpu": "CPU cap (%)",
+    "limitsMemory": "Memory cap (MB)",
+    "limitsNetwork": "Allow network",
+    "taskType": {
+      "run_code": "Run code",
+      "build_app": "Build app"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "cancelled": "Cancelled"
+    }
   },
   "steward": {
     "composer": {

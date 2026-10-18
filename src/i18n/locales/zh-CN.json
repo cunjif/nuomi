@@ -69,6 +69,7 @@
     "navBoard": "看板",
     "navTrace": "Trace",
     "navGit": "Git",
+    "navSandbox": "沙箱",
     "navApprovals": "审批",
     "navScheduler": "定时任务",
     "navSettings": "设置",
@@ -1070,7 +1071,13 @@
     "git_command_not_allowed": "该 git 命令不被允许",
     "plugin_install_failed": "插件安装失败：{{message}}",
     "plugin_uninstall_failed": "插件卸载失败：{{message}}",
-    "plugin_open_dir_failed": "无法打开插件目录：{{message}}"
+    "plugin_open_dir_failed": "无法打开插件目录：{{message}}",
+    "sandbox.unavailable": "沙箱不可用，请检查沙箱插件配置",
+    "sandbox.dir_not_authorized": "目录未获沙箱授权",
+    "sandbox.runtime_unknown": "未知沙箱运行时",
+    "sandbox.limit_invalid": "资源限制参数无效",
+    "sandbox.task_not_found": "沙箱任务不存在或已被删除",
+    "sandbox.internal": "沙箱内部错误"
   },
   "split": {
     "keepLeft": "保留左侧",
@@ -1088,6 +1095,51 @@
     "openFromHint": "在当前工作区打开（来自 {{name}}）",
     "selectWorkspaceHint": "请先选择一个工作区",
     "pullToCurrent": "↗ 拉到当前"
+  },
+  "sandbox": {
+    "title": "代码沙箱",
+    "newRun": "新建运行",
+    "newBuild": "构建应用",
+    "empty": "还没有沙箱任务，点击「新建运行」开始。",
+    "noSelection": "选择左侧任务查看详情",
+    "unavailable": "沙箱不可用：请检查沙箱插件配置",
+    "listLabel": "沙箱任务列表",
+    "detailLabel": "沙箱任务详情",
+    "runCodeTitle": "运行代码",
+    "buildTitle": "构建应用",
+    "buildHint": "构建目标自动解析为当前工作区的已挂载目录；签名密钥保留在宿主 keyring，不会进入沙箱。",
+    "buildScript": "构建脚本",
+    "runtime": "运行时",
+    "authorizedDirs": "授权目录（默认不授权）",
+    "noMountedDirs": "当前工作区没有已挂载目录",
+    "code": "代码",
+    "run": "运行",
+    "build": "构建",
+    "submitOk": "任务已提交",
+    "cancelTask": "取消任务",
+    "cancelRequested": "已请求取消",
+    "duration": "耗时 {{ms}} ms",
+    "artifact": "产物",
+    "artifactMissing": "产物回传失败",
+    "artifactRetry": "重试回传",
+    "artifactRetryOk": "产物回传成功",
+    "artifactRetryPending": "产物回传仍在进行，可稍后再次重试",
+    "limitsTimeout": "超时（秒）",
+    "limitsCpu": "CPU 上限（%）",
+    "limitsMemory": "内存上限（MB）",
+    "limitsNetwork": "允许网络",
+    "taskType": {
+      "run_code": "运行代码",
+      "build_app": "构建应用"
+    },
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "succeeded": "已成功",
+      "failed": "已失败",
+      "timed_out": "已超时",
+      "cancelled": "已取消"
+    }
   },
   "steward": {
     "composer": {
