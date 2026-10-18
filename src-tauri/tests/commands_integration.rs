@@ -986,3 +986,83 @@ async fn layout_snapshot_split_mode_retired() {
     assert_eq!(snap.mode, "single");
     assert_eq!(snap.split_workspace_ids, None);
 }
+
+#[tokio::test]
+async fn workspace_v2_conversation_filter_covers_all_directories() {
+    let (state, dir) = boot(vec![]).await;
+
+    // ws1 with two work directories (alpha + beta): sessions created during
+    // either directory's activity window carry the same workspace id — the
+    // ownership key is the workspace, not the directory.
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    let ws1 = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(&beta).unwrap();
+    commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+        .await
+        .unwrap();
+
+    // A second workspace opened afterwards.
+    let gamma = dir.path().join("gamma");
+    std::fs::create_dir_all(&gamma).unwrap();
+    let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
+        .await
+        .unwrap();
+
+    // Two sessions in ws1 (one per directory era) + one in ws2.
+    let mk = |kind: &str, title: &str, ws: &str| commands::ConversationInput {
+        kind: kind.to_string(),
+        title: Some(title.to_string()),
+        agent: None,
+        team_id: None,
+        workspace_id: ws.to_string(),
+    };
+    commands::impl_create_conversation(&state, mk("chat", "alpha-era session", &ws1.id))
+        .await
+        .unwrap();
+    commands::impl_create_conversation(&state, mk("group", "beta-era session", &ws1.id))
+        .await
+        .unwrap();
+    commands::impl_create_conversation(&state, mk("chat", "gamma session", &ws2.id))
+        .await
+        .unwrap();
+
+    // Filtering by ws1 surfaces sessions from BOTH directories (spec
+    // 5.5.1-7a) and nothing from ws2.
+    let ws1_rows = commands::impl_list_conversations(&state, None, Some(ws1.id.clone()))
+        .await
+        .unwrap();
+    let titles: Vec<&str> = ws1_rows.iter().map(|c| c.title.as_str()).collect();
+    assert!(titles.contains(&"alpha-era session"));
+    assert!(titles.contains(&"beta-era session"));
+    assert_eq!(ws1_rows.len(), 2);
+
+    // ws2 only sees its own session.
+    let ws2_rows = commands::impl_list_conversations(&state, None, Some(ws2.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(ws2_rows.len(), 1);
+    assert_eq!(ws2_rows[0].title, "gamma session");
+
+    // kind + workspace filters compose (kind is an in-memory filter on top
+    // of the workspace-scoped query).
+    let group_rows =
+        commands::impl_list_conversations(&state, Some("group".to_string()), Some(ws1.id.clone()))
+            .await
+            .unwrap();
+    assert_eq!(group_rows.len(), 1);
+    assert_eq!(group_rows[0].title, "beta-era session");
+
+    // No workspace filter → cross-workspace aggregation (ChatTabBar's
+    // empty-state fallback).
+    let all_rows = commands::impl_list_conversations(&state, None, None)
+        .await
+        .unwrap();
+    assert!(all_rows.len() >= 3);
+}
