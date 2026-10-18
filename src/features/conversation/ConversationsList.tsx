@@ -62,7 +62,9 @@ export function ConversationsList(): ReactNode {
     staleTime: 30_000,
   });
 
-  const workspacePathMap = new Map((workspacesQuery.data ?? []).map((ws) => [ws.id, ws.rootPath]));
+  const workspaceLabelMap = new Map(
+    (workspacesQuery.data ?? []).map((ws) => [ws.id, ws.labelFull ?? ws.rootPath]),
+  );
 
   const resumeMut = useMutation({
     mutationFn: ipc.resumeSession,
@@ -282,7 +284,7 @@ export function ConversationsList(): ReactNode {
                   <span className="min-w-0 flex-1 truncate">{conv.title}</span>
                   <WorkspaceBadge
                     workspaceId={conv.workspaceId}
-                    workspaceRootPath={workspacePathMap.get(conv.workspaceId) ?? null}
+                    workspaceLabel={workspaceLabelMap.get(conv.workspaceId) ?? null}
                   />
                   <span className="shrink-0 text-xs tabular-nums">
                     {formatRelativeTime(conv.createdAt, Date.now(), locale)}

@@ -61,9 +61,9 @@ export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSe
             >
               <span
                 className="h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: workspaceBadgeColor(ws.rootPath) }}
+                style={{ backgroundColor: workspaceBadgeColor(ws.id) }}
               />
-              <span className="flex-1 text-left truncate">{ws.rootPath}</span>
+              <span className="flex-1 text-left truncate">{ws.label ?? ws.rootPath}</span>
               <span
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-ink-accent bg-ink-accent text-surface" : "border-ink-muted/50"}`}
               >

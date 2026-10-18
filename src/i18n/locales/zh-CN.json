@@ -307,6 +307,7 @@
     "noProviderConfirm": "未检测到已配置的 Role Agent，该会话暂时无法调用模型。请先前往「设置」将 Role 绑定 Provider 或 CLI Agent。",
     "kindPlaceholder": "{{kind}} 会话 — 即将推出",
     "newMenuLabel": "新建会话",
+    "new": "新建会话",
     "newChat": "普通对话",
     "newGroup": "多 Agent 群聊",
     "newBackground": "后台任务",

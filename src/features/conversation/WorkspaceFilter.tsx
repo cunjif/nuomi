@@ -6,7 +6,8 @@ import { useUiStore } from "../../lib/store/uiStore";
 
 /**
  * Workspace filter dropdown for the conversations list. Renders "全部" plus
- * each registered workspace. Selection updates `uiStore.conversationWorkspaceFilter`
+ * each registered workspace, labelled by the derived ADR-0021 label (root
+ * path as fallback). Selection updates `uiStore.conversationWorkspaceFilter`
  * which drives the `listConversations` query.
  */
 export function WorkspaceFilter(): ReactNode {
@@ -32,7 +33,7 @@ export function WorkspaceFilter(): ReactNode {
         <option value="all">{t("conversation.workspaceFilterAll")}</option>
         {workspaces.map((ws) => (
           <option key={ws.id} value={ws.id}>
-            {ws.rootPath}
+            {ws.label ?? ws.rootPath}
           </option>
         ))}
       </select>

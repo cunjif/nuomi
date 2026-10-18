@@ -21,7 +21,7 @@ export function ScheduleRow({ schedule, scope, pending, onToggle, onDelete }: Sc
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium text-ink">{schedule.name}</p>
           {scope === "all" && (
-            <WorkspaceBadge workspaceId={schedule.workspaceId} workspaceRootPath={schedule.workspaceRootPath} />
+            <WorkspaceBadge workspaceId={schedule.workspaceId} workspaceLabel={schedule.workspaceRootPath} />
           )}
         </div>
         <p className="font-mono text-xs text-ink-accent">{schedule.cronExpr}</p>

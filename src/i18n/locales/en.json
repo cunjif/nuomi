@@ -307,6 +307,7 @@
     "noProviderConfirm": "No Role Agent is configured yet, so this conversation cannot call a model. Please go to Settings and bind a Role to a Provider or CLI Agent first.",
     "kindPlaceholder": "{{kind}} conversations — coming soon",
     "newMenuLabel": "New conversation",
+    "new": "New conversation",
     "newChat": "Chat",
     "newGroup": "Group chat",
     "newBackground": "Background task",

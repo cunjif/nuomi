@@ -4,6 +4,10 @@ export interface ChatTabProps {
   sessionId: string;
   kind: string;
   title: string;
+  /** Workspace color dot (hashed from the workspace id); null hides the dot. */
+  workspaceColor?: string | null;
+  /** Workspace label (ADR-0021 derived); prefixes the hover tooltip when set. */
+  workspaceLabel?: string | null;
   active: boolean;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
@@ -27,17 +31,31 @@ function truncateTitle(title: string, max = 20): string {
 
 /**
  * Single chat tab. Title is shown inline (max 20 chars, full title on hover
- * via title attribute). The tab is a 40px-tall rounded chip bottom-aligned in
- * the strip row. Active tab = highlighted chip (lighter background, no
- * border); inactive tabs stay transparent and only reveal a hover background.
+ * via title attribute, prefixed with the workspace label when known). The
+ * tab is a 40px-tall rounded chip bottom-aligned in the strip row. Active
+ * tab = highlighted chip (lighter background, no border); inactive tabs stay
+ * transparent and only reveal a hover background.
  */
-export function ChatTab({ sessionId, kind, title, active, onActivate, onClose }: ChatTabProps): ReactNode {
+export function ChatTab({
+  sessionId,
+  kind,
+  title,
+  workspaceColor,
+  workspaceLabel,
+  active,
+  onActivate,
+  onClose,
+}: ChatTabProps): ReactNode {
   const displayTitle = truncateTitle(title, 20);
+  const tooltip =
+    workspaceLabel !== null && workspaceLabel !== undefined
+      ? `${workspaceLabel} — ${title}`
+      : title;
   return (
     <button
       type="button"
       onClick={() => onActivate(sessionId)}
-      title={title}
+      title={tooltip}
       className={`group flex h-10 shrink-0 items-center gap-2 rounded-md px-2.5 text-xs transition-colors ${
         active
           ? "bg-surface-overlay text-ink-accent"
@@ -47,6 +65,14 @@ export function ChatTab({ sessionId, kind, title, active, onActivate, onClose }:
       role="tab"
     >
       <span aria-hidden="true" className="text-sm leading-none">{kindIcon(kind)}</span>
+      {workspaceColor !== null && workspaceColor !== undefined && (
+        <span
+          aria-hidden="true"
+          data-testid="chat-tab-workspace-dot"
+          className="size-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: workspaceColor }}
+        />
+      )}
       <span className="truncate">{displayTitle}</span>
       <span
         role="button"
