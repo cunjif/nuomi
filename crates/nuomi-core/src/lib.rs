@@ -5,6 +5,7 @@
 //! - `harness`: plugin kernel (plugin registry, context, event bus)
 //! - `adapters`: external agent adapters (cli agents) as LlmProvider
 //! - `providers`: provider clients + master-slave orchestration
+//! - `sandbox`: pluggable code sandbox domain (ADR-0022): executor contract + task lifecycle
 //! - `orchestrator`: role/team executors (pipeline, router, group chat, whiteboard)
 //! - `services`: UI-M1 domain services (workspace sandbox, git, scheduler)
 //! - `integrations`: outbound bots + telemetry sinks (bots-telemetry-m1)
@@ -22,6 +23,7 @@ pub mod integrations;
 pub mod orchestrator;
 pub mod plugins;
 pub mod providers;
+pub mod sandbox;
 pub mod services;
 pub mod steward;
 pub mod store;
