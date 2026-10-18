@@ -14,7 +14,7 @@
 //! (task 7.5); `run_to_completion` is the bounded convenience driver.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -50,7 +50,7 @@ pub struct SandboxTaskManager {
     executor: Arc<dyn SandboxExecutor>,
     /// Live `sandbox.<task_id>` channel for output deltas and state
     /// progress (ADR-0002 multi-channel pattern). `None` = audit-only.
-    bus: Option<EventBus>,
+    bus: Mutex<Option<EventBus>>,
     /// Plugin enablement: submissions are rejected while disabled
     /// (`sandbox.unavailable`); reads/cancels keep working.
     enabled: AtomicBool,
@@ -60,15 +60,30 @@ impl SandboxTaskManager {
     pub fn new(executor: Arc<dyn SandboxExecutor>) -> Self {
         Self {
             executor,
-            bus: None,
+            bus: Mutex::new(None),
             enabled: AtomicBool::new(true),
         }
     }
 
     /// Attaches the kernel bus for live `sandbox.<task_id>` pushes.
-    pub fn with_bus(mut self, bus: EventBus) -> Self {
-        self.bus = Some(bus);
+    pub fn with_bus(self, bus: EventBus) -> Self {
+        self.set_bus(bus);
         self
+    }
+
+    /// Attaches the kernel bus post-construction (the plugin shell wires
+    /// the bus during `init`, task 7.5).
+    pub fn set_bus(&self, bus: EventBus) {
+        *self.lock_bus() = Some(bus);
+    }
+
+    /// Whether a live bus is attached.
+    pub fn has_bus(&self) -> bool {
+        self.lock_bus().is_some()
+    }
+
+    fn lock_bus(&self) -> MutexGuard<'_, Option<EventBus>> {
+        self.bus.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Flips plugin enablement (task 7.5 wires start/stop to this).
@@ -523,7 +538,7 @@ impl SandboxTaskManager {
     /// increments per ADR-0022 §4; payload also carries the current
     /// status so the frontend can render transitions).
     fn publish_progress(&self, record: &SandboxTaskRecord, stdout_delta: &str, stderr_delta: &str) {
-        let Some(bus) = &self.bus else {
+        let Some(bus) = self.lock_bus().clone() else {
             return;
         };
         let payload = serde_json::json!({
