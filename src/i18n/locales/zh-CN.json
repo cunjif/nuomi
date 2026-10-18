@@ -1023,7 +1023,14 @@
     "directoryMissingToast": "目录不存在，可移除或重新定位",
     "removeDirDirtyTitle": "移除目录",
     "removeDirDirtyBody": "该目录下有未保存的文件，移除目录将丢弃修改：",
-    "removeDirDirtyConfirm": "移除目录"
+    "removeDirDirtyConfirm": "移除目录",
+    "emptyTitle": "没有已开启的工作区",
+    "emptyBody": "打开一个目录开始工作，或从最近使用列表中恢复",
+    "openDirectory": "打开目录",
+    "recentTitle": "最近使用",
+    "overviewHint": "概览模式 · 仅用于监控与跳转，点击卡片进入单个工作区以启动 Agent",
+    "dirAccessible": "可访问",
+    "anomaly": "工作区迁移异常，需人工处理"
   },
   "capability": {
     "reasoning": "推理",

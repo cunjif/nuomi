@@ -1017,7 +1017,14 @@
     "directoryMissingToast": "Directory missing on disk — remove it or relocate it",
     "removeDirDirtyTitle": "Remove directory",
     "removeDirDirtyBody": "This directory has unsaved files. Removing it discards the changes:",
-    "removeDirDirtyConfirm": "Remove directory"
+    "removeDirDirtyConfirm": "Remove directory",
+    "emptyTitle": "No open workspace",
+    "emptyBody": "Open a directory to start working, or resume from the recent list",
+    "openDirectory": "Open directory",
+    "recentTitle": "Recently used",
+    "overviewHint": "Overview mode · monitoring and navigation only; click a card to enter a workspace and launch agents",
+    "dirAccessible": "accessible",
+    "anomaly": "Workspace migration issue — manual attention required"
   },
   "capability": {
     "reasoning": "Reasoning",

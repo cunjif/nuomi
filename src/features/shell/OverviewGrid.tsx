@@ -1,22 +1,21 @@
-import { useUiStore } from "../../lib/store/uiStore";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { useUiStore } from "../../lib/store/uiStore";
+import { ipc } from "../../lib/ipc/client";
+import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
 
-interface WorkspaceEntryDto {
-  id: string;
-  rootPath: string;
-  colorTag: string;
-  createdAt: number;
-  isActive: boolean;
-  directoryPresent: boolean;
-}
-
+/**
+ * Overview grid: monitoring surface over the open workspace (single-open,
+ * ADR-0021). Cards render the derived label with the full label as the
+ * secondary line — never the placeholder uuid root path (spec 5.5.1-2a).
+ */
 export function OverviewGrid() {
+  const { t } = useTranslation();
   const { activeWorkspaceId, switchToWorkspace, setLayoutMode } = useUiStore();
 
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
-    queryFn: () => invoke<WorkspaceEntryDto[]>("list_workspaces"),
+    queryFn: ipc.listWorkspaces,
   });
 
   // Single-open (ADR-0021): the overview lists the open workspace only.
@@ -29,10 +28,10 @@ export function OverviewGrid() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-6 py-2 text-xs text-paper-muted bg-paper-surface/50 border-b border-paper-line/30">
-        <span>概览模式 · 仅用于监控与跳转，点击卡片进入单个工作区以启动 Agent</span>
+        <span>{t("workspace.overviewHint")}</span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 p-6 flex-1 overflow-auto">
-        {openWorkspaces.map((ws) => (
+        {openWorkspaces.map((ws: WorkspaceEntryDto) => (
           <button
             key={ws.id}
             onClick={() => {
@@ -46,13 +45,17 @@ export function OverviewGrid() {
                 className="w-3 h-3 rounded-full shrink-0"
                 style={{ backgroundColor: `var(--color-${ws.colorTag})` }}
               />
-              <span className="font-medium truncate">
-                {ws.rootPath.split(/[/\\]/).pop()}
+              <span className="font-medium truncate" title={ws.labelFull ?? ws.rootPath}>
+                {ws.label ?? ws.id}
               </span>
             </div>
-            <span className="text-xs text-paper-muted truncate">{ws.rootPath}</span>
+            <span className="text-xs text-paper-muted truncate">{ws.labelFull ?? ws.rootPath}</span>
             <div className="flex items-center gap-3 text-xs text-paper-muted">
-              <span>{ws.directoryPresent ? "✓ 可访问" : "✗ 目录缺失"}</span>
+              <span>
+                {ws.directoryPresent
+                  ? `✓ ${t("workspace.dirAccessible")}`
+                  : `✗ ${t("workspace.directoryMissing")}`}
+              </span>
             </div>
           </button>
         ))}

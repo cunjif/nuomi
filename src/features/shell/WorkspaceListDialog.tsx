@@ -12,6 +12,7 @@ import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { useUiStore } from "../../lib/store/uiStore";
+import { RECENT_WORKSPACES_KEY } from "../../lib/store/workspaceQueries";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
 
 const COLOR_MAP: Record<string, string> = {
@@ -27,10 +28,12 @@ const COLOR_MAP: Record<string, string> = {
 
 function WorkspaceRow({
   ws,
+  lastUsedAt,
   onActivate,
   onRemove,
 }: {
   ws: WorkspaceEntryDto;
+  lastUsedAt?: number;
   onActivate: (id: string) => void;
   onRemove: (id: string) => void;
 }): ReactNode {
@@ -40,18 +43,41 @@ function WorkspaceRow({
   // open-set focused workspace. registry.is_active is only mutated by
   // activate/add/remove and goes stale when switching via open/focus.
   const focused = ws.isFocused === true;
+  // Migration-anomalous rows stay non-clickable (spec 5.5.3-2c); the main
+  // label carries the anomaly tooltip. The derived label replaces the
+  // placeholder uuid root path in the row title too (spec 5.5.1-2a).
+  const anomaly = ws.anomaly === true;
   return (
     <li
-      className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs ${
-        focused ? "bg-surface-overlay text-ink-accent" : "text-ink-muted hover:bg-surface-overlay"
+      aria-disabled={anomaly}
+      className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${
+        focused
+          ? "bg-surface-overlay text-ink-accent"
+          : anomaly
+            ? "cursor-not-allowed text-ink-muted/50"
+            : "cursor-pointer text-ink-muted hover:bg-surface-overlay"
       }`}
-      onClick={() => !focused && onActivate(ws.id)}
+      onClick={() => !focused && !anomaly && onActivate(ws.id)}
     >
       <span
         aria-hidden="true"
         className={`inline-block size-2.5 rounded-full border border-ink-muted/40 ${COLOR_MAP[ws.colorTag] ?? "bg-ink-muted"}`}
       />
-      <span className="flex-1 truncate" title={ws.rootPath}>{ws.rootPath}</span>
+      {ws.isPinned === true && (
+        <span aria-label={t("workspace.pin")} className="text-[10px] text-ink-accent">★</span>
+      )}
+      <span
+        className="flex-1 truncate"
+        title={anomaly ? t("workspace.anomaly") : (ws.labelFull ?? ws.rootPath)}
+      >
+        {ws.label ?? ws.id}
+      </span>
+      {lastUsedAt !== undefined && (
+        <span className="text-[10px] text-ink-muted/70">
+          {new Date(lastUsedAt).toLocaleDateString()}
+        </span>
+      )}
+      {anomaly && <span className="text-[10px] text-state-warn" title={t("workspace.anomaly")}>⚠</span>}
       {focused && <span className="text-[10px] font-semibold text-ink-accent">●</span>}
       {!ws.directoryPresent && (
         <span className="text-[10px] text-state-warn" title={t("workspace.directoryMissing")}>⚠</span>
@@ -85,6 +111,15 @@ export function WorkspaceListDialog({
     enabled: open,
     staleTime: 5_000,
   });
+
+  // Recent-use join for the per-row last-used date (spec 5.5.1-2a).
+  const { data: recent } = useQuery({
+    queryKey: RECENT_WORKSPACES_KEY(50),
+    queryFn: () => ipc.getRecentWorkspaces(50),
+    enabled: open,
+    staleTime: 5_000,
+  });
+  const recentMap = new Map((recent ?? []).map((r) => [r.workspaceId, r]));
 
   const invalidate = (): void => {
     void qc.invalidateQueries({ queryKey: ["workspaces"] });
@@ -153,7 +188,13 @@ export function WorkspaceListDialog({
           ) : (
             <ul className="flex flex-col gap-0.5">
               {workspaces.map((ws) => (
-                <WorkspaceRow key={ws.id} ws={ws} onActivate={(id) => void handleActivate(id)} onRemove={(id) => setConfirmRemoveId(id)} />
+                <WorkspaceRow
+                  key={ws.id}
+                  ws={ws}
+                  lastUsedAt={recentMap.get(ws.id)?.lastUsedAt}
+                  onActivate={(id) => void handleActivate(id)}
+                  onRemove={(id) => setConfirmRemoveId(id)}
+                />
               ))}
             </ul>
           )}

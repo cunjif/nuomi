@@ -2,18 +2,7 @@ import { useEffect, useRef } from "react";
 import { useUiStore } from "../../lib/store/uiStore";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-
-interface WorkspaceEntryDto {
-  id: string;
-  rootPath: string;
-  colorTag: string;
-  createdAt: number;
-  isActive: boolean;
-  directoryPresent: boolean;
-  isOpen?: boolean;
-  isFocused?: boolean;
-  isPinned?: boolean;
-}
+import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
 
 interface UnreadIndicatorDto {
   workspaceId: string;
@@ -109,7 +98,7 @@ export function WorkspaceBar() {
               style={{ backgroundColor: `var(--color-${ws.colorTag})` }}
             />
             <span className="truncate max-w-32">
-              {ws.rootPath.split(/[/\\]/).pop()}
+              {ws.label ?? ws.id}
             </span>
             {isPinned && <span className="text-xs text-paper-muted">★</span>}
             {unreadCount > 0 && (
