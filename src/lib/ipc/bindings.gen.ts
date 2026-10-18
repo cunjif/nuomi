@@ -1470,6 +1470,54 @@ async stewardSetOnlineAuthorization(authorized: boolean) : Promise<Result<null, 
     else return { status: "error", error: e  as any };
 }
 },
+async sandboxRunCode(request: SandboxRunCodeRequest) : Promise<Result<SandboxTaskDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_run_code", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sandboxBuildApp(request: SandboxBuildAppRequest) : Promise<Result<SandboxTaskDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_build_app", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sandboxListTasks(limit: number | null) : Promise<Result<SandboxTaskDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_list_tasks", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sandboxGetTask(taskId: string) : Promise<Result<SandboxTaskDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_get_task", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sandboxCancelTask(taskId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_cancel_task", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sandboxListRuntimes() : Promise<Result<SandboxRuntimeDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_list_runtimes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Frontend heartbeat: called once after the React root mounts to signal that
  * the webview is alive. If this never arrives within the watchdog grace
@@ -1841,6 +1889,15 @@ createdTemp: boolean }
 export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number; kind: string; cancelable: boolean }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
+export type SandboxBuildAppRequest = { runtime: string; 
+/**
+ * Build script executed inside the sandbox.
+ */
+source: string; limits: SandboxLimitsDto | null }
+export type SandboxLimitsDto = { timeoutSecs: number; cpuPercent: number | null; memoryMb: number | null; networkEnabled: boolean }
+export type SandboxRunCodeRequest = { runtime: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto | null }
+export type SandboxRuntimeDto = { id: string; name: string; isolation: string }
+export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; createdAt: number; finishedAt: number | null }
 export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null; workspaceId: string; workspaceRootPath: string | null }
 export type ScheduleInput = { name: string; cronExpr: string; targetKind: string; agent: AgentRefInput | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; taskTitle: string; taskDescription: string }
 /**

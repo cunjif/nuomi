@@ -1727,6 +1727,59 @@ pub async fn list_rollback_points(
     commands::impl_list_rollback_points(&state, session_id).await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_run_code(
+    state: tauri::State<'_, AppState>,
+    request: commands::SandboxRunCodeRequest,
+) -> Result<commands::SandboxTaskDto, IpcError> {
+    commands::impl_sandbox_run_code(&state, request).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_build_app(
+    state: tauri::State<'_, AppState>,
+    request: commands::SandboxBuildAppRequest,
+) -> Result<commands::SandboxTaskDto, IpcError> {
+    commands::impl_sandbox_build_app(&state, request).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_list_tasks(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<commands::SandboxTaskDto>, IpcError> {
+    commands::impl_sandbox_list_tasks(&state, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_get_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<commands::SandboxTaskDto, IpcError> {
+    commands::impl_sandbox_get_task(&state, task_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_cancel_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_sandbox_cancel_task(&state, task_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sandbox_list_runtimes(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::SandboxRuntimeDto>, IpcError> {
+    commands::impl_sandbox_list_runtimes(&state).await
+}
+
 /// Frontend heartbeat: called once after the React root mounts to signal that
 /// the webview is alive. If this never arrives within the watchdog grace
 /// period, the shell auto-reloads the webview (see `shell_resilience`).

@@ -231,6 +231,12 @@ impl From<nuomi_core::steward::StewardError> for IpcError {
     }
 }
 
+impl From<nuomi_core::sandbox::types::SandboxError> for IpcError {
+    fn from(e: nuomi_core::sandbox::types::SandboxError) -> Self {
+        Self::new(e.code(), e.message().to_string())
+    }
+}
+
 /// Stable code constants (frontend i18n keys reference these).
 pub mod codes {
     pub const STORE_NOT_FOUND: &str = "store.not_found";

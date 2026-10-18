@@ -1687,6 +1687,94 @@ export function testDoubleCommands(): CommandSet {
     async stewardSetOnlineAuthorization(_authorized: boolean) {
       return ok(null);
     },
+    async sandboxRunCode(request) {
+      const limits = request.limits ?? {
+        timeoutSecs: 120,
+        cpuPercent: null,
+        memoryMb: null,
+        networkEnabled: false,
+      };
+      const now = Date.now();
+      const task = {
+        id: nextId("sbx"),
+        taskType: "run_code",
+        runtime: request.runtime,
+        status: "succeeded",
+        source: request.source,
+        authorizedDirs: request.authorizedDirs,
+        limits,
+        stdout: "",
+        stderr: "",
+        artifactRef: null,
+        artifactRetryable: false,
+        exitInfo: "exit 0",
+        durationMs: 10,
+        createdAt: now,
+        finishedAt: now,
+      };
+      tdState.sandboxTasks.unshift(task);
+      return ok(task);
+    },
+    async sandboxBuildApp(request) {
+      const limits = request.limits ?? {
+        timeoutSecs: 120,
+        cpuPercent: null,
+        memoryMb: null,
+        networkEnabled: false,
+      };
+      const mounted = (tdState.workspaces.find((w) => w.isActive) ?? tdState.workspaces[0])
+        ?.directories?.filter((d) => d.mounted) ?? [];
+      if (mounted.length === 0) {
+        return err(
+          "sandbox.dir_not_authorized",
+          "the active workspace has no mounted work directories to build against",
+        );
+      }
+      const now = Date.now();
+      const task = {
+        id: nextId("sbx"),
+        taskType: "build_app",
+        runtime: request.runtime,
+        status: "succeeded",
+        source: request.source,
+        authorizedDirs: mounted.map((d) => d.absPath),
+        limits,
+        stdout: "",
+        stderr: "",
+        artifactRef: null,
+        artifactRetryable: false,
+        exitInfo: "exit 0",
+        durationMs: 10,
+        createdAt: now,
+        finishedAt: now,
+      };
+      tdState.sandboxTasks.unshift(task);
+      return ok(task);
+    },
+    async sandboxListTasks(limit) {
+      const cap = Math.min(limit ?? 50, 200);
+      return ok(tdState.sandboxTasks.slice(0, cap));
+    },
+    async sandboxGetTask(taskId) {
+      const task = tdState.sandboxTasks.find((t) => t.id === taskId);
+      return task
+        ? ok(task)
+        : err("sandbox.task_not_found", `no sandbox task ${taskId}`);
+    },
+    async sandboxCancelTask(taskId) {
+      const task = tdState.sandboxTasks.find((t) => t.id === taskId);
+      if (!task) return err("sandbox.task_not_found", `no sandbox task ${taskId}`);
+      const terminal = ["succeeded", "failed", "timed_out", "cancelled"];
+      if (!terminal.includes(task.status)) {
+        task.status = "cancelled";
+        task.finishedAt = Date.now();
+        task.exitInfo = "cancelled by user";
+      }
+      return ok(null);
+    },
+    async sandboxListRuntimes() {
+      return ok(tdState.sandboxRuntimes);
+    },
   };
   return cmds;
 }

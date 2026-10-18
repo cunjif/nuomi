@@ -47,6 +47,7 @@ fn is_domain_topic(topic: &str) -> bool {
         || topic.starts_with("team.")
         || topic.starts_with("change.")
         || topic.starts_with("conversation.")
+        || topic.starts_with("sandbox.")
 }
 
 fn extract(event: &Event) -> (Option<String>, Option<String>, Option<String>, Option<i64>) {
@@ -102,6 +103,8 @@ mod tests {
             ("approval.requested", None, "event://domain"),
             ("schedule.triggered", None, "event://domain"),
             ("team.formed", None, "event://domain"),
+            // sandbox.<task_id> progress pushes (ADR-0022 §4)
+            ("sandbox.t-123", None, "event://domain"),
         ];
         for (topic, session, expected_channel) in cases {
             let payload = match session {

@@ -219,6 +219,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::steward_list_gate_pending,
         tauri_cmds::steward_list_events,
         tauri_cmds::steward_set_online_authorization,
+        tauri_cmds::sandbox_run_code,
+        tauri_cmds::sandbox_build_app,
+        tauri_cmds::sandbox_list_tasks,
+        tauri_cmds::sandbox_get_task,
+        tauri_cmds::sandbox_cancel_task,
+        tauri_cmds::sandbox_list_runtimes,
         tauri_cmds::__nuomi_heartbeat,
     ])
 }

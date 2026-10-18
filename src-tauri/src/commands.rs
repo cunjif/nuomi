@@ -9771,6 +9771,225 @@ pub async fn impl_list_rollback_points(
     Ok(points)
 }
 
+// ---- sandbox (ADR-0022 task 7.6) -----------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxLimitsDto {
+    pub timeout_secs: u64,
+    pub cpu_percent: Option<u32>,
+    pub memory_mb: Option<u32>,
+    pub network_enabled: bool,
+}
+
+impl From<nuomi_core::sandbox::types::SandboxLimits> for SandboxLimitsDto {
+    fn from(l: nuomi_core::sandbox::types::SandboxLimits) -> Self {
+        Self {
+            timeout_secs: l.timeout_secs,
+            cpu_percent: l.cpu_percent,
+            memory_mb: l.memory_mb,
+            network_enabled: l.network_enabled,
+        }
+    }
+}
+
+impl From<SandboxLimitsDto> for nuomi_core::sandbox::types::SandboxLimits {
+    fn from(l: SandboxLimitsDto) -> Self {
+        Self {
+            timeout_secs: l.timeout_secs,
+            cpu_percent: l.cpu_percent,
+            memory_mb: l.memory_mb,
+            network_enabled: l.network_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxTaskDto {
+    pub id: String,
+    pub task_type: String,
+    pub runtime: String,
+    pub status: String,
+    pub source: String,
+    pub authorized_dirs: Vec<String>,
+    pub limits: SandboxLimitsDto,
+    pub stdout: String,
+    pub stderr: String,
+    pub artifact_ref: Option<String>,
+    pub artifact_retryable: bool,
+    pub exit_info: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub created_at: i64,
+    pub finished_at: Option<i64>,
+}
+
+impl From<nuomi_core::store::repos::sandbox_tasks::SandboxTaskRecord> for SandboxTaskDto {
+    fn from(r: nuomi_core::store::repos::sandbox_tasks::SandboxTaskRecord) -> Self {
+        Self {
+            id: r.id,
+            task_type: r.task_type.as_str().to_string(),
+            runtime: r.runtime,
+            status: r.status.as_str().to_string(),
+            source: r.source,
+            authorized_dirs: r.authorized_dirs,
+            limits: r.limits.into(),
+            stdout: r.stdout,
+            stderr: r.stderr,
+            artifact_ref: r.artifact_ref,
+            artifact_retryable: r.artifact_retryable,
+            exit_info: r.exit_info,
+            duration_ms: r.duration_ms,
+            created_at: r.created_at,
+            finished_at: r.finished_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxRuntimeDto {
+    pub id: String,
+    pub name: String,
+    pub isolation: String,
+}
+
+impl From<nuomi_core::sandbox::types::SandboxRuntimeInfo> for SandboxRuntimeDto {
+    fn from(r: nuomi_core::sandbox::types::SandboxRuntimeInfo) -> Self {
+        Self {
+            id: r.id,
+            name: r.name,
+            isolation: r.isolation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxRunCodeRequest {
+    pub runtime: String,
+    pub source: String,
+    pub authorized_dirs: Vec<String>,
+    pub limits: Option<SandboxLimitsDto>,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxBuildAppRequest {
+    pub runtime: String,
+    /// Build script executed inside the sandbox.
+    pub source: String,
+    pub limits: Option<SandboxLimitsDto>,
+}
+
+/// `sandbox_run_code`: submission pre-checks and error mapping live in the
+/// core service (`sandbox.unavailable` / `sandbox.dir_not_authorized` /
+/// `sandbox.runtime_unknown` / `sandbox.limit_invalid`).
+pub async fn impl_sandbox_run_code(
+    state: &AppState,
+    request: SandboxRunCodeRequest,
+) -> Result<SandboxTaskDto, IpcError> {
+    let limits = request.limits.map(Into::into).unwrap_or_default();
+    let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
+        task_type: nuomi_core::sandbox::types::SandboxTaskType::RunCode,
+        runtime: request.runtime,
+        source: request.source,
+        authorized_dirs: request.authorized_dirs,
+        limits,
+    };
+    let record = state.kernel.sandbox().submit(spec).await?;
+    Ok(record.into())
+}
+
+/// `sandbox_build_app`: the build target is the active workspace's mounted
+/// directories (the kernel converges authorization onto them). Signing
+/// keys stay in the host keyring — they never enter the sandbox; any
+/// signing is a host-side step after the artifact returns.
+pub async fn impl_sandbox_build_app(
+    state: &AppState,
+    request: SandboxBuildAppRequest,
+) -> Result<SandboxTaskDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let authorized_dirs = tokio::task::spawn_blocking(move || -> Result<Vec<String>, IpcError> {
+        let db = nuomi_core::store::Db::open(&db_path)?;
+        let workspace = nuomi_core::store::repos::workspaces::find_active(&db.0)
+            .map_err(|e| IpcError::new("store.failed", e.to_string()))?
+            .ok_or_else(|| {
+                IpcError::new(
+                    "sandbox.unavailable",
+                    "no active workspace: the build target resolves against it",
+                )
+            })?;
+        Ok(
+            nuomi_core::store::repos::work_directories::list_by_workspace(&db.0, &workspace.id)
+                .map_err(|e| IpcError::new("store.failed", e.to_string()))?
+                .into_iter()
+                .filter(|dir| dir.mounted)
+                .map(|dir| dir.abs_path)
+                .collect(),
+        )
+    })
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+    if authorized_dirs.is_empty() {
+        return Err(IpcError::new(
+            "sandbox.dir_not_authorized",
+            "the active workspace has no mounted work directories to build against",
+        ));
+    }
+    let limits = request.limits.map(Into::into).unwrap_or_default();
+    let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
+        task_type: nuomi_core::sandbox::types::SandboxTaskType::BuildApp,
+        runtime: request.runtime,
+        source: request.source,
+        authorized_dirs,
+        limits,
+    };
+    let record = state.kernel.sandbox().submit(spec).await?;
+    Ok(record.into())
+}
+
+/// `sandbox_list_tasks`: recent tasks, newest first.
+pub async fn impl_sandbox_list_tasks(
+    state: &AppState,
+    limit: Option<u32>,
+) -> Result<Vec<SandboxTaskDto>, IpcError> {
+    let limit = limit.unwrap_or(50).min(200);
+    let records = state.kernel.sandbox().list_tasks(limit).await?;
+    Ok(records.into_iter().map(Into::into).collect())
+}
+
+/// `sandbox_get_task`: one task with persisted outputs and the artifact
+/// location (retryable flag when the return transfer failed).
+pub async fn impl_sandbox_get_task(
+    state: &AppState,
+    task_id: String,
+) -> Result<SandboxTaskDto, IpcError> {
+    let record = state.kernel.sandbox().get_task(&task_id).await?;
+    Ok(record.into())
+}
+
+/// `sandbox_cancel_task`: requests cancellation; the `cancelled` status
+/// lands on the next audited transition.
+pub async fn impl_sandbox_cancel_task(state: &AppState, task_id: String) -> Result<(), IpcError> {
+    state.kernel.sandbox().cancel_task(&task_id).await?;
+    Ok(())
+}
+
+/// `sandbox_list_runtimes`: the plugin's declared runtime list with the
+/// isolation description.
+pub async fn impl_sandbox_list_runtimes(
+    state: &AppState,
+) -> Result<Vec<SandboxRuntimeDto>, IpcError> {
+    Ok(state
+        .kernel
+        .sandbox()
+        .runtimes()
+        .into_iter()
+        .map(Into::into)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::mask_webhook_url;

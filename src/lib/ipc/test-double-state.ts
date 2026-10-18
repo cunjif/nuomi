@@ -72,6 +72,10 @@ interface DoubleState {
    * matching the Rust repo layer's NOT EXISTS anti-join.
    */
   stewardSessionIds: Set<string>;
+  /** Sandbox tasks (ADR-0022): newest first; tests mutate rows directly. */
+  sandboxTasks: import("./bindings.gen").SandboxTaskDto[];
+  /** Runtimes declared by the sandbox plugin double (tests override). */
+  sandboxRuntimes: import("./bindings.gen").SandboxRuntimeDto[];
 }
 
 export const tdState: DoubleState = {
@@ -101,6 +105,11 @@ export const tdState: DoubleState = {
   activeDirectoryId: null,
   files: new Map(),
   stewardSessionIds: new Set(),
+  sandboxTasks: [],
+  sandboxRuntimes: [
+    { id: "python", name: "Python 3", isolation: "test double (no isolation)" },
+    { id: "node", name: "Node.js", isolation: "test double (no isolation)" },
+  ],
 };
 
 let idCounter = 0;
@@ -224,6 +233,7 @@ export function tdReset(): void {
   tdState.activeDirectoryId = null;
   tdState.files.clear();
   tdState.stewardSessionIds.clear();
+  tdState.sandboxTasks.length = 0;
 }
 
 /** Seed workspace entries: value is directory marker or file content. */

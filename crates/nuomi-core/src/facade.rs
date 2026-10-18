@@ -20,8 +20,8 @@ use crate::harness::sideload::{
 use crate::harness::{Context, HarnessError, Kernel};
 use crate::plugins::{
     DeltaCallback, HookRegistry, HooksPlugin, LoopConfig, LoopEngine, LoopRunResult, MemoryPlugin,
-    MemoryService, SystemPromptPlugin, SystemPromptService, ToolRegistry, ToolsPlugin, TurnHook,
-    TurnOverride,
+    MemoryService, SandboxPlugin, SandboxService, SystemPromptPlugin, SystemPromptService,
+    ToolRegistry, ToolsPlugin, TurnHook, TurnOverride,
 };
 use crate::providers::{
     sensenova_base_url, AnthropicCompatibleClient, ChatMessage, ChatResponse, FakeLlm, LlmProvider,
@@ -33,6 +33,36 @@ use crate::{CoreError, CoreResult};
 use crate::services::RoleOverlay;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are nuomi, a helpful agent.";
+
+/// Default CubeSandbox-class runtime service endpoint (ADR-0022).
+const DEFAULT_SANDBOX_CUBE_URL: &str = "http://127.0.0.1:8819";
+/// `app_settings` key overriding the sandbox service endpoint.
+const SANDBOX_CUBE_URL_SETTING: &str = "sandbox_cube_url";
+
+/// Resolves the sandbox executor endpoint: the `NUOMI_SANDBOX_CUBE_URL`
+/// environment variable wins (tests/CI), then the persisted
+/// `sandbox_cube_url` setting, then the default loopback endpoint.
+async fn resolve_sandbox_base_url(db_path: &Arc<str>) -> String {
+    if let Ok(url) = std::env::var("NUOMI_SANDBOX_CUBE_URL") {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return url;
+        }
+    }
+    let path = Arc::clone(db_path);
+    let persisted = tokio::task::spawn_blocking(move || {
+        let db = Db::open(&path)?;
+        repos::settings::get(&db.0, SANDBOX_CUBE_URL_SETTING)
+    })
+    .await;
+    if let Ok(Ok(Some(raw))) = persisted {
+        let raw = raw.trim().to_string();
+        if !raw.is_empty() {
+            return raw;
+        }
+    }
+    DEFAULT_SANDBOX_CUBE_URL.to_string()
+}
 
 /// Title for brand-new sessions until the first user task derives a real
 /// one. Shared single source of truth by:
@@ -148,6 +178,10 @@ pub struct NuomiKernel {
     tools: Arc<ToolRegistry>,
     hooks: Arc<HookRegistry>,
     memory: MemoryService,
+    /// Sandbox service (ADR-0022): submitted through the builtin sandbox
+    /// plugin; the IPC layer (`sandbox_*` commands) reads it via
+    /// [`NuomiKernel::sandbox`].
+    sandbox: SandboxService,
     /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
     boot_report: BootReport,
     delta_cb: Option<DeltaCallback>,
@@ -225,6 +259,14 @@ impl NuomiKernel {
             SystemPromptService::with_store(db_path.clone(), DEFAULT_SYSTEM_PROMPT),
         )))?;
         kernel.register(Arc::new(MemoryPlugin::new(db_path.clone())))?;
+        // Sandbox (ADR-0022): the builtin plugin wires the executor, the
+        // driver loop and the service surface; the default CubeSandbox
+        // base URL is configuration (env > app_settings > default).
+        let sandbox_base_url = resolve_sandbox_base_url(&db_path).await;
+        kernel.register(Arc::new(SandboxPlugin::new(
+            sandbox_base_url,
+            db_path.clone(),
+        )))?;
 
         // Side-loaded third-party plugins (ADR 0009). Failures are recorded
         // into the boot report and never abort boot (Tolerant adapter).
@@ -275,6 +317,11 @@ impl NuomiKernel {
             .await
             .ok_or_else(|| missing("memory"))?)
         .clone();
+        let sandbox = (*ctx
+            .service::<SandboxService>("sandbox")
+            .await
+            .ok_or_else(|| missing("sandbox"))?)
+        .clone();
 
         Ok(Self {
             db_path,
@@ -285,6 +332,7 @@ impl NuomiKernel {
             tools,
             hooks,
             memory,
+            sandbox,
             boot_report,
             delta_cb: None,
             delta_seqs: Mutex::new(HashMap::new()),
@@ -299,6 +347,13 @@ impl NuomiKernel {
     /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
     pub fn boot_report(&self) -> &BootReport {
         &self.boot_report
+    }
+
+    /// The sandbox service (ADR-0022): submissions, task reads, cancels
+    /// and the declared runtime list. The builtin sandbox plugin's driver
+    /// loop advances tasks in the background.
+    pub fn sandbox(&self) -> &SandboxService {
+        &self.sandbox
     }
 
     /// Graceful teardown: disposes started plugins in reverse order (side-
