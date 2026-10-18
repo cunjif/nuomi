@@ -76,13 +76,13 @@ describe("WorkspaceListDialog — list switching", () => {
   it("clicking a non-active row activates it and closes the dialog", async () => {
     const onClose = vi.fn();
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isFocused: true }),
-      makeWs({ id: "ws-2", rootPath: "C:\\beta", isFocused: false }),
+      makeWs({ id: "ws-1", rootPath: "C:\\alpha", label: "alpha", isFocused: true }),
+      makeWs({ id: "ws-2", rootPath: "C:\\beta", label: "beta", isFocused: false }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={onClose} />);
-    await screen.findByText("C:\\beta");
+    await screen.findByText("beta");
 
-    fireEvent.click(screen.getByText("C:\\beta"));
+    fireEvent.click(screen.getByText("beta"));
     await waitFor(() => {
       expect(tdState.workspaces.find((w) => w.id === "ws-2")?.isFocused).toBe(true);
     });
@@ -92,13 +92,68 @@ describe("WorkspaceListDialog — list switching", () => {
   it("clicking the active row does not trigger activation or close", async () => {
     const onClose = vi.fn();
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\alpha", isFocused: true }),
+      makeWs({ id: "ws-1", rootPath: "C:\\alpha", label: "alpha", isFocused: true }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={onClose} />);
-    await screen.findByText("C:\\alpha");
+    await screen.findByText("alpha");
 
-    fireEvent.click(screen.getByText("C:\\alpha"));
+    fireEvent.click(screen.getByText("alpha"));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkspaceListDialog — row identity (spec 5.5.1-2a)", () => {
+  it("shows labels with full-label tooltips and last-used dates", async () => {
+    const lastUsedAt = 1_700_000_000_000;
+    tdState.workspaces.push(
+      makeWs({ id: "ws-1", label: "alpha", labelFull: "alpha-beta", isFocused: true }),
+    );
+    tdState.recentWorkspaces = [
+      {
+        workspaceId: "ws-1",
+        lastUsedAt,
+        isPinned: false,
+        label: "alpha",
+        labelFull: "alpha-beta",
+        anomaly: false,
+      },
+    ];
+    renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
+
+    expect(await screen.findByText("alpha")).toBeTruthy();
+    expect(screen.getByTitle("alpha-beta")).toBeTruthy();
+    expect(screen.getByText(new Date(lastUsedAt).toLocaleDateString())).toBeTruthy();
+  });
+
+  it("falls back to the workspace id when no label was derived", async () => {
+    tdState.workspaces.push(makeWs({ id: "ws-raw", isFocused: true }));
+    renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
+    expect(await screen.findByText("ws-raw")).toBeTruthy();
+  });
+
+  it("shows a pin star for pinned workspaces", async () => {
+    tdState.workspaces.push(
+      makeWs({ id: "ws-1", label: "alpha", isFocused: true, isPinned: true }),
+    );
+    renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
+    expect(await screen.findByText("★")).toBeTruthy();
+  });
+
+  it("marks anomalous workspaces disabled and refuses activation", async () => {
+    tdState.workspaces.push(
+      makeWs({ id: "ws-1", label: "alpha", isFocused: true }),
+      makeWs({ id: "ws-bad", label: "bad", anomaly: true }),
+    );
+    renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
+
+    const row = (await screen.findByText("bad")).closest("li");
+    expect(row?.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("⚠")).toBeTruthy();
+    expect(screen.getAllByTitle("工作区迁移异常，需人工处理").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText("bad"));
+    expect(tdState.workspaces.find((w) => w.id === "ws-bad")?.isFocused).toBeFalsy();
+    expect(tdState.workspaces.find((w) => w.id === "ws-1")?.isFocused).toBe(true);
   });
 });
 
@@ -116,10 +171,10 @@ describe("WorkspaceListDialog — add workspace", () => {
 describe("WorkspaceListDialog — remove workspace", () => {
   it("remove button shows confirmation then removes on confirm", async () => {
     tdState.workspaces.push(
-      makeWs({ id: "ws-1", rootPath: "C:\\removable", isFocused: true }),
+      makeWs({ id: "ws-1", rootPath: "C:\\removable", label: "removable", isFocused: true }),
     );
     renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
-    await screen.findByText("C:\\removable");
+    await screen.findByText("removable");
 
     fireEvent.click(screen.getByLabelText("移除"));
     expect(screen.getByText("确认移除此工作区？关联会话将保留为孤儿会话。")).toBeTruthy();

@@ -135,15 +135,15 @@ describe("EditorArea — workspace sidebar toolbar", () => {
 
   it("opens the switch dialog and activates a workspace on row click", async () => {
     tdState.workspaces.push(
-      { id: "ws-current", rootPath: "C:\\workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
-      { id: "ws-other", rootPath: "D:\\other", colorTag: "paper-yellow", createdAt: 2, isActive: false, isFocused: false, directoryPresent: true },
+      { id: "ws-current", rootPath: "C:\\workspace", label: "workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
+      { id: "ws-other", rootPath: "D:\\other", label: "other", colorTag: "paper-yellow", createdAt: 2, isActive: false, isFocused: false, directoryPresent: true },
     );
     renderWithToolbar();
 
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
     const dialog = await screen.findByRole("dialog", { name: "切换工作区" });
     // Clicking a non-focused workspace row activates it (switchToWorkspace) and closes.
-    fireEvent.click(await within(dialog).findByText("D:\\other"));
+    fireEvent.click(await within(dialog).findByText("other"));
 
     await waitFor(() => {
       expect(tdState.workspaces.find((w) => w.id === "ws-other")?.isFocused).toBe(true);
