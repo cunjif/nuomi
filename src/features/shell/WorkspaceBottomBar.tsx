@@ -17,15 +17,11 @@ import { useInvalidateWorkspaceQueries, useOpenWorkspace } from "../../lib/store
  * FileTree/sandbox root follows); a stale chip (missing on disk) toasts the
  * relocate hint instead (spec 5.5.3-1c). Right-click offers focus/remove;
  * the "+" popover mounts unmounted directories or browses for a new one.
- *
- * `paneIndex` is kept for the EditorArea mount site until task 6.8 retires
- * the split leftovers — it no longer affects behavior (single-open).
  */
 export function WorkspaceBottomBar({
   workspaceId,
 }: {
   workspaceId: string;
-  paneIndex?: number;
 }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();

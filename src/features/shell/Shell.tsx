@@ -24,7 +24,6 @@ import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
-import { SplitView } from "./SplitView";
 import { OverviewGrid } from "./OverviewGrid";
 import { EmptyStateGuide } from "./EmptyStateGuide";
 
@@ -286,11 +285,9 @@ export function Shell(): ReactNode {
 
 /**
  * Dispatches the main content area based on the single-open layout state
- * (ADR-0021; originally task 6.7.1). Precedence:
+ * (ADR-0021). Precedence:
  * 1. layoutMode "overview" → OverviewGrid (or EmptyStateGuide if no open ws)
- * 2. layoutMode "split" → SplitView (unreachable under single-open — write
- *    path retired in task 6.6; render branch removed in task 6.8)
- * 3. layoutMode "single" (default) → the existing mutually-exclusive surface
+ * 2. layoutMode "single" (default) → the existing mutually-exclusive surface
  *    (WorkbenchArea or the active view) — preserves legacy single-workspace behavior
  */
 function renderMainContent({
@@ -306,12 +303,6 @@ function renderMainContent({
 }): ReactNode {
   if (layoutMode === "overview") {
     return activeWorkspaceId === null ? <EmptyStateGuide /> : <OverviewGrid />;
-  }
-  if (layoutMode === "split") {
-    if (activeWorkspaceId === null) return <EmptyStateGuide />;
-    // Unreachable in practice (the split write path is retired, ADR-0021):
-    // the stub stays until task 6.8 removes the branch + component.
-    return <SplitView />;
   }
   // layoutMode === "single"
   if (activeArea === "workbench") {

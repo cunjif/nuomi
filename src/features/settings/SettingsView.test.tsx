@@ -30,4 +30,12 @@ describe("SettingsView — top tab navigation", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^Evolution$/ }));
     expect(await screen.findByRole("heading", { name: /^Evolution$/ })).toBeInTheDocument();
   });
+
+  it("hosts no workspace tab — the multi-workspace panel retired with ADR-0021", async () => {
+    renderWithProviders(<SettingsView />);
+
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.length).toBe(6);
+    expect(screen.queryByRole("tab", { name: /workspace/i })).toBeNull();
+  });
 });

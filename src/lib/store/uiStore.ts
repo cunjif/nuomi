@@ -95,8 +95,8 @@ function emptyEditorState(): WorkspaceEditorState {
   };
 }
 
-/** Layout mode for the main content area. */
-export type LayoutMode = "single" | "split" | "overview";
+/** Layout mode for the main content area (split retired with ADR-0021). */
+export type LayoutMode = "single" | "overview";
 
 interface UiState {
   view: View;
@@ -118,9 +118,8 @@ interface UiState {
    */
   activeWorkspaceId: string | null;
   /**
-   * Current layout mode for the main content area. The `split` write path is
-   * retired with ADR-0021 (single-open makes it unreachable); the render
-   * branch stays until task 6.8 removes the component.
+   * Current layout mode for the main content area (split retired with
+   * ADR-0021 single-open; the type no longer admits "split").
    */
   layoutMode: LayoutMode;
   /** Conversation list workspace filter ("all" = cross-workspace aggregation). */
@@ -188,11 +187,8 @@ interface UiState {
    * Calls IPC workspaceSwitch.
    */
   switchToWorkspace: (id: string) => Promise<void>;
-  /**
-   * Sets the layout mode and persists via IPC. `split` is retired with
-   * ADR-0021 — the type excludes it.
-   */
-  setLayoutMode: (mode: Exclude<LayoutMode, "split">) => Promise<void>;
+  /** Sets the layout mode and persists via IPC. */
+  setLayoutMode: (mode: LayoutMode) => Promise<void>;
   /** Syncs the open-workspace mirror from the backend (call on startup). */
   syncOpenWorkspace: () => Promise<void>;
 }

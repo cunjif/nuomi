@@ -7,12 +7,13 @@ import { IntegrationsSection } from "./IntegrationsSection";
 import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
-import { WorkspaceSettingsPanel } from "./WorkspaceSettingsPanel";
 
 /**
  * Settings tabs (用户需求: 集中一页 → 顶部导航分 tab). One section per tab;
  * only the active panel mounts, so each tab keeps its own short scroll
  * instead of one long page (配合 html/body overflow:hidden，窗口永不滚动).
+ * The multi-workspace panel is retired with ADR-0021 (task 6.8) — the
+ * single-open model leaves nothing user-configurable there.
  */
 const TABS = [
   { key: "providers", labelKey: "settings.tab.providers" },
@@ -20,7 +21,6 @@ const TABS = [
   { key: "agents", labelKey: "settings.cliAgents.heading" },
   { key: "integrations", labelKey: "settings.integrations.heading" },
   { key: "memory", labelKey: "settings.memory.heading" },
-  { key: "workspace", labelKey: "settings.workspace.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
 ] as const;
 
@@ -38,8 +38,6 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       return <IntegrationsSection />;
     case "memory":
       return <MemorySection />;
-    case "workspace":
-      return <WorkspaceSettingsPanel />;
     case "access":
       return <EvolutionSettingsPanel />;
   }

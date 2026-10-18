@@ -80,7 +80,7 @@ export function EditorToolbar(): ReactNode {
  * scrolls — every panel owns exactly one scroll container and every flex
  * ancestor carries min-h-0 so the inner heights are definite.
  */
-export function EditorArea({ workspaceId, paneIndex }: { workspaceId: string; paneIndex?: number }): ReactNode {
+export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
   const openFiles = useUiStore((s) => s.editorByWorkspace[workspaceId]?.openFiles ?? []);
   const activeFile = useUiStore((s) => s.editorByWorkspace[workspaceId]?.activeFile ?? null);
@@ -116,7 +116,7 @@ export function EditorArea({ workspaceId, paneIndex }: { workspaceId: string; pa
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             <FileTree workspaceId={workspaceId} />
           </div>
-          <WorkspaceBottomBar workspaceId={workspaceId} paneIndex={paneIndex} />
+          <WorkspaceBottomBar workspaceId={workspaceId} />
         </aside>
       </div>
     </section>
