@@ -938,3 +938,51 @@ async fn workspace_v2_migration_anomaly_flags() {
     let e2 = listed.iter().find(|w| w.id == ws2.id).unwrap();
     assert_eq!(e2.anomaly, Some(false));
 }
+
+#[tokio::test]
+async fn layout_snapshot_split_mode_retired() {
+    let (state, _dir) = boot(vec![]).await;
+
+    // Setting "split" no longer produces a split snapshot (task 6.8,
+    // ADR-0021 single-open): the command falls through to single and never
+    // persists the split pair.
+    commands::impl_set_layout_snapshot(&state, "split".into(), Some(["a".into(), "b".into()]))
+        .await
+        .unwrap();
+    let snap = commands::impl_get_layout_snapshot(&state)
+        .await
+        .unwrap()
+        .expect("snapshot must exist after set");
+    assert_eq!(snap.mode, "single");
+    assert_eq!(snap.split_workspace_ids, None);
+
+    // Overview roundtrips normally.
+    commands::impl_set_layout_snapshot(&state, "overview".into(), None)
+        .await
+        .unwrap();
+    let snap = commands::impl_get_layout_snapshot(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(snap.mode, "overview");
+
+    // Legacy `split` rows written by older builds are read back normalised
+    // (single mode, no split pair) — read compatibility without erroring.
+    let db = nuomi_core::store::Db::open(&state.db_path).unwrap();
+    nuomi_core::store::repos::workspace_layout_snapshot::upsert(
+        &db.0,
+        &nuomi_core::store::repos::workspace_layout_snapshot::LayoutSnapshotRow {
+            mode: nuomi_core::services::LayoutMode::Split,
+            split_workspace_ids: Some(["a".into(), "b".into()]),
+            focused_workspace_id: None,
+            captured_at: 1,
+        },
+    )
+    .unwrap();
+    let snap = commands::impl_get_layout_snapshot(&state)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(snap.mode, "single");
+    assert_eq!(snap.split_workspace_ids, None);
+}

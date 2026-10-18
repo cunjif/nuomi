@@ -7129,11 +7129,23 @@ pub async fn impl_get_layout_snapshot(
     tokio::task::spawn_blocking(move || -> Result<Option<LayoutSnapshotDto>, IpcError> {
         let db = Db::open(&db_path)?;
         let snap = repos::workspace_layout_snapshot::get(&db.0)?;
-        Ok(snap.map(|s| LayoutSnapshotDto {
-            mode: s.mode.as_str().to_string(),
-            split_workspace_ids: s.split_workspace_ids,
-            focused_workspace_id: s.focused_workspace_id,
-            captured_at: s.captured_at,
+        Ok(snap.map(|s| {
+            // Normalise legacy `split` rows to `single` (task 6.8): the
+            // split layout is retired under ADR-0021 single-open, so the
+            // read side must not hand a dead mode (or a meaningless split
+            // pair) to consumers. Stored rows keep their original value
+            // — only this DTO maps it.
+            let mode = if s.mode == nuomi_core::services::LayoutMode::Split {
+                "single".to_string()
+            } else {
+                s.mode.as_str().to_string()
+            };
+            LayoutSnapshotDto {
+                mode,
+                split_workspace_ids: None,
+                focused_workspace_id: s.focused_workspace_id,
+                captured_at: s.captured_at,
+            }
         }))
     })
     .await
@@ -7143,18 +7155,20 @@ pub async fn impl_get_layout_snapshot(
 pub async fn impl_set_layout_snapshot(
     state: &AppState,
     mode: String,
-    split_workspace_ids: Option<[String; 2]>,
+    _split_workspace_ids: Option<[String; 2]>,
 ) -> Result<(), IpcError> {
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
         let svc =
             nuomi_core::services::WorkspaceLayoutService::new(PathBuf::from(db_path.as_ref()));
+        // `split` is retired (task 6.8, ADR-0021 single-open): any split
+        // input (or unknown value) falls through to `single`, and the split
+        // pair is never persisted.
         let layout_mode = match mode.as_str() {
-            "split" => nuomi_core::services::LayoutMode::Split,
             "overview" => nuomi_core::services::LayoutMode::Overview,
             _ => nuomi_core::services::LayoutMode::Single,
         };
-        svc.capture_snapshot(layout_mode, split_workspace_ids)
+        svc.capture_snapshot(layout_mode, None)
             .map_err(|e| IpcError::new("internal", format!("{e}")))?;
         Ok(())
     })
