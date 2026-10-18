@@ -37,6 +37,9 @@ import {
   type RunDto,
   type ScheduleDto,
   type ScheduleInput,
+  type SandboxBuildAppRequest,
+  type SandboxRunCodeRequest,
+  type SandboxTaskDto,
   type TodoItemDto,
   type WorkspaceEntryDto,
   type CleanseRulesInput,
@@ -391,6 +394,13 @@ export const ipc = {
   stewardListGatePending: () => unwrap(current.stewardListGatePending()),
   stewardListEvents: (aggregateId: string | null, kindPrefix: string | null, limit: number | null) => unwrap(current.stewardListEvents(aggregateId, kindPrefix, limit)),
   stewardSetOnlineAuthorization: (authorized: boolean) => unwrap(current.stewardSetOnlineAuthorization(authorized)),
+  sandboxRunCode: (request: SandboxRunCodeRequest) => unwrap(current.sandboxRunCode(request)),
+  sandboxBuildApp: (request: SandboxBuildAppRequest) => unwrap(current.sandboxBuildApp(request)),
+  sandboxListTasks: (limit: number | null) => unwrap(current.sandboxListTasks(limit)),
+  sandboxGetTask: (taskId: string) => unwrap(current.sandboxGetTask(taskId)),
+  sandboxCancelTask: (taskId: string) => unwrap(current.sandboxCancelTask(taskId)),
+  sandboxRetryArtifact: (taskId: string) => unwrap(current.sandboxRetryArtifact(taskId)),
+  sandboxListRuntimes: () => unwrap(current.sandboxListRuntimes()),
 };
 
 export type Ipc = typeof ipc;
@@ -428,6 +438,9 @@ export type {
   RunDto,
   ScheduleDto,
   ScheduleInput,
+  SandboxBuildAppRequest,
+  SandboxRunCodeRequest,
+  SandboxTaskDto,
   TodoItemDto,
   WorkspaceEntryDto,
   RemoveWorkspaceResult,

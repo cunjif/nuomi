@@ -354,6 +354,43 @@ impl SandboxTaskManager {
         sandbox_tasks::list_recent(conn, limit).map_err(store_err)
     }
 
+    /// Retries the artifact return for a terminal task whose earlier
+    /// fetch failed (`artifact_retryable`): success records the location
+    /// and clears the flag; failure keeps it retryable (the sandbox
+    /// retains the artifact — ADR-0022). Tasks without a pending retry
+    /// return unchanged (idempotent).
+    pub async fn retry_artifact(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SandboxTaskRecord, SandboxError> {
+        let mut record = self.get_task(conn, task_id)?;
+        if !record.artifact_retryable {
+            return Ok(record);
+        }
+        match self.executor.fetch_artifact(&record.id).await {
+            Ok(artifact) => {
+                let reference = artifact
+                    .local_path
+                    .clone()
+                    .or_else(|| Some(artifact.name.clone()));
+                sandbox_tasks::set_artifact(conn, &record.id, reference.as_deref(), false)
+                    .map_err(store_err)?;
+                record.artifact_ref = reference;
+                record.artifact_retryable = false;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    task_id = %record.id,
+                    error = %err,
+                    "sandbox artifact retry failed; stays retryable"
+                );
+            }
+        }
+        self.publish_progress(&record, "", "");
+        Ok(record)
+    }
+
     // ---- internals --------------------------------------------------------
 
     /// Fetches the output deltas since the row's stored cursors
@@ -1005,6 +1042,45 @@ mod tests {
         assert_eq!(done.status, SandboxTaskStatus::Succeeded);
         assert!(done.artifact_retryable);
         assert!(done.artifact_ref.is_none());
+
+        // 重试成功：清 retryable、落定位；对非 retryable 任务幂等
+        fake.set_artifact(
+            &record.id,
+            Ok(crate::sandbox::executor::SandboxArtifact {
+                name: "app.exe".to_string(),
+                size_bytes: Some(4),
+                local_path: Some("C:\\nuomi\\.nuomi\\sandbox\\app.exe".to_string()),
+                bytes: None,
+            }),
+        );
+        let retried = manager.retry_artifact(&conn, &record.id).await.unwrap();
+        assert!(!retried.artifact_retryable);
+        assert_eq!(
+            retried.artifact_ref.as_deref(),
+            Some("C:\\nuomi\\.nuomi\\sandbox\\app.exe")
+        );
+        // 再次重试（已无待重试）原样返回
+        let again = manager.retry_artifact(&conn, &record.id).await.unwrap();
+        assert!(!again.artifact_retryable);
+
+        // 重试仍失败：保持 retryable
+        fake.set_artifact(
+            &record.id,
+            Err(SandboxError::Internal("still failing".to_string())),
+        );
+        let other = manager.submit(&conn, &spec_for("node", &[])).await.unwrap();
+        fake.set_artifact(
+            &other.id,
+            Err(SandboxError::Internal("transfer failed".to_string())),
+        );
+        manager.run_to_completion(&conn, &other.id).await.unwrap();
+        fake.set_artifact(
+            &other.id,
+            Err(SandboxError::Internal("still failing".to_string())),
+        );
+        let still = manager.retry_artifact(&conn, &other.id).await.unwrap();
+        assert!(still.artifact_retryable);
+        assert!(still.artifact_ref.is_none());
     }
 
     #[tokio::test]

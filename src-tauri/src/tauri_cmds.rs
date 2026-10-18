@@ -1774,6 +1774,15 @@ pub async fn sandbox_cancel_task(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn sandbox_retry_artifact(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<commands::SandboxTaskDto, IpcError> {
+    commands::impl_sandbox_retry_artifact(&state, task_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn sandbox_list_runtimes(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::SandboxRuntimeDto>, IpcError> {

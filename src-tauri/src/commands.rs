@@ -9976,6 +9976,16 @@ pub async fn impl_sandbox_cancel_task(state: &AppState, task_id: String) -> Resu
     Ok(())
 }
 
+/// `sandbox_retry_artifact`: retries the artifact return for a task
+/// marked `artifact_retryable` (idempotent otherwise).
+pub async fn impl_sandbox_retry_artifact(
+    state: &AppState,
+    task_id: String,
+) -> Result<SandboxTaskDto, IpcError> {
+    let record = state.kernel.sandbox().retry_artifact(&task_id).await?;
+    Ok(record.into())
+}
+
 /// `sandbox_list_runtimes`: the plugin's declared runtime list with the
 /// isolation description.
 pub async fn impl_sandbox_list_runtimes(

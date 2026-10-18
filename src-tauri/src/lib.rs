@@ -224,6 +224,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::sandbox_list_tasks,
         tauri_cmds::sandbox_get_task,
         tauri_cmds::sandbox_cancel_task,
+        tauri_cmds::sandbox_retry_artifact,
         tauri_cmds::sandbox_list_runtimes,
         tauri_cmds::__nuomi_heartbeat,
     ])

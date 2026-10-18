@@ -1510,6 +1510,14 @@ async sandboxCancelTask(taskId: string) : Promise<Result<null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async sandboxRetryArtifact(taskId: string) : Promise<Result<SandboxTaskDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_retry_artifact", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async sandboxListRuntimes() : Promise<Result<SandboxRuntimeDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sandbox_list_runtimes") };

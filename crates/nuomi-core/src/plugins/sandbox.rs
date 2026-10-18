@@ -147,6 +147,17 @@ impl SandboxService {
         .await
     }
 
+    /// Retries the artifact return for an `artifact_retryable` task
+    /// (idempotent otherwise).
+    pub async fn retry_artifact(&self, task_id: &str) -> Result<SandboxTaskRecord, SandboxError> {
+        let manager = Arc::clone(&self.manager);
+        let task_id = task_id.to_string();
+        call_with_connection(&self.db_path, move |conn| async move {
+            manager.retry_artifact(&conn, &task_id).await
+        })
+        .await
+    }
+
     /// Advances one task one poll cycle (manual driving / tests).
     pub async fn step_task(&self, task_id: &str) -> Result<SandboxTaskRecord, SandboxError> {
         let manager = Arc::clone(&self.manager);

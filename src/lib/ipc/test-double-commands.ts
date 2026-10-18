@@ -1772,6 +1772,15 @@ export function testDoubleCommands(): CommandSet {
       }
       return ok(null);
     },
+    async sandboxRetryArtifact(taskId) {
+      const task = tdState.sandboxTasks.find((t) => t.id === taskId);
+      if (!task) return err("sandbox.task_not_found", `no sandbox task ${taskId}`);
+      if (task.artifactRetryable) {
+        task.artifactRetryable = false;
+        task.artifactRef = `C:\\sandbox\\${task.id}\\out.zip`;
+      }
+      return ok(task);
+    },
     async sandboxListRuntimes() {
       return ok(tdState.sandboxRuntimes);
     },
