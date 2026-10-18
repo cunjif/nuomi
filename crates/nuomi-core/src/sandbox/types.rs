@@ -176,7 +176,7 @@ pub struct SandboxTaskSpec {
 }
 
 /// Resource usage snapshot reported with a result (spec 5.7.1-5).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxResourceUsage {
     /// CPU time consumed, if the executor reports it.
     pub cpu_time_ms: Option<u64>,

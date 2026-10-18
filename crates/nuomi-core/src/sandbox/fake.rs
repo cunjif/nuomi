@@ -256,10 +256,12 @@ impl SandboxExecutor for FakeSandboxExecutor {
             )
         });
         // Keep the fake self-consistent: totals mirror the buffers and
-        // artifact availability mirrors the scripted artifact result.
+        // artifact availability mirrors the scripted artifact (a scripted
+        // Err still reads "available" — the fetch itself then fails,
+        // modeling return-transfer failures).
         snap.stdout_total = task.stdout.len() as u64;
         snap.stderr_total = task.stderr.len() as u64;
-        snap.artifact_available = matches!(&task.artifact, Some(Ok(_)));
+        snap.artifact_available = task.artifact.is_some();
         task.last_status = Some(snap.status);
         Ok(snap)
     }

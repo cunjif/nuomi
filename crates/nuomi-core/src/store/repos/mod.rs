@@ -12,6 +12,7 @@ pub mod message_queue;
 pub mod prompts;
 pub mod providers;
 pub mod roles;
+pub mod sandbox_tasks;
 pub mod session_cli_handles;
 pub mod sessions;
 pub mod settings;
