@@ -152,7 +152,7 @@ function PluginCard({ plugin }: { plugin: PluginInfoDto }): ReactNode {
                 uninstallMut.mutate();
               }
             }}
-            className="shrink-0 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-ink-muted/30 px-3 py-1 text-sm text-ink-muted hover:border-red-500/50 hover:text-red-500 focus-visible:ring-2 focus-visible:ring-ink-accent"
+            className="shrink-0 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-ink-muted/30 px-3 py-1 text-sm text-ink-muted hover:border-state-danger/50 hover:text-state-danger focus-visible:ring-2 focus-visible:ring-ink-accent"
           >
             {uninstallMut.isPending ? t("plugins.uninstalling") : t("plugins.uninstall")}
           </button>
@@ -346,10 +346,10 @@ export function PluginsView(): ReactNode {
 
         {failed.length > 0 && (
           <section className="mt-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-red-500/80">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-state-danger/80">
               {t("plugins.failedTitle")}
             </h2>
-            <ul className="mt-1 space-y-0.5 text-xs text-red-500/80">
+            <ul className="mt-1 space-y-0.5 text-xs text-state-danger/80">
               {failed.map((f) => (
                 <li key={f}>{f}</li>
               ))}

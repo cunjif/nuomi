@@ -27,7 +27,7 @@ export function CloseConfirmDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-scrim">
       <div className="w-full max-w-md rounded-lg bg-surface-raised border border-divider shadow-lg p-6">
         <h2 className="text-lg font-medium mb-2">关闭工作区确认</h2>
         <p className="text-sm text-ink-muted mb-4">{reason}</p>

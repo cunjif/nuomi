@@ -10,21 +10,11 @@ import { describeError } from "../../../i18n";
 import type { ConversationKind } from "../../../lib/conversation/kinds";
 import { isRoleReady } from "../../../lib/conversation/roleReady";
 import { WorkspaceSelector } from "./WorkspaceSelector";
+import { hashPaletteColor } from "../avatarPalette";
 
 export interface NewConversationDialogProps {
   kind: ConversationKind;
   onClose: () => void;
-}
-
-const AVATAR_COLORS = [
-  "#e76f51", "#2a9d8f", "#264653", "#e9c46a",
-  "#457b9d", "#a8dadc", "#f4a261", "#6d597a",
-];
-
-function avatarColor(id: string): string {
-  let hash = 0;
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
 }
 
 function initial(name: string): string {
@@ -153,6 +143,7 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
             <div className="flex flex-col gap-1 max-h-48 overflow-y-auto rounded border border-ink-muted/40 bg-surface-raised p-2">
               {readyRoles.map((role) => {
                 const checked = selectedRoleIds.has(role.id);
+                const palette = hashPaletteColor(role.id);
                 return (
                   <button
                     key={role.id}
@@ -161,8 +152,8 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
                     className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm text-ink transition-colors ${checked ? "bg-ink-accent/15" : "hover:bg-surface-overlay"}`}
                   >
                     <span
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium text-surface"
-                      style={{ backgroundColor: avatarColor(role.id) }}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium"
+                      style={{ backgroundColor: palette.bg, color: palette.fg }}
                     >
                       {initial(role.name)}
                     </span>

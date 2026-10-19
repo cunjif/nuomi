@@ -70,7 +70,7 @@ export function WorkspaceDialog({
       {/* Backdrop: click dismisses (same recipe as QuickOpen). */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-surface-scrim"
         onMouseDown={(e) => {
           e.preventDefault();
           onClose();

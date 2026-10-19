@@ -1,21 +1,11 @@
 import type { ReactNode } from "react";
 import type { ConversationDto } from "../../../lib/ipc/client";
+import { hashPaletteColor } from "../avatarPalette";
 
 export interface RoleAvatarProps {
   conversation: ConversationDto | null;
   /** "md" (default, 32px) or "sm" (24px, for compact bars). */
   size?: "sm" | "md";
-}
-
-/** Stable color from role id hash for avatar backgrounds. */
-function avatarColor(id: string): string {
-  const colors = [
-    "#e76f51", "#2a9d8f", "#264653", "#e9c46a",
-    "#457b9d", "#a8dadc", "#f4a261", "#6d597a",
-  ];
-  let hash = 0;
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  return colors[Math.abs(hash) % colors.length]!;
 }
 
 /** First letter (uppercased) of a name for the avatar fallback. */
@@ -32,15 +22,17 @@ function initial(name: string): string {
 export function RoleAvatar({ conversation, size = "md" }: RoleAvatarProps): ReactNode {
   const agent = conversation?.participantAgents[0] ?? null;
   const name = agent?.name || agent?.id || "?";
-  const color = agent ? avatarColor(agent.id) : "var(--nuomi-accent)";
+  const palette = agent
+    ? hashPaletteColor(agent.id)
+    : { bg: "var(--nuomi-accent)", fg: "var(--nuomi-surface)" };
   const sizeClass = size === "sm" ? "h-6 w-6 text-xs" : "h-8 w-8 text-sm";
 
   return (
     <div
-      className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full font-medium text-surface shadow-sm`}
+      className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full font-medium shadow-sm`}
       title={name}
       aria-label={name}
-      style={{ backgroundColor: color }}
+      style={{ backgroundColor: palette.bg, color: palette.fg }}
     >
       {initial(name)}
     </div>

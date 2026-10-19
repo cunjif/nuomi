@@ -181,7 +181,7 @@ export function MemorySection(): ReactNode {
                     <button
                       type="button"
                       onClick={() => deleteMut.mutate(m.id)}
-                      className="text-red-400 hover:text-red-300"
+                      className="text-state-danger hover:text-state-danger/80"
                     >
                       {t("settings.memory.confirmDelete")}
                     </button>
@@ -197,7 +197,7 @@ export function MemorySection(): ReactNode {
                   <button
                     type="button"
                     onClick={() => setConfirmingId(m.id)}
-                    className="shrink-0 text-ink-muted hover:text-red-400"
+                    className="shrink-0 text-ink-muted hover:text-state-danger"
                     aria-label={t("settings.memory.delete")}
                   >
                     ×

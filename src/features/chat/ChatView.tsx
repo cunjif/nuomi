@@ -281,7 +281,7 @@ export function ChatView(): ReactNode {
       />
       {rollbackTargetSeq !== null && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-surface-scrim p-4"
           role="dialog"
           aria-modal="true"
         >
@@ -294,7 +294,7 @@ export function ChatView(): ReactNode {
               }).length })}
             </p>
             {rollbackMut.data?.containsToolCalls === true && (
-              <p className="mb-3 text-xs text-amber-500">
+              <p className="mb-3 text-xs text-state-warn">
                 {t("chat.toolSideEffectsRetained")}
               </p>
             )}

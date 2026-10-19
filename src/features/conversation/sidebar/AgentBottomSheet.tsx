@@ -112,7 +112,7 @@ export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRem
                 <button
                   type="button"
                   onClick={onRemove}
-                  className="w-full rounded border border-ink-muted/30 px-3 py-1.5 text-sm text-ink-muted hover:border-red-500 hover:text-red-500"
+                  className="w-full rounded border border-ink-muted/30 px-3 py-1.5 text-sm text-ink-muted hover:border-state-danger hover:text-state-danger"
                 >
                   {t("conversation.agentDetail.removeMember")}
                 </button>

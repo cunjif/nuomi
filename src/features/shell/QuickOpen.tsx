@@ -296,7 +296,7 @@ export function QuickOpen(): ReactNode {
       {/* Backdrop: click dismisses (tabIndex -1 keeps tab order inside panel). */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-surface-scrim"
         onMouseDown={(e) => {
           e.preventDefault();
           close();

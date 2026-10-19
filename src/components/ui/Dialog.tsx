@@ -31,7 +31,7 @@ export function Dialog({ open, title, onClose, children, footer, className = "" 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-surface-scrim p-4"
       onClick={onClose}
       role="presentation"
     >

@@ -157,7 +157,7 @@ export function WorkspaceListDialog({
   if (!open) return null;
   return (
     <div role="dialog" aria-label={t("workspace.switchWorkspace")} className="fixed inset-0 z-50 flex items-center justify-center">
-      <div aria-hidden="true" className="absolute inset-0 bg-black/40" onMouseDown={(e) => { e.preventDefault(); onClose(); }} />
+      <div aria-hidden="true" className="absolute inset-0 bg-surface-scrim" onMouseDown={(e) => { e.preventDefault(); onClose(); }} />
       <div data-testid="workspace-list-dialog" className="sketch-panel relative w-full max-w-lg border border-ink-muted/40 bg-surface-raised p-4 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-title-hand text-sm font-semibold">{t("workspace.listTitle")}</h2>

@@ -211,7 +211,7 @@ export function ConversationsList(): ReactNode {
                 }
               }}
               disabled={selectedIds.size === 0}
-              className="rounded bg-red-600 px-1.5 py-0.5 text-xs text-white disabled:opacity-30"
+              className="rounded bg-state-danger px-1.5 py-0.5 text-xs text-surface disabled:opacity-30"
             >
               {t("conversation.deleteSelected", { count: selectedIds.size })}
             </button>
@@ -294,7 +294,7 @@ export function ConversationsList(): ReactNode {
                   <button
                     type="button"
                     onClick={() => setConfirm({ type: "delete", sessionId: conv.id, title: conv.title })}
-                    className="shrink-0 text-xs text-ink-muted opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                    className="shrink-0 text-xs text-ink-muted opacity-0 transition-opacity hover:text-state-danger group-hover:opacity-100"
                     aria-label={t("conversation.delete")}
                   >
                     🗑
@@ -332,7 +332,7 @@ export function ConversationsList(): ReactNode {
             <button
               type="button"
               onClick={() => void handleConfirm()}
-              className="rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+              className="rounded bg-state-danger px-3 py-1 text-sm text-surface hover:opacity-90"
             >
               {t("conversation.confirm")}
             </button>

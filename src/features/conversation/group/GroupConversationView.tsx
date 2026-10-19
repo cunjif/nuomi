@@ -17,18 +17,11 @@ import { GroupControls } from "./GroupControls";
 import { StatusPill, type StatusPillEntry } from "../../chat/StatusPill";
 import { TurnNotice, type TurnNoticeKind } from "../../chat/TurnNotice";
 import { useSessionStream } from "../../chat/useSessionStream";
+import { hashPaletteColor } from "../avatarPalette";
 
 interface TurnNoticeState {
   kind: TurnNoticeKind;
   summary?: string;
-}
-
-/** Stable color from role name hash. */
-function roleColor(roleName: string): string {
-  const colors = ["#e76f51", "#2a9d8f", "#264653", "#e9c46a", "#457b9d", "#a8dadc", "#f4a261"];
-  let hash = 0;
-  for (const ch of roleName) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  return colors[Math.abs(hash) % colors.length]!;
 }
 
 const PILL_FADE_MS = 220;
@@ -222,7 +215,7 @@ export function GroupConversationView(): ReactNode {
               <SpeakerBubble
                 key={msg.id}
                 roleName={roleName}
-                roleColor={roleColor(roleName)}
+                roleColor={hashPaletteColor(roleName)}
                 content={msg.text ?? ""}
                 quotedExcerpt={msg.quotedExcerpt}
               />
@@ -231,7 +224,7 @@ export function GroupConversationView(): ReactNode {
           {groupStream !== null && (
             <SpeakerBubble
               roleName={groupStream.roleName}
-              roleColor={roleColor(groupStream.roleName)}
+              roleColor={hashPaletteColor(groupStream.roleName)}
               content={groupStream.text}
             />
           )}
