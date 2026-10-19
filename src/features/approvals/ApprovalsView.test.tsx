@@ -13,7 +13,7 @@ describe("ApprovalsView — approve flow (AC10)", () => {
       toolName: "write_file",
       argumentsJson: '{"path":"src/main.rs"}',
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
     const base = testDoubleCommands();
     const resolveApproval = vi.fn(base.resolveApproval);
@@ -31,7 +31,7 @@ describe("ApprovalsView — approve flow (AC10)", () => {
   });
 
   it("deny also resolves the item", async () => {
-    tdState.approvals.push({ id: "a2", runId: "r2", toolName: "git_push", argumentsJson: "{}", workspaceId: "__migrated__", workspaceRootPath: null });
+    tdState.approvals.push({ id: "a2", runId: "r2", toolName: "git_push", argumentsJson: "{}", workspaceId: "__migrated__", workspaceLabel: null });
     const base = testDoubleCommands();
     const resolveApproval = vi.fn(base.resolveApproval);
     injectIpcCommands({ ...base, resolveApproval });

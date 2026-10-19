@@ -1219,6 +1219,28 @@ pub struct ConversationUpdateInput {
     pub goal: Option<String>,
 }
 
+/// Workspace label map for board-style DTOs (ADR-0021): id → derived label
+/// (short form). Empty derivations (no directory rows) fall back to
+/// `root_path` — v1 rows still carry a real path there, v2 placeholders are
+/// only reachable for anomalous workspaces.
+fn workspace_label_map(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashMap<String, String>, IpcError> {
+    repos::workspaces::list(conn)?
+        .into_iter()
+        .map(|w| {
+            let dirs = repos::work_directories::list_by_workspace(conn, &w.id)?;
+            let label = nuomi_core::services::derive_label(&dirs);
+            let value = if label.label.is_empty() {
+                w.root_path.clone()
+            } else {
+                label.label
+            };
+            Ok((w.id, value))
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskDto {
@@ -1230,7 +1252,7 @@ pub struct TaskDto {
     pub created_at: i64,
     pub updated_at: i64,
     pub workspace_id: String,
-    pub workspace_root_path: Option<String>,
+    pub workspace_label: Option<String>,
 }
 
 impl From<Task> for TaskDto {
@@ -1244,7 +1266,7 @@ impl From<Task> for TaskDto {
             created_at: t.created_at,
             updated_at: t.updated_at,
             workspace_id: t.workspace_id,
-            workspace_root_path: None,
+            workspace_label: None,
         }
     }
 }
@@ -1290,15 +1312,12 @@ pub async fn impl_list_tasks(
             (None, Some(st)) => repos::tasks_runs::list_tasks_by_status(&db.0, *st, 500)?,
             (None, None) => repos::tasks_runs::list_tasks(&db.0, 500)?,
         };
-        let ws_map = repos::workspaces::list(&db.0)?
-            .into_iter()
-            .map(|w| (w.id, w.root_path))
-            .collect::<std::collections::HashMap<String, String>>();
+        let ws_map = workspace_label_map(&db.0)?;
         Ok(tasks
             .into_iter()
             .map(|t| {
                 let mut dto = TaskDto::from(t);
-                dto.workspace_root_path = ws_map.get(&dto.workspace_id).cloned();
+                dto.workspace_label = ws_map.get(&dto.workspace_id).cloned();
                 dto
             })
             .collect())
@@ -1553,10 +1572,7 @@ pub async fn impl_list_pending_approvals(
             Some(ws) => repos::tasks_runs::list_pending_approvals_by_workspace(&db.0, ws)?,
             None => repos::tasks_runs::list_pending_approvals(&db.0)?,
         };
-        let ws_map = repos::workspaces::list(&db.0)?
-            .into_iter()
-            .map(|w| (w.id, w.root_path))
-            .collect::<std::collections::HashMap<String, String>>();
+        let ws_map = workspace_label_map(&db.0)?;
         let approval_ws_map: std::collections::HashMap<String, String> = {
             let mut stmt = db.0.prepare(
                 "SELECT a.id, r.workspace_id FROM approvals a
@@ -1573,7 +1589,7 @@ pub async fn impl_list_pending_approvals(
                 let mut dto = ApprovalDto::from(a);
                 if let Some(ws_id) = approval_ws_map.get(&dto.id) {
                     dto.workspace_id = ws_id.clone();
-                    dto.workspace_root_path = ws_map.get(ws_id).cloned();
+                    dto.workspace_label = ws_map.get(ws_id).cloned();
                 }
                 dto
             })
@@ -1943,14 +1959,11 @@ pub async fn impl_list_schedules(
             Some(ws) => repos::tasks_runs::list_schedules_by_workspace(&db.0, ws, 200)?,
             None => repos::tasks_runs::list_schedules(&db.0, 200)?,
         };
-        let ws_map = repos::workspaces::list(&db.0)?
-            .into_iter()
-            .map(|w| (w.id, w.root_path))
-            .collect::<std::collections::HashMap<String, String>>();
+        let ws_map = workspace_label_map(&db.0)?;
         let mut out = Vec::with_capacity(schedules.len());
         for schedule in &schedules {
             let mut dto = ScheduleDto::from(schedule.clone());
-            dto.workspace_root_path = ws_map.get(&schedule.workspace_id).cloned();
+            dto.workspace_label = ws_map.get(&schedule.workspace_id).cloned();
             if let Some(agent) =
                 nuomi_core::services::name_agent_ref(&db.0, schedule.agent.as_ref())?
             {
@@ -6069,7 +6082,7 @@ pub struct ApprovalDto {
     pub tool_name: String,
     pub arguments_json: String,
     pub workspace_id: String,
-    pub workspace_root_path: Option<String>,
+    pub workspace_label: Option<String>,
 }
 
 impl From<nuomi_core::domain::Approval> for ApprovalDto {
@@ -6080,7 +6093,7 @@ impl From<nuomi_core::domain::Approval> for ApprovalDto {
             tool_name: a.tool_name,
             arguments_json: a.arguments_json,
             workspace_id: String::new(),
-            workspace_root_path: None,
+            workspace_label: None,
         }
     }
 }
@@ -6136,7 +6149,7 @@ pub struct ScheduleDto {
     pub last_triggered_at: Option<i64>,
     pub next_trigger_at: Option<i64>,
     pub workspace_id: String,
-    pub workspace_root_path: Option<String>,
+    pub workspace_label: Option<String>,
 }
 
 impl From<Schedule> for ScheduleDto {
@@ -6161,7 +6174,7 @@ impl From<Schedule> for ScheduleDto {
             last_triggered_at: s.last_triggered_at,
             next_trigger_at: s.next_trigger_at,
             workspace_id: s.workspace_id,
-            workspace_root_path: None,
+            workspace_label: None,
         }
     }
 }

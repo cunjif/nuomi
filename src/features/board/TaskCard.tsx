@@ -59,7 +59,7 @@ export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithT
       </button>
       {scope === "all" && (
         <div className="mt-0.5">
-          <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceRootPath} />
+          <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceLabel} />
         </div>
       )}
       {task.status === "running" && (

@@ -37,7 +37,7 @@ describe("SchedulerView — schedule list (task 7.3)", () => {
       sessionId: null,
       autoDispatch: true,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
     injectIpcCommands(testDoubleCommands());
 

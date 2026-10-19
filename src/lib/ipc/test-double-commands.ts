@@ -236,7 +236,7 @@ export function testDoubleCommands(): CommandSet {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         workspaceId: "__migrated__",
-        workspaceRootPath: null,
+        workspaceLabel: null,
       };
       tdState.tasks.unshift(t);
       return ok(t);
@@ -607,7 +607,7 @@ export function testDoubleCommands(): CommandSet {
         lastTriggeredAt: null,
         nextTriggerAt: null,
         workspaceId: "__migrated__",
-        workspaceRootPath: null,
+        workspaceLabel: null,
       };
       tdState.schedules.unshift(s);
       return ok(s);

@@ -493,7 +493,9 @@ async fn create_schedule_rejects_without_focused_workspace() {
 
     // Close any open workspace to unfocus (single-open: at most one).
     if let Some(open) = commands::impl_workspace_get_open(&state).await.unwrap() {
-        commands::impl_workspace_close(&state, open.id).await.unwrap();
+        commands::impl_workspace_close(&state, open.id)
+            .await
+            .unwrap();
     }
 
     let err = commands::impl_create_schedule(
@@ -513,7 +515,9 @@ async fn create_task_writes_migrated_placeholder_when_no_focused_workspace() {
     let (state, _dir) = boot(vec![]).await;
 
     if let Some(open) = commands::impl_workspace_get_open(&state).await.unwrap() {
-        commands::impl_workspace_close(&state, open.id).await.unwrap();
+        commands::impl_workspace_close(&state, open.id)
+            .await
+            .unwrap();
     }
 
     let task = commands::impl_create_task(&state, "no-ws".into(), String::new())

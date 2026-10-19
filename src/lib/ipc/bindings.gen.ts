@@ -1556,7 +1556,7 @@ export type AgentRefInput = { kind: string; id: string }
 export type AggregationConfigInput = { batchSize?: number; bySession?: boolean; byBehavior?: boolean; byTimeWindow?: boolean }
 export type AiCommitResultDto = { message: string; truncated: boolean; agentName: string; elapsedMs: number }
 export type AppStateSnapshotDto = { providers: ProviderSummaryDto[]; roles: RoleSummaryDto[]; teams: TeamSummaryDto[]; agentProfiles: AgentProfileSummaryDto[]; sessions: SessionSummaryDto[]; recentEvents: EventSummaryDto[]; memoryEntries: MemorySummaryDto[]; promptVersions: PromptVersionSummaryDto[]; evolutionCycles: CycleSummaryDto[] }
-export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceRootPath: string | null }
+export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceLabel: string | null }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
 export type BindingConfigDto = { mode: BindingModeDto; providerId: string | null; agentProfileId: string | null }
@@ -1862,7 +1862,7 @@ export type SandboxLimitsDto = { timeoutSecs: number; cpuPercent: number | null;
 export type SandboxRunCodeRequest = { runtime: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto | null }
 export type SandboxRuntimeDto = { id: string; name: string; isolation: string }
 export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; createdAt: number; finishedAt: number | null }
-export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null; workspaceId: string; workspaceRootPath: string | null }
+export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null; workspaceId: string; workspaceLabel: string | null }
 export type ScheduleInput = { name: string; cronExpr: string; targetKind: string; agent: AgentRefInput | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; taskTitle: string; taskDescription: string }
 /**
  * Outcome counts of a preset seeding pass.
@@ -1897,7 +1897,7 @@ export type StewardRunStatusDto = { state: StewardRunStatusStateDto; label: stri
 export type StewardRunStatusStateDto = "idle" | "running" | "awaiting_approval" | "failed"
 export type StewardSessionDto = { id: string; stewardId: string; title: string; goal?: string | null; createdAt: number; updatedAt: number; todoList?: TodoItemDto[] | null; runStatus?: StewardRunStatusDto | null }
 export type StewardSettingsDto = { soul: SoulConfigDto | null; binding: BindingConfigDto; runStatus: StewardRunStatusDto; todoList: TodoItemDto[]; messageStats: MessageStatsDto }
-export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceRootPath: string | null }
+export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceLabel: string | null }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
 export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 
 /**

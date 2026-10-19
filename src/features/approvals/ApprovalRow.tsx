@@ -19,7 +19,7 @@ export function ApprovalRow({ approval, scope, onResolve, pending }: ApprovalRow
       <div className="flex items-center gap-2">
         <p className="font-mono text-sm text-ink-accent">{approval.toolName}</p>
         {scope === "all" && (
-          <WorkspaceBadge workspaceId={approval.workspaceId} workspaceLabel={approval.workspaceRootPath} />
+          <WorkspaceBadge workspaceId={approval.workspaceId} workspaceLabel={approval.workspaceLabel} />
         )}
       </div>
       <pre className="mt-1 max-h-24 overflow-auto rounded bg-surface p-2 font-mono text-xs text-ink-muted">

@@ -35,7 +35,7 @@ describe("BoardView — create task flow (AC10)", () => {
       createdAt: 1,
       updatedAt: 1,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
     const base = testDoubleCommands();
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
@@ -61,7 +61,7 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       createdAt: 1,
       updatedAt: 1,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
     tdState.teams.push({
       id: "team-1",
@@ -103,7 +103,7 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       createdAt: 1,
       updatedAt: 1,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
     injectIpcCommands(testDoubleCommands());
 
@@ -126,7 +126,7 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
       createdAt: 1,
       updatedAt: 1,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
   };
 
@@ -240,7 +240,7 @@ describe("BoardView — batch operations (批次二②)", () => {
       createdAt: 1,
       updatedAt: 1,
       workspaceId: "__migrated__",
-      workspaceRootPath: null,
+      workspaceLabel: null,
     });
   };
 

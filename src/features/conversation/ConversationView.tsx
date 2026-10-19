@@ -11,6 +11,7 @@ import { GroupConversationView } from "./group/GroupConversationView";
 import { BackgroundConversationView } from "./background/BackgroundConversationView";
 import { ScheduledConversationView } from "./scheduled/ScheduledConversationView";
 import { isRoleReady } from "../../lib/conversation/roleReady";
+import { workspaceDisplayPath } from "./workspaceDisplayPath";
 import { WorkspaceListDialog } from "../shell/WorkspaceListDialog";
 
 /**
@@ -46,7 +47,9 @@ export function ConversationView(): ReactNode {
   const workspaceRootPath = useMemo(() => {
     if (!activeWorkspaceId) return null;
     const ws = workspacesQuery.data?.find((w) => w.id === activeWorkspaceId);
-    return ws?.rootPath ?? null;
+    // ADR-0021 兼容读取：v2 工作区 rootPath 是 uuid 占位，混合策略见
+    // workspaceDisplayPath（单可用目录显示路径，多目录显示 labelFull）。
+    return ws ? workspaceDisplayPath(ws) : null;
   }, [activeWorkspaceId, workspacesQuery.data]);
 
   // No Role Agent configured → conversation panel is unavailable.

@@ -48,7 +48,7 @@ export const contextCommands: SlashCommand[] = [
 
       if (sub === "list") {
         const list = await ctx.ipc.listWorkspaces();
-        const lines = list.map((w) => `${w.isActive ? "●" : "○"} ${w.rootPath}${w.directoryPresent ? "" : " ⚠"}`);
+        const lines = list.map((w) => `${w.isActive ? "●" : "○"} ${w.label ?? w.rootPath}${w.directoryPresent ? "" : " ⚠"}`);
         ctx.toast.success(lines.length > 0 ? lines.join("\n") : ctx.t("workspace.empty"));
         return;
       }
