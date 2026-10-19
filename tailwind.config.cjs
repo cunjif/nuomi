@@ -6,29 +6,35 @@ module.exports = {
     extend: {
       colors: {
         // Dark-first palette; light theme mirrors via CSS vars in M-UI1 polish.
+        // Alpha-capable colors map to `rgb(var(--nuomi-X-rgb) / <alpha-value>)`
+        // so Tailwind's alpha modifier compiles: `bg-state-warn/10` emits
+        // `rgb(var(--nuomi-warn-rgb) / 0.1)`. Each `-rgb` triple lives in
+        // global.css beside its hex twin `--nuomi-X` (still used by boxShadow
+        // and raw var() references) and is guarded 1:1 by themeContrast.test.ts.
         surface: {
-          DEFAULT: "var(--nuomi-surface, #0b0c0e)",
-          raised: "var(--nuomi-surface-raised, #141518)",
-          overlay: "var(--nuomi-surface-overlay, #1b1d21)",
+          DEFAULT: "rgb(var(--nuomi-surface-rgb, 11 12 14) / <alpha-value>)",
+          raised: "rgb(var(--nuomi-surface-raised-rgb, 20 21 24) / <alpha-value>)",
+          overlay: "rgb(var(--nuomi-surface-overlay-rgb, 27 29 33) / <alpha-value>)",
+          // Scrim keeps its alpha baked into the per-theme var on purpose: it
+          // is never used with an alpha modifier, so it has no rgb mirror.
           scrim: "var(--nuomi-scrim, rgba(0, 0, 0, 0.55))",
         },
-        // Hairline separators. The alpha is baked into the per-theme CSS var on
-        // purpose: this project maps colors to `var(...)` strings, and Tailwind
-        // v3 cannot inject an alpha into a `var()` color — `bg-ink-muted/30`
-        // silently emits nothing. So the tint lives in the token, not the class.
+        // Hairline separators. Same baked-alpha reason as scrim — never
+        // alpha-modified, no rgb mirror.
         divider: "var(--nuomi-divider, rgba(154, 163, 173, 0.26))",
         ink: {
-          DEFAULT: "var(--nuomi-ink, #e6e6e6)",
-          muted: "var(--nuomi-ink-muted, #9aa3ad)",
-          accent: "var(--nuomi-accent, #5b9bf8)",
+          DEFAULT: "rgb(var(--nuomi-ink-rgb, 230 230 230) / <alpha-value>)",
+          muted: "rgb(var(--nuomi-ink-muted-rgb, 154 163 173) / <alpha-value>)",
+          accent: "rgb(var(--nuomi-accent-rgb, 91 155 248) / <alpha-value>)",
         },
         state: {
-          ok: "var(--nuomi-ok, #9ece6a)",
-          warn: "var(--nuomi-warn, #e0af68)",
-          danger: "var(--nuomi-danger, #f7768e)",
+          ok: "rgb(var(--nuomi-ok-rgb, 158 206 106) / <alpha-value>)",
+          warn: "rgb(var(--nuomi-warn-rgb, 224 175 104) / <alpha-value>)",
+          danger: "rgb(var(--nuomi-danger-rgb, 247 118 142) / <alpha-value>)",
         },
         // Capability badge ink (KiloCode-style Re/I/Vo/Vi) — token, not raw
         // palette, so all four themes pick a legible variant (review §10).
+        // Never alpha-modified, so no rgb mirror.
         cap: {
           re: "var(--nuomi-cap-re, #0369a1)",
           i: "var(--nuomi-cap-i, #047857)",
@@ -39,7 +45,7 @@ module.exports = {
         // red/blue stays separable under the common red-green deficiencies.
         // Removed lines use `state.danger` (the app's single red).
         diff: {
-          add: "var(--nuomi-diff-add, #0369a1)",
+          add: "rgb(var(--nuomi-diff-add-rgb, 3 105 161) / <alpha-value>)",
         },
       },
       fontFamily: {

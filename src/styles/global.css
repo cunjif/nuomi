@@ -39,6 +39,21 @@
      kraft raised surface (#fffdf5) this lands near #d3cfc6 — visible as a
      hairline, never competing with the tab title. */
   --nuomi-divider: rgba(107, 99, 88, 0.28);
+  /* RGB-channel mirrors of the hex tokens above — Tailwind maps these with
+     `<alpha-value>` so `bg-ink-muted/30` (and every other alpha modifier)
+     actually generates CSS; a plain `var()` color cannot take an alpha.
+     Kept in sync with the hex values by themeContrast.test.ts (hex ↔ rgb
+     guard) — never edit one side without the other. */
+  --nuomi-surface-rgb: 244 239 225;
+  --nuomi-surface-raised-rgb: 255 253 245;
+  --nuomi-surface-overlay-rgb: 238 232 217;
+  --nuomi-ink-rgb: 42 37 32;
+  --nuomi-ink-muted-rgb: 107 99 88;
+  --nuomi-accent-rgb: 156 63 10;
+  --nuomi-ok-rgb: 22 106 42;
+  --nuomi-warn-rgb: 138 101 8;
+  --nuomi-danger-rgb: 189 38 38;
+  --nuomi-diff-add-rgb: 3 105 161;
   /* Kraft-paper grain (turbulence noise, ~5% opacity) tiled over the light
      surface — keeps text readable while giving the "paper" feel (review §4.2.1). */
   --nuomi-paper-texture:
@@ -73,6 +88,17 @@
   /* Hairline separators — chalk dust on the blackboard: muted chalk (#9aa3ad)
      at low alpha over #0d0d0d lands near #33363a, a faint grey rule. */
   --nuomi-divider: rgba(154, 163, 173, 0.26);
+  /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
+  --nuomi-surface-rgb: 0 0 0;
+  --nuomi-surface-raised-rgb: 13 13 13;
+  --nuomi-surface-overlay-rgb: 20 20 20;
+  --nuomi-ink-rgb: 232 232 232;
+  --nuomi-ink-muted-rgb: 154 163 173;
+  --nuomi-accent-rgb: 91 155 248;
+  --nuomi-ok-rgb: 158 206 106;
+  --nuomi-warn-rgb: 224 175 104;
+  --nuomi-danger-rgb: 247 118 142;
+  --nuomi-diff-add-rgb: 125 211 252;
   /* Chalk-dust grain (faint white noise) over the blackboard (review §4.2.3). */
   --nuomi-chalk-texture:
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='c'><feTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/></filter><rect width='100%' height='100%' filter='url(%23c)'/></svg>");
@@ -110,6 +136,17 @@
   --nuomi-scrollbar-hover: #9aa1ad;
   /* Hairline separators — pencil-grey on white, same recipe as paper-light. */
   --nuomi-divider: rgba(91, 101, 114, 0.28);
+  /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
+  --nuomi-surface-rgb: 248 249 250;
+  --nuomi-surface-raised-rgb: 255 255 255;
+  --nuomi-surface-overlay-rgb: 236 238 242;
+  --nuomi-ink-rgb: 31 36 48;
+  --nuomi-ink-muted-rgb: 91 101 114;
+  --nuomi-accent-rgb: 49 80 203;
+  --nuomi-ok-rgb: 22 106 42;
+  --nuomi-warn-rgb: 138 101 8;
+  --nuomi-danger-rgb: 189 38 38;
+  --nuomi-diff-add-rgb: 3 105 161;
   /* 24px blue ruling (review §4.2.2). */
   --nuomi-grid-texture:
     linear-gradient(rgba(49, 80, 203, 0.08) 1px, transparent 1px),
@@ -145,6 +182,17 @@
   /* Hairline separators — this theme trades subtlety for visibility, so the
      rule is roughly twice as opaque as the other three (near #666 on black). */
   --nuomi-divider: rgba(204, 204, 204, 0.5);
+  /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
+  --nuomi-surface-rgb: 0 0 0;
+  --nuomi-surface-raised-rgb: 10 10 10;
+  --nuomi-surface-overlay-rgb: 20 20 20;
+  --nuomi-ink-rgb: 255 255 255;
+  --nuomi-ink-muted-rgb: 204 204 204;
+  --nuomi-accent-rgb: 255 255 0;
+  --nuomi-ok-rgb: 0 255 0;
+  --nuomi-warn-rgb: 255 255 0;
+  --nuomi-danger-rgb: 255 0 0;
+  --nuomi-diff-add-rgb: 102 217 255;
 }
 [data-theme="high-contrast"] body {
   background-image: none;

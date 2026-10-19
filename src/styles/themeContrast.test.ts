@@ -296,6 +296,33 @@ const THEMES: ReadonlyArray<{
   { name: "high-contrast", selector: '[data-theme="high-contrast"]' },
 ];
 
+// Tokens that carry an `--nuomi-X-rgb` mirror (space-separated triple) in
+// tailwind.config.cjs via `rgb(var(--nuomi-X-rgb) / <alpha-value>)`. Scrim,
+// divider and cap-* deliberately have no mirror: their alpha is baked into
+// the value itself and they are never used with an alpha modifier.
+const RGB_MIRRORED_TOKENS = [
+  "surface",
+  "surface-raised",
+  "surface-overlay",
+  "ink",
+  "ink-muted",
+  "accent",
+  "ok",
+  "warn",
+  "danger",
+  "diff-add",
+] as const;
+
+const RGB_TRIPLE_RE = /^(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})$/;
+
+function parseRgbTriple(raw: string): Rgb {
+  const match = RGB_TRIPLE_RE.exec(raw);
+  if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined) {
+    throw new Error(`global.css: unsupported rgb triple "${raw}" (need "r g b")`);
+  }
+  return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]) };
+}
+
 describe("theme contrast guard (WCAG via parsed global.css palettes)", () => {
   const cssPromise = readGlobalCss();
   const resolvedByTheme = new Map<string, ResolvedTheme>();
@@ -326,4 +353,34 @@ describe("theme contrast guard (WCAG via parsed global.css palettes)", () => {
       }
     });
   }
+});
+
+describe("hex↔rgb mirror consistency (alpha-capable tokens)", () => {
+  // tailwind.config.cjs maps alpha-capable colors to
+  // `rgb(var(--nuomi-X-rgb) / <alpha-value>)` while boxShadow and raw var()
+  // references keep using the hex twin `--nuomi-X`. If the two ever drift,
+  // borders/tints (rgb path) and shadows/fallbacks (hex path) render as
+  // different colors per theme — this guard makes the drift fail loudly.
+  it.each(THEMES)("$name: every mirrored token's rgb triple equals its hex twin", async (theme) => {
+    const vars = parseVars(extractBlock(await readGlobalCss(), theme.selector));
+    for (const token of RGB_MIRRORED_TOKENS) {
+      const hexRaw = vars.get(token);
+      const rgbRaw = vars.get(`${token}-rgb`);
+      expect(
+        hexRaw,
+        `${theme.name}: global.css \`${theme.selector}\` is missing --nuomi-${token} (hex twin)`,
+      ).toBeDefined();
+      expect(
+        rgbRaw,
+        `${theme.name}: global.css \`${theme.selector}\` is missing --nuomi-${token}-rgb (tailwind alpha mirror)`,
+      ).toBeDefined();
+      if (hexRaw === undefined || rgbRaw === undefined) continue;
+      const hex = parseColor(hexRaw);
+      const triple = parseRgbTriple(rgbRaw);
+      expect(
+        { r: triple.r, g: triple.g, b: triple.b },
+        `${theme.name}: --nuomi-${token}-rgb (${rgbRaw}) must equal the hex twin ${hexRaw} parsed as rgb — keep both in sync when tuning a palette.`,
+      ).toEqual({ r: hex.r, g: hex.g, b: hex.b });
+    }
+  });
 });
