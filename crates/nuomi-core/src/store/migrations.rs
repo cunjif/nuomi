@@ -930,6 +930,11 @@ mod tests {
             .query_row("SELECT count(*) FROM work_directories", [], |r| r.get(0))
             .unwrap();
         assert_eq!(dir_count, 0, "empty root_path yields no work directory");
+        // Original anomaly record preserved (skip, not drop — spec 5.5.3-2).
+        let ws_count: i64 = conn
+            .query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ws_count, 1, "anomalous workspace row must be preserved");
     }
 
     // ---- migration 0037: sandbox_tasks (ADR-0022 lossless upgrade)
@@ -1040,5 +1045,227 @@ mod tests {
             .query_row("SELECT count(*) FROM sandbox_tasks", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    // ---- task 9.4: full upgrade drill 0035 -> 0037 (lossless, idempotent)
+
+    #[test]
+    fn migrations_0035_to_0037_full_upgrade_drill() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Build a 0035-state database holding every aggregate the drill must
+        // verify across the 0036/0037 hop: workspaces (with color tags),
+        // sessions, a steward session + its replayable history events, an
+        // attachment, a session event, and a layout snapshot.
+        run_migrations_to(&conn, 35);
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w1', 'C:\\proj\\alpha', 'paper-yellow', 100, 1, 0),
+                    ('w2', 'C:\\proj\\beta', 'paper-blue', 200, 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, kind, workspace_id)
+             VALUES ('s1', 'alpha chat', 1, 1, 'chat', 'w1'),
+                    ('s2', 'beta chat', 2, 2, 'chat', 'w2'),
+                    ('stew-1', 'steward chat', 3, 3, 'background', 'w1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO steward_sessions (id, steward_id, title, goal, created_at, updated_at)
+             VALUES ('stew-1', 'steward_main', '管家会话', 'help me', 3, 3)",
+            [],
+        )
+        .unwrap();
+        // Steward history: two replayable events on the events log.
+        conn.execute(
+            "INSERT INTO events (aggregate_type, aggregate_id, kind, payload, seq, created_at)
+             VALUES ('steward', 'stew-1', 'message', '{\"role\":\"user\",\"content\":\"hi\"}', 1, 10),
+                    ('steward', 'stew-1', 'message', '{\"role\":\"assistant\",\"content\":\"hello\"}', 2, 11)",
+            [],
+        )
+        .unwrap();
+        // A regular session event.
+        conn.execute(
+            "INSERT INTO events (aggregate_type, aggregate_id, kind, payload, seq, created_at)
+             VALUES ('session', 's1', 'message', '{\"content\":\"alpha msg\"}', 1, 12)",
+            [],
+        )
+        .unwrap();
+        // Attachment metadata.
+        conn.execute(
+            "INSERT INTO attachments (id, session_id, seq, kind, name, mime, rel_path, size_bytes, sha256, created_at)
+             VALUES ('att-1', 'stew-1', NULL, 'image', 'shot.png', 'image/png',
+                     '.nuomi/attachments/stew-1/abc.png', 1234, 'abc123', 5)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workspace_layout_snapshot (id, mode, focused_workspace_id, captured_at)
+             VALUES (1, 'single', 'w1', 1)",
+            [],
+        )
+        .unwrap();
+
+        // Upgrade: 0036 -> 0037 in one run.
+        run(&conn).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 37);
+
+        // (1) Workspace <-> work directory: one backfilled directory per
+        // workspace, mounted, added_at = created_at.
+        let dirs: Vec<(String, String, i64, i64)> = conn
+            .prepare("SELECT workspace_id, abs_path, mounted, added_at FROM work_directories ORDER BY workspace_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(
+            (dirs[0].0.as_str(), dirs[0].1.as_str(), dirs[0].2, dirs[0].3),
+            ("w1", "C:\\proj\\alpha", 1, 100)
+        );
+        assert_eq!(
+            (dirs[1].0.as_str(), dirs[1].1.as_str(), dirs[1].2, dirs[1].3),
+            ("w2", "C:\\proj\\beta", 1, 200)
+        );
+
+        // (2) Identity intact: color_tag unchanged by the upgrade.
+        let colors: Vec<(String, String)> = conn
+            .prepare("SELECT id, color_tag FROM workspaces ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            colors,
+            vec![
+                ("w1".into(), "paper-yellow".into()),
+                ("w2".into(), "paper-blue".into())
+            ]
+        );
+
+        // (3) Session ownership unchanged.
+        let owners: Vec<(String, String)> = conn
+            .prepare("SELECT id, workspace_id FROM sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            owners,
+            vec![
+                ("s1".into(), "w1".into()),
+                ("s2".into(), "w2".into()),
+                ("stew-1".into(), "w1".into())
+            ]
+        );
+
+        // (4) Steward session discriminant survives.
+        let steward: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM steward_sessions WHERE id = 'stew-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(steward, 1);
+
+        // (5) Steward history replayable: both events intact, in seq order,
+        // with the original payloads (spec 4.2-4).
+        let replay: Vec<(String, String, i64)> = conn
+            .prepare(
+                "SELECT kind, payload, seq FROM events \
+                 WHERE aggregate_type = 'steward' AND aggregate_id = 'stew-1' ORDER BY seq",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            replay,
+            vec![
+                (
+                    "message".into(),
+                    "{\"role\":\"user\",\"content\":\"hi\"}".into(),
+                    1
+                ),
+                (
+                    "message".into(),
+                    "{\"role\":\"assistant\",\"content\":\"hello\"}".into(),
+                    2
+                ),
+            ]
+        );
+
+        // (6) Attachment metadata fully preserved (seq NULL = not yet bound).
+        let att: (String, String, i64, String, String, Option<i64>, String) = conn
+            .query_row(
+                "SELECT id, session_id, size_bytes, mime, rel_path, seq, sha256 FROM attachments WHERE id = 'att-1'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            att,
+            (
+                "att-1".into(),
+                "stew-1".into(),
+                1234,
+                "image/png".into(),
+                ".nuomi/attachments/stew-1/abc.png".into(),
+                None,
+                "abc123".into()
+            )
+        );
+
+        // (7) Regular session event still on the log.
+        let session_events: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE aggregate_type = 'session' AND aggregate_id = 's1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_events, 1);
+
+        // (8) Layout snapshot untouched.
+        let snapshot: (String, String) = conn
+            .query_row(
+                "SELECT mode, focused_workspace_id FROM workspace_layout_snapshot WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(snapshot, ("single".into(), "w1".into()));
+
+        // (9) Idempotent: a second run changes nothing.
+        run(&conn).unwrap();
+        let (dir_count, att_count, event_count, snapshot_count): (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT
+                    (SELECT count(*) FROM work_directories),
+                    (SELECT count(*) FROM attachments),
+                    (SELECT count(*) FROM events),
+                    (SELECT count(*) FROM workspace_layout_snapshot)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (dir_count, att_count, event_count, snapshot_count),
+            (2, 1, 3, 1)
+        );
     }
 }
