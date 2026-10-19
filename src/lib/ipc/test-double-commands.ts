@@ -24,7 +24,6 @@ import type {
   GateDecisionDto,
   ResolveOutcomeDto,
   StewardEventDto,
-  CloseWorkspaceResult,
   ContextInjectionDto,
   ContextInjectionInput,
   ConversationDto,
@@ -32,7 +31,6 @@ import type {
   CrossSearchOutcomeDto,
   DiffResultDto,
   FileReferenceDto,
-  FocusWorkspaceResult,
   IpcError,
   InjectableRuleDto,
   InjectableSessionDto,
@@ -41,8 +39,6 @@ import type {
   IsolationViolationDto,
   JsonValue,
   LayoutSnapshotDto,
-  OpenSetDto,
-  OpenWorkspaceResult,
   OrphanSessionDto,
   PluginInfoDto,
   PluginListResultDto,
@@ -410,30 +406,6 @@ export function testDoubleCommands(): CommandSet {
     },
     async reclaimOrphanSessions(_workspaceId: string) {
       return ok(0);
-    },
-    async openWorkspace(id: string) {
-      // Mirror backend: open_workspace flips is_focused in the open set.
-      for (const w of tdState.workspaces ?? []) {
-        w.isFocused = w.id === id;
-      }
-      return ok({ workspaceId: id } as OpenWorkspaceResult);
-    },
-    async closeWorkspace(id: string, _force: boolean) {
-      return ok({ closedId: id, newFocusedId: null } as CloseWorkspaceResult);
-    },
-    async focusWorkspace(id: string) {
-      return ok({ workspaceId: id } as FocusWorkspaceResult);
-    },
-    async closeAllWorkspaces(_excludePinned: boolean) {
-      return ok([] as CloseWorkspaceResult[]);
-    },
-    async getOpenSet() {
-      return ok({
-        openWorkspaces: [],
-        focusedWorkspaceId: null,
-        pinnedWorkspaceIds: [],
-        unreadIndicators: [],
-      } as OpenSetDto);
     },
     async workspaceAddDirectory(path: string) {
       // Mirror v2 single-open semantics: open workspace → join it (the fresh

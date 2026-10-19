@@ -612,53 +612,6 @@ pub async fn get_active_workspace(
     commands::impl_get_active_workspace(&state).await
 }
 
-// ---- Multi-workspace open-set commands ----
-
-#[tauri::command]
-#[specta::specta]
-pub async fn open_workspace(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<commands::OpenWorkspaceResult, IpcError> {
-    commands::impl_open_workspace(&state, id).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn close_workspace(
-    state: tauri::State<'_, AppState>,
-    id: String,
-    force: bool,
-) -> Result<commands::CloseWorkspaceResult, IpcError> {
-    commands::impl_close_workspace(&state, id, force).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn focus_workspace(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<commands::FocusWorkspaceResult, IpcError> {
-    commands::impl_focus_workspace(&state, id).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn close_all_workspaces(
-    state: tauri::State<'_, AppState>,
-    exclude_pinned: bool,
-) -> Result<Vec<commands::CloseWorkspaceResult>, IpcError> {
-    commands::impl_close_all_workspaces(&state, exclude_pinned).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn get_open_set(
-    state: tauri::State<'_, AppState>,
-) -> Result<commands::OpenSetDto, IpcError> {
-    commands::impl_get_open_set(&state).await
-}
-
 // ---- Two-level workspace commands (ADR-0021) ----
 
 #[tauri::command]

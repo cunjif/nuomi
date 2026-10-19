@@ -20,19 +20,10 @@ vi.mock("./monacoSetup", () => ({}));
 const folderPick = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => folderPick(...a) }));
 
-// uiStore.openWorkspace/focusWorkspace call tauri invoke directly; route
-// open_workspace/focus_workspace into tdState so isFocused updates land.
+// jsdom has no Tauri runtime — stub the core invoke for the commands
+// EditorArea still calls directly (layout snapshot persistence).
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (cmd: string, args?: Record<string, unknown>) => {
-    if (cmd === "open_workspace" || cmd === "focus_workspace") {
-      const id = args?.id as string;
-      for (const w of tdState.workspaces ?? []) w.isFocused = w.id === id;
-      return { workspaceId: id };
-    }
-    if (cmd === "close_workspace") return { closedId: args?.id, newFocusedId: null };
-    if (cmd === "get_open_set") {
-      return { openWorkspaces: [], focusedWorkspaceId: null, pinnedWorkspaceIds: [], unreadIndicators: [] };
-    }
+  invoke: async (cmd: string) => {
     if (cmd === "set_layout_snapshot") return null;
     return undefined;
   },

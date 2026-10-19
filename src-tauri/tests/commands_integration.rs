@@ -421,7 +421,7 @@ async fn role_capability_mismatch_and_preset_protection() {
 async fn open_first_workspace(state: &AppState) -> String {
     let ws_path = state.current_workspace().to_string_lossy().to_string();
     let entry = commands::impl_add_workspace(state, ws_path).await.unwrap();
-    commands::impl_open_workspace(state, entry.id.clone())
+    commands::impl_workspace_switch(state, entry.id.clone())
         .await
         .unwrap();
     entry.id
@@ -491,10 +491,10 @@ async fn list_schedules_with_workspace_id_filters() {
 async fn create_schedule_rejects_without_focused_workspace() {
     let (state, _dir) = boot(vec![]).await;
 
-    // Close all workspaces to unfocus
-    commands::impl_close_all_workspaces(&state, false)
-        .await
-        .unwrap();
+    // Close any open workspace to unfocus (single-open: at most one).
+    if let Some(open) = commands::impl_workspace_get_open(&state).await.unwrap() {
+        commands::impl_workspace_close(&state, open.id).await.unwrap();
+    }
 
     let err = commands::impl_create_schedule(
         &state,
@@ -512,9 +512,9 @@ async fn create_schedule_rejects_without_focused_workspace() {
 async fn create_task_writes_migrated_placeholder_when_no_focused_workspace() {
     let (state, _dir) = boot(vec![]).await;
 
-    commands::impl_close_all_workspaces(&state, false)
-        .await
-        .unwrap();
+    if let Some(open) = commands::impl_workspace_get_open(&state).await.unwrap() {
+        commands::impl_workspace_close(&state, open.id).await.unwrap();
+    }
 
     let task = commands::impl_create_task(&state, "no-ws".into(), String::new())
         .await
@@ -679,9 +679,8 @@ async fn workspace_v2_directory_lifecycle() {
     assert_eq!(entry.directories.as_ref().unwrap().len(), 2);
     assert!(entry.is_open.unwrap());
 
-    // Close (retirement shim) → empty state; a third path opens a second
-    // workspace.
-    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+    // v2 close → empty state; a third path opens a second workspace.
+    commands::impl_workspace_close(&state, ws1.id.clone())
         .await
         .unwrap();
     assert!(commands::impl_workspace_get_open(&state)
@@ -825,7 +824,7 @@ async fn workspace_v2_recent_list_derived_labels() {
     commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
         .await
         .unwrap();
-    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+    commands::impl_workspace_close(&state, ws1.id.clone())
         .await
         .unwrap();
 
@@ -835,7 +834,7 @@ async fn workspace_v2_recent_list_derived_labels() {
     let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
         .await
         .unwrap();
-    commands::impl_close_workspace(&state, ws2.id.clone(), false)
+    commands::impl_workspace_close(&state, ws2.id.clone())
         .await
         .unwrap();
 
@@ -890,7 +889,7 @@ async fn workspace_v2_migration_anomaly_flags() {
     let ws1 = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
         .await
         .unwrap();
-    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+    commands::impl_workspace_close(&state, ws1.id.clone())
         .await
         .unwrap();
     let gamma = dir.path().join("gamma");
@@ -898,7 +897,7 @@ async fn workspace_v2_migration_anomaly_flags() {
     let ws2 = commands::impl_workspace_add_directory(&state, gamma.to_string_lossy().to_string())
         .await
         .unwrap();
-    commands::impl_close_workspace(&state, ws2.id.clone(), false)
+    commands::impl_workspace_close(&state, ws2.id.clone())
         .await
         .unwrap();
 
@@ -1004,7 +1003,7 @@ async fn workspace_v2_conversation_filter_covers_all_directories() {
     commands::impl_workspace_add_directory(&state, beta.to_string_lossy().to_string())
         .await
         .unwrap();
-    commands::impl_close_workspace(&state, ws1.id.clone(), false)
+    commands::impl_workspace_close(&state, ws1.id.clone())
         .await
         .unwrap();
 

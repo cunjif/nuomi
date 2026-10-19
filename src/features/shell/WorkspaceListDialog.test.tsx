@@ -12,20 +12,6 @@ import { WorkspaceListDialog } from "./WorkspaceListDialog";
 const openDialog = vi.fn();
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialog(...a) }));
 
-// uiStore.openWorkspace calls tauri invoke("open_workspace") directly (not
-// ipc.openWorkspace), so mock the core invoke to route open_workspace into
-// the test-double which updates isFocused on tdState.workspaces.
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (cmd: string, args?: Record<string, unknown>) => {
-    if (cmd === "open_workspace") {
-      const id = args?.id as string;
-      for (const w of tdState.workspaces ?? []) w.isFocused = w.id === id;
-      return { workspaceId: id };
-    }
-    return undefined;
-  },
-}));
-
 function makeWs(overrides: Partial<WorkspaceEntryDto> & { id: string }): WorkspaceEntryDto {
   return {
     rootPath: `C:\\projects\\${overrides.id}`,

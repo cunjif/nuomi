@@ -478,46 +478,6 @@ async getActiveWorkspace() : Promise<Result<WorkspaceEntryDto | null, IpcError>>
     else return { status: "error", error: e  as any };
 }
 },
-async openWorkspace(id: string) : Promise<Result<OpenWorkspaceResult, IpcError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("open_workspace", { id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async closeWorkspace(id: string, force: boolean) : Promise<Result<CloseWorkspaceResult, IpcError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("close_workspace", { id, force }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async focusWorkspace(id: string) : Promise<Result<FocusWorkspaceResult, IpcError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("focus_workspace", { id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async closeAllWorkspaces(excludePinned: boolean) : Promise<Result<CloseWorkspaceResult[], IpcError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("close_all_workspaces", { excludePinned }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async getOpenSet() : Promise<Result<OpenSetDto, IpcError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_open_set") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async workspaceAddDirectory(path: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("workspace_add_directory", { path }) };
@@ -1602,10 +1562,6 @@ export type CleanseRulesInput = { redactPatterns: RedactPatternInput[]; aggregat
 export type CleanseScopeInput = { timeRange: [number, number]; includeKinds?: string[]; includeMemoryKinds?: string[] }
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
-/**
- * Result of closing a workspace.
- */
-export type CloseWorkspaceResult = { closedId: string; newFocusedId: string | null }
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ConfigChangeResultDto = { proposalId: string; snapshotId: string; targetType: string; targetId: string }
 export type ConfigProposalDto = { proposalId: string; targetType: string; targetId: string; diffPreview: string; createdAt: number }
@@ -1676,10 +1632,6 @@ export type FileMatchDto = { relativePath: string; matchType: string }
  * File reference DTO (read-only snapshot from another workspace).
  */
 export type FileReferenceDto = { sourceWorkspaceId: string; sourceRelativePath: string; contentSnapshot: string }
-/**
- * Result of focusing a workspace.
- */
-export type FocusWorkspaceResult = { workspaceId: string }
 export type GateDecisionDto = { kind: string; feedback?: string | null }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
@@ -1751,18 +1703,6 @@ export type MessageStatsDto = { total: number; clearedAt: number | null }
  */
 export type ModelEntryDto = { id: string; capabilities: CapabilityDto[]; temperature?: number | null; topP?: number | null; maxTokens?: number | null }
 export type OnlineLearningConfigDto = { authorized: boolean; allowlist: string[] }
-/**
- * The current open set + focused workspace + pinned ids.
- */
-export type OpenSetDto = { openWorkspaces: OpenWorkspaceDto[]; focusedWorkspaceId: string | null; pinnedWorkspaceIds: string[]; unreadIndicators: UnreadIndicatorDto[] }
-/**
- * A single open workspace in the open set.
- */
-export type OpenWorkspaceDto = { workspaceId: string; openedAt: number; lastFocusedAt: number; isFocused: boolean }
-/**
- * Result of opening a workspace.
- */
-export type OpenWorkspaceResult = { workspaceId: string }
 /**
  * A session whose `workspace_id` points to a removed workspace.
  */
@@ -1983,10 +1923,6 @@ proxy: string | null;
  */
 model: string | null }
 export type TodoItemDto = { id: string; description: string; completed: boolean }
-/**
- * Unread indicator for a workspace tab (task completions, failures, pending approvals).
- */
-export type UnreadIndicatorDto = { workspaceId: string; count: number }
 export type WhiteBoardNoteDto = { id: string; sessionId: string; authorRoleId: string | null; noteType: string; body: string; refs: JsonValue; seq: number; createdAt: number }
 /**
  * A work directory of a workspace (two-level model, ADR-0021).

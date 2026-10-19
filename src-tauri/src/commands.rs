@@ -6253,34 +6253,6 @@ pub struct RemoveDirectoryResultDto {
     pub workspace_closed: bool,
 }
 
-/// A single open workspace in the open set.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenWorkspaceDto {
-    pub workspace_id: String,
-    pub opened_at: i64,
-    pub last_focused_at: i64,
-    pub is_focused: bool,
-}
-
-/// Unread indicator for a workspace tab (task completions, failures, pending approvals).
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct UnreadIndicatorDto {
-    pub workspace_id: String,
-    pub count: i64,
-}
-
-/// The current open set + focused workspace + pinned ids.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenSetDto {
-    pub open_workspaces: Vec<OpenWorkspaceDto>,
-    pub focused_workspace_id: Option<String>,
-    pub pinned_workspace_ids: Vec<String>,
-    pub unread_indicators: Vec<UnreadIndicatorDto>,
-}
-
 /// Layout snapshot DTO for persistence/restoration.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -6308,38 +6280,6 @@ pub struct RecentWorkspaceDto {
     /// Migration-anomaly flag: the workspace carries a `migration_report`
     /// event and should render disabled in the recent list (spec 5.5.3-2c).
     pub anomaly: bool,
-}
-
-/// Result of opening a workspace.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenWorkspaceResult {
-    pub workspace_id: String,
-}
-
-/// Result of closing a workspace.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CloseWorkspaceResult {
-    pub closed_id: String,
-    pub new_focused_id: Option<String>,
-}
-
-/// Details when close requires confirmation.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CloseConfirmDetails {
-    pub workspace_id: String,
-    pub reason: String,
-    pub dirty_files: Vec<String>,
-    pub running_tasks: Vec<String>,
-}
-
-/// Result of focusing a workspace.
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct FocusWorkspaceResult {
-    pub workspace_id: String,
 }
 
 /// A cross-workspace search result group.
@@ -6761,104 +6701,6 @@ pub async fn impl_get_active_workspace(
     }))
 }
 
-// ---- Multi-workspace open-set commands ----
-// open/close/focus/close_all are ADR-0021 retirement shims (one version
-// cycle): they delegate to the v2 single-open registry while keeping their
-// wire contracts for the not-yet-migrated frontend. get_open_set keeps its
-// raw-table read — the open-state table is shared and v2 maintains it.
-
-pub async fn impl_open_workspace(
-    state: &AppState,
-    id: String,
-) -> Result<OpenWorkspaceResult, IpcError> {
-    // Shim: the old multi-open "open" maps to the single-open switch — the
-    // sanctioned transition between open workspaces (design B4).
-    let db_path = state.db_path.clone();
-    let id_for_switch = id.clone();
-    let view = tokio::task::spawn_blocking(
-        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
-            let svc =
-                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-            Ok(svc.switch(&id_for_switch)?)
-        },
-    )
-    .await
-    .map_err(join_err)??;
-    sync_root_to_view(state, &view);
-    Ok(OpenWorkspaceResult { workspace_id: id })
-}
-
-pub async fn impl_close_workspace(
-    state: &AppState,
-    id: String,
-    _force: bool,
-) -> Result<CloseWorkspaceResult, IpcError> {
-    // `_force` is contract compat only: v2 close has no dirty-check gate —
-    // closing never touches sessions, runs or directories.
-    let db_path = state.db_path.clone();
-    let id_for_close = id.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
-        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-        svc.close(&id_for_close)?;
-        Ok(())
-    })
-    .await
-    .map_err(join_err)??;
-    // Single-open: closing the only open workspace leaves the empty state —
-    // focus never transfers.
-    Ok(CloseWorkspaceResult {
-        closed_id: id,
-        new_focused_id: None,
-    })
-}
-
-pub async fn impl_focus_workspace(
-    state: &AppState,
-    id: String,
-) -> Result<FocusWorkspaceResult, IpcError> {
-    // Shim: under single-open, focusing IS switching (idempotent refocus on
-    // the open workspace; opens a closed one via the sanctioned transition).
-    let db_path = state.db_path.clone();
-    let id_for_switch = id.clone();
-    let view = tokio::task::spawn_blocking(
-        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
-            let svc =
-                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-            Ok(svc.switch(&id_for_switch)?)
-        },
-    )
-    .await
-    .map_err(join_err)??;
-    sync_root_to_view(state, &view);
-    Ok(FocusWorkspaceResult { workspace_id: id })
-}
-
-pub async fn impl_close_all_workspaces(
-    state: &AppState,
-    exclude_pinned: bool,
-) -> Result<Vec<CloseWorkspaceResult>, IpcError> {
-    let db_path = state.db_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<Vec<CloseWorkspaceResult>, IpcError> {
-        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-        let mut outcomes = Vec::new();
-        if let Some(view) = svc.get_open()? {
-            // Single-open: at most one workspace to close; `exclude_pinned`
-            // keeps a pinned one open (legacy behavior).
-            if !(exclude_pinned && view.entry.is_pinned) {
-                let closed_id = view.entry.id;
-                svc.close(&closed_id)?;
-                outcomes.push(CloseWorkspaceResult {
-                    closed_id,
-                    new_focused_id: None,
-                });
-            }
-        }
-        Ok(outcomes)
-    })
-    .await
-    .map_err(join_err)?
-}
-
 // ---- Two-level workspace commands (ADR-0021) ----
 
 pub async fn impl_workspace_add_directory(
@@ -7093,56 +6935,6 @@ pub async fn impl_workspace_focus_directory(
     state.set_active_directory(&view.entry.id, &directory_id, &abs_path);
     let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
     Ok(workspace_view_to_dto(&view, active.as_deref()))
-}
-
-pub async fn impl_get_open_set(state: &AppState) -> Result<OpenSetDto, IpcError> {
-    let db_path = state.db_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<OpenSetDto, IpcError> {
-        let db = Db::open(&db_path)?;
-        let open_state = repos::workspace_open_state::list(&db.0)?;
-        let focused = repos::workspace_open_state::find_focused(&db.0)?;
-        let all_workspaces = repos::workspaces::list(&db.0)?;
-        let pinned_ids: Vec<String> = all_workspaces
-            .iter()
-            .filter(|w| w.is_pinned)
-            .map(|w| w.id.clone())
-            .collect();
-        let unread_indicators = open_state
-            .iter()
-            .filter_map(|r| {
-                let count = repos::tasks_runs::count_unread_since(
-                    &db.0,
-                    &r.workspace_id,
-                    r.last_focused_at,
-                )
-                .unwrap_or(0);
-                if count > 0 {
-                    Some(UnreadIndicatorDto {
-                        workspace_id: r.workspace_id.clone(),
-                        count,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(OpenSetDto {
-            open_workspaces: open_state
-                .into_iter()
-                .map(|r| OpenWorkspaceDto {
-                    workspace_id: r.workspace_id,
-                    opened_at: r.opened_at,
-                    last_focused_at: r.last_focused_at,
-                    is_focused: r.is_focused,
-                })
-                .collect(),
-            focused_workspace_id: focused.map(|r| r.workspace_id),
-            pinned_workspace_ids: pinned_ids,
-            unread_indicators,
-        })
-    })
-    .await
-    .map_err(join_err)?
 }
 
 // ---- Pin/unpin commands ----
