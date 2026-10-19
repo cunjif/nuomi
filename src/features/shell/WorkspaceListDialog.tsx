@@ -14,17 +14,7 @@ import { Icon } from "../../components/ui/Icon/Icon";
 import { useUiStore } from "../../lib/store/uiStore";
 import { RECENT_WORKSPACES_KEY } from "../../lib/store/workspaceQueries";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
-
-const COLOR_MAP: Record<string, string> = {
-  "paper-yellow": "bg-amber-300",
-  "ink-blue": "bg-blue-500",
-  "moss-green": "bg-green-500",
-  "brick-red": "bg-red-500",
-  "violet": "bg-purple-500",
-  "ochre-orange": "bg-orange-500",
-  "slate-gray": "bg-slate-400",
-  "pink-rose": "bg-pink-400",
-};
+import { workspaceColorClass } from "./workspaceColors";
 
 function WorkspaceRow({
   ws,
@@ -61,7 +51,7 @@ function WorkspaceRow({
     >
       <span
         aria-hidden="true"
-        className={`inline-block size-2.5 rounded-full border border-ink-muted/40 ${COLOR_MAP[ws.colorTag] ?? "bg-ink-muted"}`}
+        className={`inline-block size-2.5 rounded-full border border-ink-muted/40 ${workspaceColorClass(ws.colorTag)}`}
       />
       {ws.isPinned === true && (
         <span aria-label={t("workspace.pin")} className="text-[10px] text-ink-accent">★</span>

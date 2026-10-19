@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useUiStore } from "../../lib/store/uiStore";
 import { ipc } from "../../lib/ipc/client";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
+import { workspaceColorClass } from "./workspaceColors";
 
 /**
  * Overview grid: monitoring surface over the open workspace (single-open,
@@ -27,7 +28,7 @@ export function OverviewGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-6 py-2 text-xs text-paper-muted bg-paper-surface/50 border-b border-paper-line/30">
+      <div className="flex items-center gap-2 px-6 py-2 text-xs text-ink-muted bg-surface/50 border-b border-divider">
         <span>{t("workspace.overviewHint")}</span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 p-6 flex-1 overflow-auto">
@@ -38,19 +39,18 @@ export function OverviewGrid() {
               void switchToWorkspace(ws.id);
               void setLayoutMode("single");
             }}
-            className="flex flex-col gap-2 p-4 rounded-lg border border-paper-line/40 bg-paper-bg hover:border-paper-accent/60 transition-colors text-left"
+            className="flex flex-col gap-2 p-4 rounded-lg border border-divider bg-surface hover:border-ink-accent/60 transition-colors text-left"
           >
             <div className="flex items-center gap-2">
               <span
-                className="w-3 h-3 rounded-full shrink-0"
-                style={{ backgroundColor: `var(--color-${ws.colorTag})` }}
+                className={`w-3 h-3 rounded-full shrink-0 ${workspaceColorClass(ws.colorTag)}`}
               />
               <span className="font-medium truncate" title={ws.labelFull ?? ws.rootPath}>
                 {ws.label ?? ws.id}
               </span>
             </div>
-            <span className="text-xs text-paper-muted truncate">{ws.labelFull ?? ws.rootPath}</span>
-            <div className="flex items-center gap-3 text-xs text-paper-muted">
+            <span className="text-xs text-ink-muted truncate">{ws.labelFull ?? ws.rootPath}</span>
+            <div className="flex items-center gap-3 text-xs text-ink-muted">
               <span>
                 {ws.directoryPresent
                   ? `✓ ${t("workspace.dirAccessible")}`

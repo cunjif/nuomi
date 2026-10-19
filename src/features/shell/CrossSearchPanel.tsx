@@ -48,17 +48,17 @@ export function CrossSearchPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-paper-bg">
-      <div className="flex items-center gap-2 p-3 border-b border-paper-line/30">
+    <div className="flex flex-col h-full bg-surface">
+      <div className="flex items-center gap-2 p-3 border-b border-divider">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && search()}
           placeholder={t("crossSearch.placeholder")}
-          className="flex-1 px-3 py-1.5 rounded-md border border-paper-line/40 bg-paper-bg text-sm focus:outline-none focus:border-paper-accent"
+          className="flex-1 px-3 py-1.5 rounded-md border border-divider bg-surface text-sm focus:outline-none focus:border-ink-accent"
         />
-        <label className="flex items-center gap-1 text-xs text-paper-muted">
+        <label className="flex items-center gap-1 text-xs text-ink-muted">
           <input
             type="checkbox"
             checked={matchContent}
@@ -69,36 +69,36 @@ export function CrossSearchPanel() {
         <button
           onClick={search}
           disabled={searching}
-          className="px-3 py-1.5 rounded-md bg-paper-accent text-paper-bg text-sm disabled:opacity-50"
+          className="px-3 py-1.5 rounded-md bg-ink-accent text-surface text-sm disabled:opacity-50"
         >
           {searching ? t("crossSearch.searching") : t("crossSearch.search")}
         </button>
       </div>
       <div className="flex-1 overflow-auto p-3">
         {result && result.skippedWorkspaceIds.length > 0 && (
-          <div className="mb-3 p-2 rounded-md bg-paper-warn/10 text-xs text-paper-warn">
+          <div className="mb-3 p-2 rounded-md bg-state-warn/10 text-xs text-state-warn">
             {t("crossSearch.skipped", { count: result.skippedWorkspaceIds.length })}
           </div>
         )}
         {result?.groups.map((group) => (
           <div key={group.workspaceId} className="mb-4">
             <div className="flex items-center gap-2 mb-1 text-sm font-medium">
-              <span className="text-paper-muted">📁</span>
+              <span className="text-ink-muted">📁</span>
               {group.workspaceName}
             </div>
             {group.matches.map((match, i) => (
               <div
                 key={i}
                 onClick={() => handleOpenMatch(group.workspaceId, match.relativePath)}
-                className="ml-6 py-0.5 text-sm text-paper-muted hover:text-paper-fg cursor-pointer"
+                className="ml-6 py-0.5 text-sm text-ink-muted hover:text-ink cursor-pointer"
                 title={activeWorkspaceId !== null ? t("crossSearch.openFromHint", { name: group.workspaceName }) : t("crossSearch.selectWorkspaceHint")}
               >
                 {match.relativePath}
-                <span className="ml-2 text-xs text-paper-faint">
+                <span className="ml-2 text-xs text-ink-muted/60">
                   {match.matchType === "fileName" ? t("crossSearch.matchTypeFileName") : t("crossSearch.matchTypeContent")}
                 </span>
                 {activeWorkspaceId !== null && group.workspaceId !== activeWorkspaceId && (
-                  <span className="ml-2 text-xs text-paper-accent">{t("crossSearch.pullToCurrent")}</span>
+                  <span className="ml-2 text-xs text-ink-accent">{t("crossSearch.pullToCurrent")}</span>
                 )}
               </div>
             ))}

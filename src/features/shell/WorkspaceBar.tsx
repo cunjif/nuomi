@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { ipc } from "../../lib/ipc/client";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
+import { workspaceColorClass } from "./workspaceColors";
 
 export function WorkspaceBar() {
   // Single-open (ADR-0021): the bar lists the open workspace only; the
@@ -63,7 +64,7 @@ export function WorkspaceBar() {
 
   return (
     <div
-      className="flex items-center gap-1 px-2 h-9 border-b border-paper-line/30 bg-paper-bg/50 overflow-x-auto"
+      className="flex items-center gap-1 px-2 h-9 border-b border-divider bg-surface/50 overflow-x-auto"
       style={{ contain: "inline-size" }}
     >
       {sorted.map((ws) => {
@@ -77,20 +78,19 @@ export function WorkspaceBar() {
             style={{ contain: "layout style" }}
             className={`group flex items-center gap-1.5 px-3 py-1 rounded-t-md text-sm transition-colors ${
               isFocused
-                ? "bg-paper-bg border-b-2 border-paper-accent"
-                : "hover:bg-paper-bg/60"
+                ? "bg-surface border-b-2 border-ink-accent"
+                : "hover:bg-surface/60"
             }`}
           >
             <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: `var(--color-${ws.colorTag})` }}
+              className={`w-2 h-2 rounded-full shrink-0 ${workspaceColorClass(ws.colorTag)}`}
             />
             <span className="truncate max-w-32">
               {ws.label ?? ws.id}
             </span>
-            {isPinned && <span className="text-xs text-paper-muted">★</span>}
+            {isPinned && <span className="text-xs text-ink-muted">★</span>}
             {unreadCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-paper-accent text-paper-bg">
+              <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-ink-accent text-surface">
                 {unreadCount}
               </span>
             )}
@@ -104,7 +104,7 @@ export function WorkspaceBar() {
                     .then(() => useUiStore.getState().syncOpenWorkspace())
                     .catch(() => { /* close failures surface via open-state sync */ });
                 }}
-                className="ml-1 text-xs text-paper-muted opacity-0 group-hover:opacity-100 hover:text-paper-fg"
+                className="ml-1 text-xs text-ink-muted opacity-0 group-hover:opacity-100 hover:text-ink"
               >
                 ×
               </span>

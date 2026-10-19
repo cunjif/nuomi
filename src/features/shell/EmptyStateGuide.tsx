@@ -44,18 +44,18 @@ export function EmptyStateGuide() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 p-8">
       <div className="text-center">
-        <h2 className="text-xl font-medium text-paper-fg mb-2">{t("workspace.emptyTitle")}</h2>
-        <p className="text-sm text-paper-muted">{t("workspace.emptyBody")}</p>
+        <h2 className="text-xl font-medium text-ink mb-2">{t("workspace.emptyTitle")}</h2>
+        <p className="text-sm text-ink-muted">{t("workspace.emptyBody")}</p>
       </div>
       <button
         onClick={handleOpenDirectory}
-        className="px-4 py-2 rounded-md bg-paper-accent text-paper-bg text-sm hover:opacity-90"
+        className="px-4 py-2 rounded-md bg-ink-accent text-surface text-sm hover:opacity-90"
       >
         {t("workspace.openDirectory")}
       </button>
       {recentWorkspaces && recentWorkspaces.length > 0 && (
         <div className="w-full max-w-md">
-          <h3 className="text-sm font-medium text-paper-fg mb-2">{t("workspace.recentTitle")}</h3>
+          <h3 className="text-sm font-medium text-ink mb-2">{t("workspace.recentTitle")}</h3>
           <div className="flex flex-col gap-1">
             {recentWorkspaces.map((ws) => (
               <button
@@ -66,13 +66,13 @@ export function EmptyStateGuide() {
                 }}
                 title={ws.anomaly ? t("workspace.anomaly") : (ws.labelFull ?? undefined)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm text-left ${
-                  ws.anomaly ? "cursor-not-allowed opacity-50" : "hover:bg-paper-bg/60"
+                  ws.anomaly ? "cursor-not-allowed opacity-50" : "hover:bg-surface/60"
                 }`}
               >
-                {ws.isPinned && <span className="text-xs text-paper-accent">★</span>}
+                {ws.isPinned && <span className="text-xs text-ink-accent">★</span>}
                 <span className="flex-1 truncate">{ws.label ?? ws.workspaceId}</span>
                 {ws.anomaly && <span className="text-xs text-state-warn">⚠</span>}
-                <span className="text-xs text-paper-faint">
+                <span className="text-xs text-ink-muted/60">
                   {new Date(ws.lastUsedAt).toLocaleDateString()}
                 </span>
               </button>
