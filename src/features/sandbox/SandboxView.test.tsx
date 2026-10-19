@@ -31,6 +31,7 @@ function seedTask(partial: Partial<SandboxTaskDto>): SandboxTaskDto {
     artifactRetryable: false,
     exitInfo: "exit 0",
     durationMs: 12,
+    usage: null,
     createdAt: now,
     finishedAt: now + 12,
     ...partial,
@@ -56,6 +57,18 @@ describe("SandboxView — task list + detail (task 7.7)", () => {
     expect(screen.getByLabelText("stdout")).toHaveTextContent("hello from sandbox");
     expect(screen.getByText("exit 0")).toBeInTheDocument();
     expect(screen.getByText("耗时 12 ms")).toBeInTheDocument();
+  });
+
+  it("shows executor-reported usage in the detail header", async () => {
+    tdState.sandboxTasks.push(
+      seedTask({ id: "sbx-usage", usage: { cpuTimeMs: 120, peakMemoryMb: 64 } }),
+    );
+
+    renderWithProviders(<SandboxView />);
+
+    fireEvent.click(await screen.findByText("sbx-usage"));
+    expect(await screen.findByText("CPU 120 ms")).toBeInTheDocument();
+    expect(screen.getByText("峰值内存 64 MB")).toBeInTheDocument();
   });
 
   it("submits a run task from the dialog and lists it", async () => {

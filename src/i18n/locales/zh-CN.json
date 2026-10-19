@@ -1119,6 +1119,8 @@
     "cancelTask": "取消任务",
     "cancelRequested": "已请求取消",
     "duration": "耗时 {{ms}} ms",
+    "usageCpu": "CPU {{ms}} ms",
+    "usageMemory": "峰值内存 {{mb}} MB",
     "artifact": "产物",
     "artifactMissing": "产物回传失败",
     "artifactRetry": "重试回传",

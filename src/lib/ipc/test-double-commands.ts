@@ -1698,6 +1698,7 @@ export function testDoubleCommands(): CommandSet {
         artifactRetryable: false,
         exitInfo: "exit 0",
         durationMs: 10,
+        usage: { cpuTimeMs: 120, peakMemoryMb: 64 },
         createdAt: now,
         finishedAt: now,
       };
@@ -1734,6 +1735,7 @@ export function testDoubleCommands(): CommandSet {
         artifactRetryable: false,
         exitInfo: "exit 0",
         durationMs: 10,
+        usage: { cpuTimeMs: 900, peakMemoryMb: 256 },
         createdAt: now,
         finishedAt: now,
       };

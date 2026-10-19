@@ -1119,6 +1119,8 @@
     "cancelTask": "Cancel task",
     "cancelRequested": "Cancellation requested",
     "duration": "{{ms}} ms",
+    "usageCpu": "CPU {{ms}} ms",
+    "usageMemory": "peak {{mb}} MB",
     "artifact": "Artifact",
     "artifactMissing": "Artifact transfer failed",
     "artifactRetry": "Retry transfer",

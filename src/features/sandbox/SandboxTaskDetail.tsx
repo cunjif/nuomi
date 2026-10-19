@@ -68,6 +68,12 @@ export function SandboxTaskDetail({ task }: { task: SandboxTaskDto }): ReactNode
         {task.durationMs !== null && (
           <span className="text-xs text-ink-muted">{t("sandbox.duration", { ms: task.durationMs })}</span>
         )}
+        {task.usage?.cpuTimeMs != null && (
+          <span className="text-xs text-ink-muted">{t("sandbox.usageCpu", { ms: task.usage.cpuTimeMs })}</span>
+        )}
+        {task.usage?.peakMemoryMb != null && (
+          <span className="text-xs text-ink-muted">{t("sandbox.usageMemory", { mb: task.usage.peakMemoryMb })}</span>
+        )}
         {task.exitInfo !== null && (
           <span className="font-mono text-xs text-ink-muted">{task.exitInfo}</span>
         )}
