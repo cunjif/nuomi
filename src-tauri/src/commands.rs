@@ -6220,6 +6220,11 @@ pub struct WorkspaceEntryDto {
     /// disabled in switch/recent lists (spec 5.5.3-2c).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anomaly: Option<bool>,
+    /// Unread task completions/failures and pending approvals since
+    /// `last_focused_at` — open workspaces only, `None` when zero/closed
+    /// (the unread indicator the retired `get_open_set` shim carried).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_count: Option<i64>,
 }
 
 /// A work directory of a workspace (two-level model, ADR-0021).
@@ -6443,6 +6448,17 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                     let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
                     let label = nuomi_core::services::derive_label(&dir_entries);
                     let anomaly = anomaly_ids.contains(&wp.entry.id);
+                    // Unread indicator (open workspaces only): count failures
+                    // are tolerated, mirroring the retired get_open_set shim.
+                    let unread_count = os.and_then(|r| {
+                        repos::tasks_runs::count_unread_since(
+                            &db.0,
+                            &wp.entry.id,
+                            r.last_focused_at,
+                        )
+                        .ok()
+                        .filter(|&c| c > 0)
+                    });
                     // Active-directory marking only for the open workspace —
                     // the resolver chain (slotted, else first mounted+available).
                     let active_id = os.and_then(|_| {
@@ -6474,6 +6490,7 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                         label_full: optional_label(&label.label_full),
                         directories: Some(work_directory_dtos(&dirs, active_id.as_deref())),
                         anomaly: Some(anomaly),
+                        unread_count,
                     })
                 })
                 .collect()
@@ -6572,6 +6589,7 @@ fn workspace_view_to_dto(
         // The open workspace passed the v2 open gate (directories exist), so
         // migration anomalies only surface via list/recent views.
         anomaly: None,
+        unread_count: None,
     }
 }
 
@@ -6636,6 +6654,7 @@ pub async fn impl_add_workspace(
         label_full: None,
         directories: None,
         anomaly: None,
+        unread_count: None,
     })
 }
 
@@ -6708,6 +6727,7 @@ pub async fn impl_activate_workspace(
         label_full: None,
         directories: None,
         anomaly: None,
+        unread_count: None,
     })
 }
 
@@ -6736,6 +6756,7 @@ pub async fn impl_get_active_workspace(
             label_full: None,
             directories: None,
             anomaly: None,
+            unread_count: None,
         }
     }))
 }
@@ -6959,6 +6980,28 @@ pub async fn impl_workspace_unmount_directory(
     })
     .await
     .map_err(join_err)?
+}
+
+/// Closes the open workspace (ADR-0021 single-open): the registry row and
+/// its directories stay intact — reopening restores the workspace. The v2
+/// replacement for the retired `close_workspace` shim. Idempotent; returns
+/// whether the workspace was open.
+pub async fn impl_workspace_close(
+    state: &AppState,
+    workspace_id: String,
+) -> Result<bool, IpcError> {
+    let db_path = state.db_path.clone();
+    let id_for_close = workspace_id.clone();
+    let was_open = tokio::task::spawn_blocking(move || -> Result<bool, IpcError> {
+        let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+        Ok(svc.close(&id_for_close)?)
+    })
+    .await
+    .map_err(join_err)??;
+    // Empty state: drop the active-directory slot so the resolver chain
+    // starts clean when the next workspace opens.
+    state.clear_active_directory(&workspace_id, None);
+    Ok(was_open)
 }
 
 pub async fn impl_workspace_switch(

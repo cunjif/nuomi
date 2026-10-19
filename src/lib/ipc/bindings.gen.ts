@@ -550,6 +550,14 @@ async workspaceUnmountDirectory(workspaceId: string, directoryId: string) : Prom
     else return { status: "error", error: e  as any };
 }
 },
+async workspaceClose(workspaceId: string) : Promise<Result<boolean, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_close", { workspaceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async workspaceSwitch(workspaceId: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("workspace_switch", { workspaceId }) };
@@ -2038,7 +2046,13 @@ directories?: WorkDirectoryDto[] | null;
  * during the 0036 correction) — anomalous workspaces are surfaced
  * disabled in switch/recent lists (spec 5.5.3-2c).
  */
-anomaly?: boolean | null }
+anomaly?: boolean | null; 
+/**
+ * Unread task completions/failures and pending approvals since
+ * `last_focused_at` — open workspaces only, `None` when zero/closed
+ * (the unread indicator the retired `get_open_set` shim carried).
+ */
+unreadCount?: number | null }
 /**
  * Workspace contract: the active sandbox root plus whether the workspace has
  * been configured (`app_settings` row exists or `NUOMI_WORKSPACE_ROOT` env

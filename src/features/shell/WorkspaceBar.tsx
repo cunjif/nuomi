@@ -2,19 +2,8 @@ import { useEffect, useRef } from "react";
 import { useUiStore } from "../../lib/store/uiStore";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "../../lib/ipc/client";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
-
-interface UnreadIndicatorDto {
-  workspaceId: string;
-  count: number;
-}
-
-interface OpenSetDto {
-  openWorkspaces: { workspaceId: string; openedAt: number; lastFocusedAt: number; isFocused: boolean }[];
-  focusedWorkspaceId: string | null;
-  pinnedWorkspaceIds: string[];
-  unreadIndicators: UnreadIndicatorDto[];
-}
 
 export function WorkspaceBar() {
   // Single-open (ADR-0021): the bar lists the open workspace only; the
@@ -24,11 +13,8 @@ export function WorkspaceBar() {
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
     queryFn: () => invoke<WorkspaceEntryDto[]>("list_workspaces"),
-  });
-
-  const { data: openSet } = useQuery({
-    queryKey: ["open-set"],
-    queryFn: () => invoke<OpenSetDto>("get_open_set"),
+    // Unread indicators ride the same query (unreadCount on the DTO) — the
+    // 5s cadence matches the retired get_open_set polling.
     refetchInterval: 5000,
   });
 
@@ -57,7 +43,9 @@ export function WorkspaceBar() {
   }, []);
 
   const unreadMap = new Map(
-    (openSet?.unreadIndicators ?? []).map((u) => [u.workspaceId, u.count]),
+    (workspaces ?? [])
+      .filter((w) => (w.unreadCount ?? 0) > 0)
+      .map((w) => [w.id, w.unreadCount ?? 0]),
   );
 
   const openWorkspaces = (workspaces ?? []).filter((w) =>
@@ -110,10 +98,9 @@ export function WorkspaceBar() {
               <span
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Retirement shim (alive for one version cycle): v2 closes
-                  // via removing the last directory or switching; the
-                  // dedicated surface lands with task 6.7.
-                  void invoke("close_workspace", { id: ws.id, force: true })
+                  // v2 close (ADR-0021): drops the open state only — the
+                  // registry row and directories stay, reopening restores.
+                  void ipc.workspaceClose(ws.id)
                     .then(() => useUiStore.getState().syncOpenWorkspace())
                     .catch(() => { /* close failures surface via open-state sync */ });
                 }}

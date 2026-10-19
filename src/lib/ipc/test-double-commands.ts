@@ -522,6 +522,19 @@ export function testDoubleCommands(): CommandSet {
       if (tdState.activeDirectoryId === directoryId) tdState.activeDirectoryId = null;
       return ok(null);
     },
+    async workspaceClose(workspaceId: string) {
+      // Mirror backend: idempotent close — the registry row and its
+      // directories stay intact, only the open state is dropped.
+      const target = (tdState.workspaces ?? []).find((w) => w.id === workspaceId);
+      if (!target) return err("workspace.not_found", `workspace #${workspaceId} not found`);
+      const wasOpen = target.isActive === true;
+      if (wasOpen) {
+        target.isActive = false;
+        target.isFocused = false;
+        tdState.activeDirectoryId = null;
+      }
+      return ok(wasOpen);
+    },
     async workspaceSwitch(id: string) {
       const existing = tdState.workspaces ?? [];
       const target = existing.find((w) => w.id === id);
