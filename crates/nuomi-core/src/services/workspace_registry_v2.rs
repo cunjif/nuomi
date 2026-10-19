@@ -471,6 +471,26 @@ fn emit_json(conn: &Connection, workspace_id: &str, kind: &str, payload: serde_j
     );
 }
 
+/// ADR-0021 `root_path` 兼容读取：v2 工作区的 `root_path` 列是 uuid 占位，
+/// 真实根目录从 `work_directories` 派生（available 目录，`added_at` 序）；
+/// 目录行为空或全部失效时回退 v1 语义（`root_path` 现场校验）。
+/// 返回空 vec 表示该工作区当前无可达根目录。
+pub fn compat_roots(conn: &Connection, ws: &WorkspaceEntry) -> Result<Vec<PathBuf>, StoreError> {
+    let mut roots: Vec<PathBuf> =
+        work_directories::list_by_workspace_with_availability(conn, &ws.id)?
+            .iter()
+            .filter(|d| d.available)
+            .map(|d| PathBuf::from(&d.directory.abs_path))
+            .collect();
+    if roots.is_empty() {
+        let legacy = Path::new(&ws.root_path);
+        if legacy.is_dir() {
+            roots.push(legacy.to_path_buf());
+        }
+    }
+    Ok(roots)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use thiserror::Error;
 
+use super::workspace_registry_v2::compat_roots;
 use crate::store::repos::workspace_open_state;
 use crate::store::repos::workspaces;
 use crate::store::{migrations, Db, StoreError};
@@ -116,15 +117,21 @@ impl CrossWorkspaceService {
                 }
             };
 
-            let root = Path::new(&ws.root_path);
-            if !root.is_dir() {
+            // ADR-0021 root_path 兼容读取：v2 工作区从 work_directories 派生
+            // 根目录（可能多个，全部搜索）；v1 回退 root_path。
+            let roots = compat_roots(&conn, &ws)?;
+            if roots.is_empty() {
                 skipped.push(ws.id.clone());
                 continue;
             }
 
-            let matches = search_in_workspace(root, query, match_content)?;
+            let mut matches = Vec::new();
+            for root in &roots {
+                matches.extend(search_in_workspace(root, query, match_content)?);
+            }
+            matches.truncate(100);
             if !matches.is_empty() {
-                let name = root
+                let name = roots[0]
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| ws.id.clone());
@@ -154,15 +161,7 @@ impl CrossWorkspaceService {
         let ws = workspaces::find_by_id(&conn, source_workspace_id)?
             .ok_or_else(|| CrossWorkspaceError::NotFound(source_workspace_id.to_string()))?;
 
-        let root = Path::new(&ws.root_path);
-        if !root.is_dir() {
-            return Err(CrossWorkspaceError::DirectoryMissing(ws.root_path.clone()));
-        }
-
-        let full_path = root.join(file_path);
-        if !full_path.is_file() {
-            return Err(CrossWorkspaceError::FileNotFound(file_path.to_string()));
-        }
+        let full_path = resolve_file(&conn, &ws, file_path)?;
 
         let content = std::fs::read_to_string(&full_path)?;
         Ok(FileReference {
@@ -186,15 +185,8 @@ impl CrossWorkspaceService {
         let ws_b = workspaces::find_by_id(&conn, workspace_b)?
             .ok_or_else(|| CrossWorkspaceError::NotFound(workspace_b.to_string()))?;
 
-        let path_a = Path::new(&ws_a.root_path).join(file_a);
-        let path_b = Path::new(&ws_b.root_path).join(file_b);
-
-        if !path_a.is_file() {
-            return Err(CrossWorkspaceError::FileNotFound(file_a.to_string()));
-        }
-        if !path_b.is_file() {
-            return Err(CrossWorkspaceError::FileNotFound(file_b.to_string()));
-        }
+        let path_a = resolve_file(&conn, &ws_a, file_a)?;
+        let path_b = resolve_file(&conn, &ws_b, file_b)?;
 
         let content_a = std::fs::read_to_string(&path_a)?;
         let content_b = std::fs::read_to_string(&path_b)?;
@@ -209,6 +201,25 @@ impl CrossWorkspaceService {
             content_b,
         })
     }
+}
+
+/// Resolves `file_path` inside a workspace's compat roots: v2 multi-directory
+/// workspaces probe every available directory in `added_at` order and the
+/// first hit wins; empty roots surface as `DirectoryMissing` (v1 semantics).
+fn resolve_file(
+    conn: &Connection,
+    ws: &workspaces::WorkspaceEntry,
+    file_path: &str,
+) -> Result<PathBuf, CrossWorkspaceError> {
+    let roots = compat_roots(conn, ws)?;
+    if roots.is_empty() {
+        return Err(CrossWorkspaceError::DirectoryMissing(ws.root_path.clone()));
+    }
+    roots
+        .iter()
+        .map(|r| r.join(file_path))
+        .find(|p| p.is_file())
+        .ok_or_else(|| CrossWorkspaceError::FileNotFound(file_path.to_string()))
 }
 
 /// Recursively searches files in a workspace root by file name (and optionally
@@ -393,5 +404,111 @@ mod tests {
 
         let diff = svc.compare_files(&ea.id, "f.txt", &eb.id, "f.txt").unwrap();
         assert!(diff.is_identical);
+    }
+
+    // --- ADR-0021 root_path 兼容读取（v2 uuid 占位工作区）---
+
+    /// Seeds a v2 workspace: `root_path` holds the uuid placeholder (ADR-0021)
+    /// and the real root only exists as a `work_directories` row.
+    fn seed_v2_workspace(svc: &CrossWorkspaceService, dir_root: &Path) -> String {
+        let conn = svc.conn().unwrap();
+        let id = uuid::Uuid::now_v7().to_string();
+        workspaces::insert(
+            &conn,
+            &workspaces::WorkspaceEntry {
+                id: id.clone(),
+                root_path: id.clone(),
+                color_tag: "ink-blue".to_string(),
+                created_at: crate::domain::now_ms(),
+                is_active: false,
+                is_pinned: false,
+            },
+        )
+        .unwrap();
+        crate::store::repos::work_directories::add(
+            &conn,
+            &id,
+            &dir_root.to_string_lossy(),
+            "v2dir",
+        )
+        .unwrap();
+        id
+    }
+
+    #[test]
+    fn v2_uuid_placeholder_workspace_is_searchable() {
+        let (svc, open_svc, _reg, dir) = setup();
+        let ws_dir = dir.path().join("v2proj");
+        fs::create_dir_all(&ws_dir).unwrap();
+        fs::write(ws_dir.join("hello.txt"), "content").unwrap();
+        let id = seed_v2_workspace(&svc, &ws_dir);
+
+        open_svc.open(&id).unwrap();
+        let outcome = svc.search_all_open("hello", false).unwrap();
+        assert_eq!(outcome.groups.len(), 1);
+        assert_eq!(outcome.groups[0].workspace_id, id);
+        assert!(!outcome.groups[0].matches.is_empty());
+        assert!(outcome.skipped_workspace_ids.is_empty());
+    }
+
+    #[test]
+    fn v2_reference_probes_directories_in_added_order() {
+        let (svc, _open_svc, _reg, dir) = setup();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        fs::write(second.join("only-in-second.txt"), "hit").unwrap();
+        let id = seed_v2_workspace(&svc, &first);
+        {
+            let conn = svc.conn().unwrap();
+            crate::store::repos::work_directories::add(
+                &conn,
+                &id,
+                &second.to_string_lossy(),
+                "second",
+            )
+            .unwrap();
+        }
+
+        let reference = svc
+            .create_file_reference(&id, "only-in-second.txt")
+            .unwrap();
+        assert_eq!(reference.content_snapshot, "hit");
+    }
+
+    #[test]
+    fn v2_compare_files_across_placeholder_roots() {
+        let (svc, _open_svc, _reg, dir) = setup();
+        let ws_a = dir.path().join("va");
+        let ws_b = dir.path().join("vb");
+        fs::create_dir_all(&ws_a).unwrap();
+        fs::create_dir_all(&ws_b).unwrap();
+        fs::write(ws_a.join("f.txt"), "same").unwrap();
+        fs::write(ws_b.join("f.txt"), "same").unwrap();
+        let ia = seed_v2_workspace(&svc, &ws_a);
+        let ib = seed_v2_workspace(&svc, &ws_b);
+
+        let diff = svc.compare_files(&ia, "f.txt", &ib, "f.txt").unwrap();
+        assert!(diff.is_identical);
+    }
+
+    #[test]
+    fn v2_workspace_with_stale_directory_is_skipped() {
+        let (svc, open_svc, _reg, dir) = setup();
+        // work_directories 行指向不存在的路径（repo 哑层不校验存在性），
+        // root_path 又是 uuid 占位 → 无可达根目录。
+        let ghost = dir.path().join("ghost");
+        let id = seed_v2_workspace(&svc, &ghost);
+
+        assert!(matches!(
+            open_svc.open(&id),
+            Err(crate::services::OpenSetError::DirectoryMissing(_))
+        ));
+        // 工作区不在 open 集合，搜索天然不触及；直接引用报 DirectoryMissing。
+        assert!(matches!(
+            svc.create_file_reference(&id, "any.txt"),
+            Err(CrossWorkspaceError::DirectoryMissing(_))
+        ));
     }
 }

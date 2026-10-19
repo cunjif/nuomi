@@ -97,5 +97,5 @@ pub use workspace_registry::{
     WorkspaceRegistry,
 };
 pub use workspace_registry_v2::{
-    RegistryV2Error, RemoveDirectoryResult, WorkspaceRegistryV2, WorkspaceView,
+    compat_roots, RegistryV2Error, RemoveDirectoryResult, WorkspaceRegistryV2, WorkspaceView,
 };

@@ -100,8 +100,11 @@ impl WorkspaceOpenSetService {
             return Err(OpenSetError::OpenSetFull(max_open));
         }
 
-        // Probe directory reachability.
-        if !std::path::Path::new(&entry.root_path).is_dir() {
+        // Probe directory reachability (ADR-0021 root_path 兼容读取：v2
+        // 工作区从 work_directories 派生根目录，任一可用即可打开；v1
+        // 回退 root_path 现场校验).
+        let roots = super::workspace_registry_v2::compat_roots(&conn, &entry)?;
+        if roots.is_empty() {
             return Err(OpenSetError::DirectoryMissing(entry.root_path.clone()));
         }
 
@@ -411,5 +414,54 @@ mod tests {
         let outcomes = svc.close_all(false).unwrap();
         assert_eq!(outcomes.len(), 2);
         assert!(svc.list_open().unwrap().is_empty());
+    }
+
+    // --- ADR-0021 root_path 兼容读取（v2 uuid 占位工作区）---
+
+    fn seed_v2_row(svc: &WorkspaceOpenSetService, dir_root: &Path) -> String {
+        let conn = svc.conn().unwrap();
+        let id = uuid::Uuid::now_v7().to_string();
+        workspaces::insert(
+            &conn,
+            &workspaces::WorkspaceEntry {
+                id: id.clone(),
+                root_path: id.clone(),
+                color_tag: "ink-blue".to_string(),
+                created_at: crate::domain::now_ms(),
+                is_active: false,
+                is_pinned: false,
+            },
+        )
+        .unwrap();
+        crate::store::repos::work_directories::add(
+            &conn,
+            &id,
+            &dir_root.to_string_lossy(),
+            "v2dir",
+        )
+        .unwrap();
+        id
+    }
+
+    #[test]
+    fn open_accepts_v2_uuid_placeholder_workspace() {
+        let (svc, _reg, dir) = setup();
+        let ws = make_ws_dir(dir.path(), "v2");
+        let id = seed_v2_row(&svc, &ws);
+        svc.open(&id).unwrap();
+        assert_eq!(svc.focused_id().unwrap().unwrap(), id);
+    }
+
+    #[test]
+    fn open_rejects_v2_workspace_with_stale_directory() {
+        let (svc, _reg, dir) = setup();
+        // work_directories 行指向不存在的路径（repo 哑层不校验存在性），
+        // root_path 又是 uuid 占位 → 无可达根目录。
+        let ghost = dir.path().join("ghost");
+        let id = seed_v2_row(&svc, &ghost);
+        assert!(matches!(
+            svc.open(&id),
+            Err(OpenSetError::DirectoryMissing(_))
+        ));
     }
 }
