@@ -359,6 +359,7 @@ export const ipc = {
   stewardOptimizePrompt: (sessionId: string, draft: string) => unwrap(current.stewardOptimizePrompt(sessionId, draft)),
   getContextUsage: (sessionId: string) => unwrap(current.getContextUsage(sessionId)),
   optimizePrompt: (sessionId: string, draft: string) => unwrap(current.optimizePrompt(sessionId, draft)),
+  stewardGetAttachmentLimit: () => unwrap(current.stewardGetAttachmentLimit()),
   stewardGetSettings: (sessionId: string) => unwrap(current.stewardGetSettings(sessionId)),
   stewardUpdateSoul: (sessionId: string, content: string) => unwrap(current.stewardUpdateSoul(sessionId, content)),
   stewardUpdateBinding: (sessionId: string, mode: BindingModeDto, providerId: string | null, agentProfileId: string | null) => unwrap(current.stewardUpdateBinding(sessionId, mode, providerId, agentProfileId)),

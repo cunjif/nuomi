@@ -1514,6 +1514,10 @@ export function testDoubleCommands(): CommandSet {
       };
       return ok(result);
     },
+    async stewardGetAttachmentLimit() {
+      // Mirror the backend default (app_settings override absent in tests).
+      return ok(10 * 1024 * 1024);
+    },
     async stewardGetSettings(_sessionId) {
       const settings: StewardSettingsDto = {
         soul: { content: null, maxLength: 16000 },

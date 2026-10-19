@@ -5,7 +5,11 @@
  * gives immediate feedback in the composer before a save round-trip.
  */
 
-/** Default per-file cap (design §2.1: `steward_attachment_max_bytes`, 10 MB). */
+/**
+ * Default per-file cap (design §2.1: `steward_attachment_max_bytes`, 10 MB).
+ * Fallback only — the live cap comes from `stewardGetAttachmentLimit`
+ * (app_settings); the backend save stays authoritative either way.
+ */
 export const STEWARD_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** Steward MIME whitelist — exact matches only (mirrors backend, 25 entries). */

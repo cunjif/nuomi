@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { Icon } from "../../components/ui/Icon/Icon";
@@ -56,6 +57,14 @@ export function StewardComposer({
   const { optimize, runOptimize, clearOptimize, describeOptimizeError } =
     usePromptOptimize(sessionId);
 
+  // Live attachment cap from app_settings (steward_attachment_max_bytes);
+  // the exported constant is only the fallback until the query settles.
+  const { data: attachmentLimit } = useQuery({
+    queryKey: ["steward", "attachment-limit"],
+    queryFn: () => ipc.stewardGetAttachmentLimit(),
+  });
+  const maxBytes = attachmentLimit ?? STEWARD_MAX_ATTACHMENT_BYTES;
+
   // Auto-grow: adjust textarea height to fit content, capped at ~12 rows
   // (same contract as the unified Composer).
   useEffect(() => {
@@ -76,11 +85,11 @@ export function StewardComposer({
             toast.error(t("steward.composer.unsupportedType", { name: file.name }));
             continue;
           }
-          if (file.size > STEWARD_MAX_ATTACHMENT_BYTES) {
+          if (file.size > maxBytes) {
             toast.error(
               t("steward.composer.tooLarge", {
                 name: file.name,
-                limit: formatSize(STEWARD_MAX_ATTACHMENT_BYTES),
+                limit: formatSize(maxBytes),
               }),
             );
             continue;
@@ -116,7 +125,7 @@ export function StewardComposer({
         setAttaching(false);
       }
     },
-    [sessionId, t],
+    [sessionId, t, maxBytes],
   );
 
   const removeAttachment = useCallback((id: string): void => {

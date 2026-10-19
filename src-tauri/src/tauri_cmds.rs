@@ -1357,6 +1357,14 @@ pub async fn steward_ensure_singleton_session(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn steward_get_attachment_limit(
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, IpcError> {
+    commands::impl_steward_get_attachment_limit(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn steward_get_settings(
     state: tauri::State<'_, AppState>,
     session_id: String,

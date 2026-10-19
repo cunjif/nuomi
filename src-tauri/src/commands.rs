@@ -8174,6 +8174,19 @@ pub struct StewardSettingsDto {
     pub message_stats: MessageStatsDto,
 }
 
+/// The configured per-file steward attachment cap
+/// (`steward_attachment_max_bytes`, default 10 MB) — the value the composer's
+/// client-side pre-check mirrors (the backend save stays authoritative).
+pub async fn impl_steward_get_attachment_limit(state: &AppState) -> Result<i64, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<i64, IpcError> {
+        let db = Db::open(&db_path)?;
+        Ok(nuomi_core::steward::attachments::load_max_bytes(&db.0) as i64)
+    })
+    .await
+    .map_err(join_err)?
+}
+
 pub async fn impl_steward_get_settings(
     state: &AppState,
     session_id: String,

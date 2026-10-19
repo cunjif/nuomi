@@ -1230,6 +1230,14 @@ async optimizePrompt(sessionId: string, draft: string) : Promise<Result<PromptOp
     else return { status: "error", error: e  as any };
 }
 },
+async stewardGetAttachmentLimit() : Promise<Result<number, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_get_attachment_limit") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async stewardGetSettings(sessionId: string) : Promise<Result<StewardSettingsDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("steward_get_settings", { sessionId }) };

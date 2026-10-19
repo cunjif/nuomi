@@ -189,6 +189,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::steward_optimize_prompt,
         tauri_cmds::get_context_usage,
         tauri_cmds::optimize_prompt,
+        tauri_cmds::steward_get_attachment_limit,
         tauri_cmds::steward_get_settings,
         tauri_cmds::steward_update_soul,
         tauri_cmds::steward_update_binding,
