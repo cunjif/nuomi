@@ -182,6 +182,7 @@ impl SandboxTaskManager {
             artifact_retryable: false,
             exit_info: None,
             duration_ms: None,
+            usage: None,
             created_at: now_ms(),
             finished_at: None,
         };
@@ -481,6 +482,12 @@ impl SandboxTaskManager {
                 now_ms(),
             )
             .map_err(store_err)?;
+            // Terminal usage lands on the row in the same audited
+            // transaction (spec 5.7.1-5); executors that never report
+            // usage leave the column NULL.
+            if let Some(usage) = transition.usage {
+                sandbox_tasks::set_usage(&tx, task_id, usage).map_err(store_err)?;
+            }
         }
         tx.commit().map_err(|e| store_err(e.into()))
     }
@@ -802,6 +809,59 @@ mod tests {
             fake.calls().as_slice(),
             [FakeExecutorCall::Submit { .. }]
         ));
+    }
+
+    #[tokio::test]
+    async fn terminal_usage_lands_on_the_row_and_survives_queries() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+        let record = manager
+            .submit(&conn, &spec_for("python", &["C:\\proj\\alpha"]))
+            .await
+            .unwrap();
+
+        let mut terminal = SandboxTaskSnapshot::terminal(
+            SandboxTaskStatus::Succeeded,
+            Some("exit 0".to_string()),
+            Some(1_234),
+        );
+        terminal.usage = Some(SandboxResourceUsage {
+            cpu_time_ms: Some(120),
+            peak_memory_mb: Some(64),
+        });
+        fake.set_poll_script(&record.id, vec![terminal]);
+
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        let expected = Some(SandboxResourceUsage {
+            cpu_time_ms: Some(120),
+            peak_memory_mb: Some(64),
+        });
+        assert_eq!(done.status, SandboxTaskStatus::Succeeded);
+        assert_eq!(done.usage, expected);
+
+        // Row-level queries return the usage too (spec 5.7.1-5a).
+        assert_eq!(manager.get_task(&conn, &record.id).unwrap().usage, expected);
+        let listed = manager.list_recent(&conn, 10).unwrap();
+        assert_eq!(listed.first().unwrap().usage, expected);
+    }
+
+    #[tokio::test]
+    async fn terminal_without_reported_usage_keeps_column_null() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let record = manager
+            .submit(&conn, &spec_for("python", &["C:\\proj\\alpha"]))
+            .await
+            .unwrap();
+
+        // Default script: running → succeeded without usage.
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        assert_eq!(done.status, SandboxTaskStatus::Succeeded);
+        assert_eq!(done.usage, None);
+        assert_eq!(manager.get_task(&conn, &record.id).unwrap().usage, None);
     }
 
     /// Iron-rule probe: opens its OWN connection and checks whether the
@@ -1166,6 +1226,7 @@ mod tests {
             artifact_retryable: false,
             exit_info: None,
             duration_ms: None,
+            usage: None,
             created_at: now_ms() - age_ms,
             finished_at: None,
         }

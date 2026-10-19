@@ -11,10 +11,12 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::sandbox::types::{dirs_from_json, SandboxLimits, SandboxTaskStatus, SandboxTaskType};
+use crate::sandbox::types::{
+    dirs_from_json, SandboxLimits, SandboxResourceUsage, SandboxTaskStatus, SandboxTaskType,
+};
 use crate::store::StoreError;
 
-/// A `sandbox_tasks` row (mirrors migration 0037).
+/// A `sandbox_tasks` row (mirrors migrations 0037 + 0038).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxTaskRecord {
     pub id: String,
@@ -32,6 +34,9 @@ pub struct SandboxTaskRecord {
     pub artifact_retryable: bool,
     pub exit_info: Option<String>,
     pub duration_ms: Option<u64>,
+    /// Executor-reported terminal usage, stored as the `usage` JSON object
+    /// column (migration 0038); `None` when the executor never reported.
+    pub usage: Option<SandboxResourceUsage>,
     /// unix-ms
     pub created_at: i64,
     /// unix-ms; `None` while non-terminal
@@ -46,8 +51,8 @@ pub fn insert(conn: &Connection, record: &SandboxTaskRecord) -> Result<(), Store
         "INSERT INTO sandbox_tasks
            (id, task_type, runtime, status, source, authorized_dirs, limits,
             stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-            duration_ms, created_at, finished_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            duration_ms, usage, created_at, finished_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             record.id,
             record.task_type.as_str(),
@@ -62,6 +67,11 @@ pub fn insert(conn: &Connection, record: &SandboxTaskRecord) -> Result<(), Store
             record.artifact_retryable,
             record.exit_info,
             record.duration_ms,
+            record
+                .usage
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
             record.created_at,
             record.finished_at,
         ],
@@ -74,7 +84,7 @@ pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<SandboxTaskRecor
     conn.query_row(
         "SELECT id, task_type, runtime, status, source, authorized_dirs, limits,
                 stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-                duration_ms, created_at, finished_at
+                duration_ms, usage, created_at, finished_at
          FROM sandbox_tasks WHERE id = ?1",
         params![id],
         row_to_record,
@@ -88,7 +98,7 @@ pub fn list_recent(conn: &Connection, limit: u32) -> Result<Vec<SandboxTaskRecor
     let mut stmt = conn.prepare(
         "SELECT id, task_type, runtime, status, source, authorized_dirs, limits,
                 stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-                duration_ms, created_at, finished_at
+                duration_ms, usage, created_at, finished_at
          FROM sandbox_tasks ORDER BY created_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_record)?;
@@ -137,6 +147,21 @@ pub fn mark_terminal(
     Ok(())
 }
 
+/// Records the executor-reported terminal usage onto the row
+/// (migration 0038). Called inside the audited terminal transition's
+/// transaction, after `mark_terminal`.
+pub fn set_usage(
+    conn: &Connection,
+    id: &str,
+    usage: &SandboxResourceUsage,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE sandbox_tasks SET usage = ?2 WHERE id = ?1",
+        params![id, serde_json::to_string(usage)?],
+    )?;
+    Ok(())
+}
+
 /// Grows the inline output columns (the executor-side delta since the
 /// row's current cursor, i.e. `stdout.len()` / `stderr.len()`).
 pub fn append_output(
@@ -173,6 +198,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SandboxTaskRecord>
     let dirs_raw: String = row.get(5)?;
     let limits_raw: String = row.get(6)?;
     let retryable: i64 = row.get(10)?;
+    let usage_raw: Option<String> = row.get(13)?;
     Ok(SandboxTaskRecord {
         id: row.get(0)?,
         task_type: parse_enum(1, &task_type_raw, SandboxTaskType::parse)?,
@@ -191,8 +217,18 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SandboxTaskRecord>
         artifact_retryable: retryable != 0,
         exit_info: row.get(11)?,
         duration_ms: row.get(12)?,
-        created_at: row.get(13)?,
-        finished_at: row.get(14)?,
+        usage: usage_raw
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    13,
+                    rusqlite::types::Type::Text,
+                    format!("corrupt sandbox usage JSON: {e}").into(),
+                )
+            })?,
+        created_at: row.get(14)?,
+        finished_at: row.get(15)?,
     })
 }
 
@@ -239,6 +275,7 @@ mod tests {
             artifact_retryable: false,
             exit_info: None,
             duration_ms: None,
+            usage: None,
             created_at,
             finished_at: None,
         }
@@ -267,6 +304,49 @@ mod tests {
     fn find_missing_returns_none() {
         let conn = db();
         assert!(find_by_id(&conn, "ghost").unwrap().is_none());
+    }
+
+    #[test]
+    fn usage_roundtrips_via_insert_and_set_usage() {
+        let conn = db();
+        let mut with_usage = queued_record("t-usage", 7);
+        with_usage.usage = Some(SandboxResourceUsage {
+            cpu_time_ms: Some(120),
+            peak_memory_mb: Some(64),
+        });
+        insert(&conn, &with_usage).unwrap();
+        assert_eq!(
+            find_by_id(&conn, "t-usage").unwrap().unwrap().usage,
+            with_usage.usage
+        );
+
+        let plain = queued_record("t-plain", 8);
+        insert(&conn, &plain).unwrap();
+        assert_eq!(find_by_id(&conn, "t-plain").unwrap().unwrap().usage, None);
+        set_usage(
+            &conn,
+            "t-plain",
+            &SandboxResourceUsage {
+                cpu_time_ms: None,
+                peak_memory_mb: Some(32),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            find_by_id(&conn, "t-plain").unwrap().unwrap().usage,
+            Some(SandboxResourceUsage {
+                cpu_time_ms: None,
+                peak_memory_mb: Some(32),
+            })
+        );
+        // list_recent reads the same column.
+        assert_eq!(
+            list_recent(&conn, 10).unwrap()[0].usage,
+            Some(SandboxResourceUsage {
+                cpu_time_ms: None,
+                peak_memory_mb: Some(32),
+            })
+        );
     }
 
     #[test]

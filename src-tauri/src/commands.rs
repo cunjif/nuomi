@@ -9667,6 +9667,22 @@ impl From<SandboxLimitsDto> for nuomi_core::sandbox::types::SandboxLimits {
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
+pub struct SandboxResourceUsageDto {
+    pub cpu_time_ms: Option<u64>,
+    pub peak_memory_mb: Option<u64>,
+}
+
+impl From<nuomi_core::sandbox::types::SandboxResourceUsage> for SandboxResourceUsageDto {
+    fn from(u: nuomi_core::sandbox::types::SandboxResourceUsage) -> Self {
+        Self {
+            cpu_time_ms: u.cpu_time_ms,
+            peak_memory_mb: u.peak_memory_mb,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct SandboxTaskDto {
     pub id: String,
     pub task_type: String,
@@ -9681,6 +9697,9 @@ pub struct SandboxTaskDto {
     pub artifact_retryable: bool,
     pub exit_info: Option<String>,
     pub duration_ms: Option<u64>,
+    /// Executor-reported terminal usage (spec 5.7.1-5); `None` when the
+    /// executor never reported.
+    pub usage: Option<SandboxResourceUsageDto>,
     pub created_at: i64,
     pub finished_at: Option<i64>,
 }
@@ -9701,6 +9720,7 @@ impl From<nuomi_core::store::repos::sandbox_tasks::SandboxTaskRecord> for Sandbo
             artifact_retryable: r.artifact_retryable,
             exit_info: r.exit_info,
             duration_ms: r.duration_ms,
+            usage: r.usage.map(Into::into),
             created_at: r.created_at,
             finished_at: r.finished_at,
         }

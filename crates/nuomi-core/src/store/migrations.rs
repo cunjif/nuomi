@@ -297,6 +297,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0037_sandbox_tasks.sql"
         )),
     ),
+    (
+        38,
+        "0038_sandbox_task_usage",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0038_sandbox_task_usage.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -732,19 +740,19 @@ mod tests {
     #[test]
     fn migrations_steward_tables_idempotent_on_empty_db() {
         let conn = Connection::open_in_memory().unwrap();
-        // First run: applies all migrations 0001-0037
+        // First run: applies all migrations 0001-0038
         run(&conn).unwrap();
         let v1: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v1, 37);
+        assert_eq!(v1, 38);
 
-        // Second run: no-op (user_version already 37)
+        // Second run: no-op (user_version already 38)
         run(&conn).unwrap();
         let v2: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v2, 37);
+        assert_eq!(v2, 38);
 
         // Steward tables exist and are empty (except roles331 seeds 5 builtin roles)
         let steward_sessions: i64 = conn
@@ -964,12 +972,12 @@ mod tests {
         )
         .unwrap();
 
-        // Apply 0037 (run continues from user_version 36).
+        // Apply 0037+0038 (run continues from user_version 36).
         run(&conn).unwrap();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 37);
+        assert_eq!(version, 38);
 
         // Existing tables and rows are untouched (zero change to prior state).
         let ws_count: i64 = conn
@@ -1108,12 +1116,12 @@ mod tests {
         )
         .unwrap();
 
-        // Upgrade: 0036 -> 0037 in one run.
+        // Upgrade: 0036 -> 0038 in one run.
         run(&conn).unwrap();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 37);
+        assert_eq!(version, 38);
 
         // (1) Workspace <-> work directory: one backfilled directory per
         // workspace, mounted, added_at = created_at.

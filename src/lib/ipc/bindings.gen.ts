@@ -1859,9 +1859,15 @@ export type SandboxBuildAppRequest = { runtime: string;
  */
 source: string; limits: SandboxLimitsDto | null }
 export type SandboxLimitsDto = { timeoutSecs: number; cpuPercent: number | null; memoryMb: number | null; networkEnabled: boolean }
+export type SandboxResourceUsageDto = { cpuTimeMs: number | null; peakMemoryMb: number | null }
 export type SandboxRunCodeRequest = { runtime: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto | null }
 export type SandboxRuntimeDto = { id: string; name: string; isolation: string }
-export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; createdAt: number; finishedAt: number | null }
+export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; 
+/**
+ * Executor-reported terminal usage (spec 5.7.1-5); `None` when the
+ * executor never reported.
+ */
+usage: SandboxResourceUsageDto | null; createdAt: number; finishedAt: number | null }
 export type ScheduleDto = { id: string; name: string; cronExpr: string; taskTitle: string; taskDescription: string; enabled: boolean; targetKind: string; agent: AgentRefDto | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; lastTriggeredAt: number | null; nextTriggerAt: number | null; workspaceId: string; workspaceLabel: string | null }
 export type ScheduleInput = { name: string; cronExpr: string; targetKind: string; agent: AgentRefInput | null; teamId: string | null; sessionMode: string; sessionId: string | null; autoDispatch: boolean; taskTitle: string; taskDescription: string }
 /**
