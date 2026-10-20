@@ -27,6 +27,7 @@ import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
 import { WorkspaceSetup } from "./WorkspaceSetup";
 import { OverviewGrid } from "./OverviewGrid";
 import { EmptyStateGuide } from "./EmptyStateGuide";
+import { useIdleProposalTimer } from "./useIdleProposalTimer";
 
 type WorkspaceInfo = { root: string; configured: boolean };
 
@@ -144,6 +145,8 @@ export function Shell(): ReactNode {
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   useGlobalNavShortcuts();
   useGlobalPaletteShortcuts();
+  // Idle team-proposal liveness probe (ADR 0023): no-op outside Tauri.
+  useIdleProposalTimer();
   const queryClient = useQueryClient();
   // Kernel boot lifecycle as observed through events; the workspace query
   // poll below is the fallback signal when an event is missed.

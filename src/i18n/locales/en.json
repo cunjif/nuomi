@@ -759,6 +759,14 @@
         "retrievalHybrid": "Hybrid"
       }
     },
+    "idleProposal": {
+      "heading": "Idle team proposals",
+      "description": "When the app sits idle with a backlog of queued tasks, it drafts a team proposal for the approvals inbox (advisory only — nothing runs automatically).",
+      "enabled": "Draft team proposals while idle",
+      "timeoutMinutes": "Idle threshold (minutes)",
+      "saved": "Idle proposal settings saved",
+      "saveFailed": "Failed to save idle proposal settings"
+    },
     "memory": {
       "heading": "Memory",
       "rememberTitle": "Add a memory",

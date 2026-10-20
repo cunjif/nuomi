@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CliAgentsSection } from "./CliAgentsSection";
 import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
+import { IdleProposalSection } from "./IdleProposalSection";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
@@ -39,7 +40,12 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
     case "memory":
       return <MemorySection />;
     case "access":
-      return <EvolutionSettingsPanel />;
+      return (
+        <>
+          <EvolutionSettingsPanel />
+          <IdleProposalSection />
+        </>
+      );
   }
 }
 

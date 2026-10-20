@@ -759,6 +759,14 @@
         "retrievalHybrid": "混合"
       }
     },
+    "idleProposal": {
+      "heading": "空闲自发组队",
+      "description": "检测到长时间无操作且看板存在积压任务时，自动生成一份组队建议提案（仅建议，绝不自动执行）。",
+      "enabled": "空闲时生成组队建议",
+      "timeoutMinutes": "空闲判定时长（分钟）",
+      "saved": "空闲组队设置已保存",
+      "saveFailed": "空闲组队设置保存失败"
+    },
     "memory": {
       "heading": "记忆",
       "rememberTitle": "添加记忆",
