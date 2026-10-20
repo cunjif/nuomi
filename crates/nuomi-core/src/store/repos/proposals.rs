@@ -85,6 +85,29 @@ pub fn list_pending_by_workspace(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Whether a pending proposal of the given source already exists — the
+/// "at most one pending idle proposal" anti-nag gate (ADR 0023).
+pub fn has_pending_by_source(conn: &Connection, source: &str) -> Result<bool, StoreError> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM proposals WHERE source = ?1 AND status = 'pending'",
+        params![source],
+        |row| row.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// The most recent proposal of the given source regardless of status —
+/// the cooldown gate seed (ADR 0023); `None` when none exists yet.
+pub fn latest_by_source(conn: &Connection, source: &str) -> Result<Option<Proposal>, StoreError> {
+    Ok(conn
+        .query_row(
+            &proposal_select("WHERE source = ?1 ORDER BY created_at DESC LIMIT 1"),
+            params![source],
+            row_to_proposal,
+        )
+        .optional()?)
+}
+
 fn proposal_select(where_clause: &str) -> String {
     format!(
         "SELECT id, kind, source, plan_json, status, workspace_id, resolved_at, created_at
@@ -195,5 +218,35 @@ mod tests {
         let pending = list_pending(&conn).unwrap();
         assert_eq!(pending[0].id, "p1");
         assert_eq!(pending[1].id, "p2");
+    }
+
+    #[test]
+    fn source_queries_gate_on_pending_and_latest() {
+        let conn = db();
+        assert!(!has_pending_by_source(&conn, "idle").unwrap());
+        assert!(latest_by_source(&conn, "idle").unwrap().is_none());
+
+        // An idle proposal, already denied, two hours ago.
+        let mut old = proposal("p1", "__migrated__");
+        old.source = "idle".into();
+        old.status = ProposalStatus::Denied;
+        old.created_at = 100;
+        insert(&conn, &old).unwrap();
+        // A scheduled-source pending proposal must not affect the idle gates.
+        insert(&conn, &proposal("p2", "__migrated__")).unwrap();
+
+        assert!(!has_pending_by_source(&conn, "idle").unwrap());
+        assert!(has_pending_by_source(&conn, "scheduled").unwrap());
+        assert_eq!(latest_by_source(&conn, "idle").unwrap().unwrap().id, "p1");
+
+        // A pending idle proposal flips the gate on.
+        let mut pending = proposal("p3", "__migrated__");
+        pending.source = "idle".into();
+        insert(&conn, &pending).unwrap();
+        assert!(has_pending_by_source(&conn, "idle").unwrap());
+        // Latest by created_at is the pending row (created_at = 1) vs p1
+        // (100): order by created_at DESC picks p1; the gate only needs the
+        // most recent, which here is p1.
+        assert_eq!(latest_by_source(&conn, "idle").unwrap().unwrap().id, "p1");
     }
 }

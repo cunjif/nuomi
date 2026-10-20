@@ -9,6 +9,7 @@ pub mod conversation_service;
 pub mod cross_workspace;
 pub mod debug_event_publisher;
 pub mod git_service;
+pub mod idle_proposal;
 pub mod nuomi_dir;
 pub mod presets;
 pub mod reference_pre_check;
@@ -59,6 +60,11 @@ pub use git_service::{
     remove_worktree, worktree_path, CommitInfo, GitError, GitService, MergeIntent, RecoveryItem,
     StageAOutcome, StageBResult, StatusEntry, WorktreeInfo, WorktreeMergeError, BRANCH_PREFIX,
     NUOMI_META_DIR, WORKTREES_DIR,
+};
+pub use idle_proposal::{
+    backlog_prompt, evaluate as evaluate_idle_proposal, IdleCheckOutcome, IdleProposalConfig,
+    DEFAULT_TIMEOUT_MINUTES as IDLE_DEFAULT_TIMEOUT_MINUTES, IDLE_BACKLOG_KEY, IDLE_COOLDOWN_KEY,
+    IDLE_ENABLED_KEY, IDLE_TIMEOUT_KEY, MAX_BACKLOG_TASKS, SOURCE as IDLE_PROPOSAL_SOURCE,
 };
 pub use nuomi_dir::{codebase_memory_dir, ensure_nuomi_dir, NuomiDirError, NUOMI_DIR_NAME};
 pub use presets::{seed_builtin_roles, SeedReport, PRESET_ROLES};

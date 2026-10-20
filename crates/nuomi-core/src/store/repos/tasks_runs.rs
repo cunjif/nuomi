@@ -82,6 +82,24 @@ pub fn list_tasks_by_status(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Queued tasks of one workspace (the whole library when `workspace_id`
+/// is `None`), oldest first — the backlog scan for idle team proposals
+/// (ADR 0023).
+pub fn list_queued_tasks(
+    conn: &Connection,
+    workspace_id: Option<&str>,
+    limit: u32,
+) -> Result<Vec<Task>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
+         FROM tasks
+         WHERE status = 'queued' AND (?1 IS NULL OR workspace_id = ?1)
+         ORDER BY created_at ASC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![workspace_id, limit], row_to_task)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// Removes the task row itself; `Ok(false)` when no row matched. Children
 /// are NOT touched here — runs/approvals must be cleared first (the 0002
 /// FKs have no CASCADE); prefer [`delete_cascade`].
@@ -815,6 +833,42 @@ mod tests {
             list_tasks_by_status(&conn, TaskStatus::Done, 10).unwrap()[0].id,
             "t2"
         );
+    }
+
+    #[test]
+    fn queued_tasks_scope_workspace_and_order_oldest_first() {
+        let conn = db();
+        // Newest first in insertion order; the idle backlog scan must
+        // re-order oldest first (ADR 0023).
+        let mut ws_a_new = task("t3", TaskStatus::Queued);
+        ws_a_new.workspace_id = "ws-a".into();
+        ws_a_new.created_at = 30;
+        let mut ws_a_old = task("t1", TaskStatus::Queued);
+        ws_a_old.workspace_id = "ws-a".into();
+        ws_a_old.created_at = 10;
+        let mut ws_b = task("t2", TaskStatus::Queued);
+        ws_b.workspace_id = "ws-b".into();
+        ws_b.created_at = 20;
+        let done = task("t4", TaskStatus::Done);
+        insert_task(&conn, &ws_a_new).unwrap();
+        insert_task(&conn, &ws_a_old).unwrap();
+        insert_task(&conn, &ws_b).unwrap();
+        insert_task(&conn, &done).unwrap();
+
+        let ws_a_queued = list_queued_tasks(&conn, Some("ws-a"), 10).unwrap();
+        assert_eq!(
+            ws_a_queued
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["t1", "t3"]
+        );
+        let all_queued = list_queued_tasks(&conn, None, 10).unwrap();
+        assert_eq!(
+            all_queued.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["t1", "t2", "t3"]
+        );
+        assert_eq!(list_queued_tasks(&conn, Some("ws-b"), 10).unwrap().len(), 1);
     }
 
     #[test]
