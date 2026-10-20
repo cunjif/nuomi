@@ -509,7 +509,20 @@
     "never": "Unscheduled",
     "deleteFailed": "Failed to delete",
     "toggleFailed": "Failed to toggle",
-    "empty": "No schedules yet"
+    "empty": "No schedules yet",
+    "targetKind": "Target type",
+    "targetTask": "Task",
+    "targetChat": "Single chat",
+    "targetGroup": "Group chat",
+    "teamSource": "Team source",
+    "teamAuto": "Auto formation",
+    "teamPick": "Preset team",
+    "teamPlaceholder": "Select a team",
+    "agentLabel": "Chat agent",
+    "agentPlaceholder": "Select a role",
+    "autoDispatch": "Run on trigger",
+    "agentRequired": "Select a chat agent",
+    "teamRequired": "Select a team"
   },
   "settings": {
     "providersHeading": "Providers",

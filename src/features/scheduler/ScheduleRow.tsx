@@ -12,14 +12,24 @@ interface ScheduleRowProps {
   onDelete: (id: string) => void;
 }
 
+const KIND_LABEL_KEY: Record<string, string> = {
+  task: "scheduler.targetTask",
+  chat: "scheduler.targetChat",
+  group: "scheduler.targetGroup",
+};
+
 /** One schedule row with enable toggle and delete. */
 export function ScheduleRow({ schedule, scope, pending, onToggle, onDelete }: ScheduleRowProps): ReactNode {
   const { t } = useTranslation();
+  const kindKey = KIND_LABEL_KEY[schedule.targetKind] ?? "scheduler.targetTask";
   return (
     <li className="flex items-center justify-between gap-3 rounded border border-ink-muted/40 bg-surface-raised p-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium text-ink">{schedule.name}</p>
+          <span className="shrink-0 rounded bg-ink-muted/20 px-1.5 py-0.5 text-[10px] text-ink-muted">
+            {t(kindKey)}
+          </span>
           {scope === "all" && (
             <WorkspaceBadge workspaceId={schedule.workspaceId} workspaceLabel={schedule.workspaceLabel} />
           )}

@@ -509,7 +509,20 @@
     "never": "未排期",
     "deleteFailed": "删除失败",
     "toggleFailed": "切换状态失败",
-    "empty": "还没有定时任务"
+    "empty": "还没有定时任务",
+    "targetKind": "目标类型",
+    "targetTask": "任务",
+    "targetChat": "单聊",
+    "targetGroup": "群聊",
+    "teamSource": "团队来源",
+    "teamAuto": "自动组队",
+    "teamPick": "预选团队",
+    "teamPlaceholder": "选择团队",
+    "agentLabel": "对话角色",
+    "agentPlaceholder": "选择角色",
+    "autoDispatch": "触发后立即执行",
+    "agentRequired": "请选择对话角色",
+    "teamRequired": "请选择团队"
   },
   "settings": {
     "providersHeading": "Provider 配置",

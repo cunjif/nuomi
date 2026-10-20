@@ -51,6 +51,7 @@ import type {
   RoleInput,
   RunDto,
   ScheduleDto,
+  ScheduleInput,
   StewardSessionDto,
   StewardMessageDto,
   StewardAttachmentDto,
@@ -1360,7 +1361,7 @@ export function testDoubleCommands(): CommandSet {
     async deleteAttachment(_attachmentId) {
       return ok(null);
     },
-    async upsertSchedule(input) {
+    async upsertSchedule(input: ScheduleInput) {
       const s = {
         id: nextId("sch"),
         name: input.name,
@@ -1369,7 +1370,7 @@ export function testDoubleCommands(): CommandSet {
         taskDescription: input.taskDescription,
         enabled: true,
         targetKind: input.targetKind,
-        agent: null,
+        agent: input.agent ? { kind: input.agent.kind, id: input.agent.id, name: "" } : null,
         teamId: input.teamId,
         sessionMode: input.sessionMode,
         sessionId: input.sessionId,
@@ -1380,7 +1381,7 @@ export function testDoubleCommands(): CommandSet {
       tdState.schedules.unshift(s as unknown as ScheduleDto);
       return ok(s as unknown as ScheduleDto);
     },
-    async updateSchedule(scheduleId, input) {
+    async updateSchedule(scheduleId: string, input: ScheduleInput) {
       const s = {
         id: scheduleId,
         name: input.name,
@@ -1389,7 +1390,7 @@ export function testDoubleCommands(): CommandSet {
         taskDescription: input.taskDescription,
         enabled: true,
         targetKind: input.targetKind,
-        agent: null,
+        agent: input.agent ? { kind: input.agent.kind, id: input.agent.id, name: "" } : null,
         teamId: input.teamId,
         sessionMode: input.sessionMode,
         sessionId: input.sessionId,
