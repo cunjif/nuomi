@@ -81,15 +81,20 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     renderTab("doc.md");
 
     await screen.findByTestId("wysiwyg-editor");
-    // Outline toggle available next to the WYSIWYG pane (headings → symbols).
-    expect(screen.getByRole("button", { name: "大纲" })).toBeInTheDocument();
+    // Outline toggle next to the WYSIWYG pane; the floating panel defaults
+    // closed and opens on click — headings become symbol rows.
+    const outlineToggle = screen.getByRole("button", { name: "大纲" });
+    expect(outlineToggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(outlineToggle);
+    expect(outlineToggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Title" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "源码" }));
     await screen.findByLabelText("editor");
     // Source mode is plain Monaco — no rendered markdown pane (需求: 源码不显示渲染).
     expect(screen.queryByTestId("markdown-preview")).toBeNull();
-    // Outline panel defaults to open (no toggle in source mode after header removal).
-    expect(screen.getByRole("navigation", { name: "大纲" })).toBeInTheDocument();
+    // The open outline survives the mode switch, floating beside the editor.
+    expect(screen.getByRole("button", { name: "Title" })).toBeInTheDocument();
   });
 
   it("lands a pending cross-file jump in WYSIWYG mode (markdown never mounts Monaco)", async () => {

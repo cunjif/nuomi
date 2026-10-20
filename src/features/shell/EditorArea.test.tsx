@@ -47,7 +47,7 @@ function renderPanel(): void {
 }
 
 describe("EditorArea — editor dirty flow", () => {
-  it("marks the tab dirty on input and clears it after save; status bar shows language + hint", async () => {
+  it("marks the tab dirty on input and clears it after save; status bar shows the language", async () => {
     tdSeedFiles({ "README.md": "hello" });
     openInStore("README.md");
     renderPanel();
@@ -58,9 +58,8 @@ describe("EditorArea — editor dirty flow", () => {
     await screen.findByTestId("wysiwyg-editor");
     // Switch to source mode for the classic Monaco dirty/save flow.
     fireEvent.click(screen.getByRole("button", { name: "源码" }));
-    // Status bar: recognized language id + save hint (zh-CN default resources).
+    // Status bar: recognized language id (save is Ctrl+S only, no hint chip).
     expect(screen.getByText("markdown")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl+S 保存")).toBeInTheDocument();
 
     fireEvent.change(await screen.findByLabelText("editor"), { target: { value: "hello nuomi" } });
     await waitFor(() => expect(tab).toHaveAttribute("title", "README.md · 未保存的更改"));
