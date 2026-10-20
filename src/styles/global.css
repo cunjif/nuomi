@@ -54,6 +54,11 @@
   --nuomi-warn-rgb: 138 101 8;
   --nuomi-danger-rgb: 189 38 38;
   --nuomi-diff-add-rgb: 3 105 161;
+  /* Monospace stack — single source for the Tailwind `font-mono` class, the
+     .md-wysiwyg code blocks below, and Monaco's editor font (P2-E). JetBrains
+     Mono first (user-installed), then the platform faces: Cascadia Mono
+     (Win10+), SF Mono/Menlo (macOS), Liberation Mono (Linux). */
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   /* Kraft-paper grain (turbulence noise, ~5% opacity) tiled over the light
      surface — keeps text readable while giving the "paper" feel (review §4.2.1). */
   --nuomi-paper-texture:

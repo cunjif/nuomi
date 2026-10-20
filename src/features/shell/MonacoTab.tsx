@@ -32,6 +32,15 @@ const MonacoEditor = lazy(async () => {
   return import("@monaco-editor/react");
 });
 
+// Editor font = the shared --font-mono stack (single source in global.css,
+// same as the `font-mono` class and .md-wysiwyg code). Resolved at render
+// into a concrete face list: Monaco's canvas-based char measurement cannot
+// resolve a var() reference, so the stack must be read, not inlined.
+const monoFont = (): string => {
+  const stack = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
+  return stack !== "" ? stack : "monospace";
+};
+
 interface MonacoTabProps {
   path: string;
   workspaceId: string;
@@ -315,6 +324,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           applyEdit(v ?? "");
         }}
         options={{
+          fontFamily: monoFont(),
           fontSize: 13,
           minimap: { enabled: false },
           tabSize: 2,

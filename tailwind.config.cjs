@@ -50,7 +50,9 @@ module.exports = {
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "Consolas", "monospace"],
+        // Single source: the --font-mono stack in global.css (P2-E) — keeps
+        // the `font-mono` class, .md-wysiwyg code, and Monaco in lockstep.
+        mono: ["var(--font-mono, monospace)"],
         // Hand-drawn line-art faces (review §3.1). Latin only — CJK falls
         // back to system-ui via the font stack in global.css.
         hand: ["Patrick Hand", "cursive"], // 标题/品牌
