@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import { useDraggable } from "@dnd-kit/core";
-import type { TaskDto } from "../../lib/ipc/bindings.gen";
+import type { TaskDto, TeamDto } from "../../lib/ipc/bindings.gen";
 import { Spinner } from "../../components/ui/Spinner";
 import { Icon } from "../../components/ui/Icon/Icon";
-import { ipc } from "../../lib/ipc/client";
+import { formatRelativeTime, type RelativeTimeLocale } from "../../lib/format/relativeTime";
 import { WorkspaceBadge } from "../conversation/WorkspaceBadge";
 import { statusLabelKey, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
 import type { ViewScope } from "../common/ViewScopeToggle";
@@ -14,6 +13,7 @@ import type { ViewScope } from "../common/ViewScopeToggle";
 interface TaskCardProps {
   task: TaskDto;
   scope: ViewScope;
+  teams: TeamDto[];
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -25,14 +25,23 @@ const menuButton =
   "block w-full px-3 py-1 text-left text-xs text-ink hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent";
 
 /** Draggable card with an equivalent keyboard menu (a11y rule for drag). */
-export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithTeam, onAutoFormRun }: TaskCardProps): ReactNode {
-  const { t } = useTranslation();
+export function TaskCard({
+  task,
+  scope,
+  teams,
+  onOpenRuns,
+  onMove,
+  onDelete,
+  onRunWithTeam,
+  onAutoFormRun,
+}: TaskCardProps): ReactNode {
+  const { t, i18n } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [teamListOpen, setTeamListOpen] = useState(false);
   /** two-step delete (IntegrationsSection pattern): armed by the first click */
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const teamsQuery = useQuery({ queryKey: ["teams"], queryFn: ipc.listTeams });
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
+  const locale: RelativeTimeLocale = i18n.language.startsWith("zh") ? "zh-CN" : "en";
 
   const closeMenu = (): void => {
     setMenuOpen(false);
@@ -57,11 +66,22 @@ export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithT
       >
         {task.title}
       </button>
-      {scope === "all" && (
-        <div className="mt-0.5">
-          <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceLabel} />
-        </div>
+      {task.description.length > 0 && (
+        <p className="mt-0.5 truncate text-[10px] text-ink-muted" title={task.description}>
+          {task.description}
+        </p>
       )}
+      <div className="mt-0.5 flex items-center justify-between gap-1">
+        {scope === "all" && (
+          <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceLabel} />
+        )}
+        <span
+          className="text-[10px] text-ink-muted/70"
+          title={new Date(task.createdAt).toLocaleString()}
+        >
+          {formatRelativeTime(task.createdAt, Date.now(), locale)}
+        </span>
+      </div>
       {task.status === "running" && (
         <div className="mt-1">
           <Spinner />
@@ -109,7 +129,7 @@ export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithT
             </button>
             {teamListOpen && (
               <ul>
-                {(teamsQuery.data ?? []).map((team) => (
+                {teams.map((team) => (
                   <li key={team.id}>
                     <button
                       type="button"
@@ -124,7 +144,7 @@ export function TaskCard({ task, scope, onOpenRuns, onMove, onDelete, onRunWithT
                     </button>
                   </li>
                 ))}
-                {(teamsQuery.data?.length ?? 0) === 0 && (
+                {teams.length === 0 && (
                   <li className="px-6 py-1 text-[10px] text-ink-muted" role="note">
                     {t("board.noTeamsForRun")}
                   </li>

@@ -352,3 +352,55 @@ describe("BoardView — view scope toggle (task 7.3)", () => {
     await waitFor(() => expect(setViewScope).toHaveBeenCalledWith("board", "focused"));
   });
 });
+
+describe("BoardView — card density and search (board polish)", () => {
+  const seed = (id: string, title: string, description: string): void => {
+    tdState.tasks.push({
+      id,
+      sessionId: null,
+      title,
+      description,
+      status: "backlog",
+      createdAt: Date.now() - 5 * 60_000,
+      updatedAt: Date.now(),
+      workspaceId: "__migrated__",
+      workspaceLabel: null,
+    });
+  };
+
+  it("shows the description preview and relative creation time on cards", async () => {
+    seed("t-density", "重构内核", "拆分 store 层并补迁移");
+    injectIpcCommands(testDoubleCommands());
+
+    renderWithProviders(<BoardView workspaceId={null} />);
+
+    expect(await screen.findByText("拆分 store 层并补迁移")).toBeInTheDocument();
+    // 5 minutes ago seeds a relative-time label (not a raw date).
+    expect(await screen.findByText("5分钟前")).toBeInTheDocument();
+  });
+
+  it("filters cards by title and description, clearing restores all", async () => {
+    seed("t-a", "重构内核", "store 层");
+    seed("t-b", "写文档", "API 文档补充");
+    injectIpcCommands(testDoubleCommands());
+
+    renderWithProviders(<BoardView workspaceId={null} />);
+    expect(await screen.findByText("重构内核")).toBeInTheDocument();
+    expect(screen.getByText("写文档")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索任务..."), { target: { value: "重构" } });
+    await waitFor(() => expect(screen.queryByText("写文档")).not.toBeInTheDocument());
+    expect(screen.getByText("重构内核")).toBeInTheDocument();
+
+    // Description matches too.
+    fireEvent.change(screen.getByLabelText("搜索任务..."), { target: { value: "API 文档" } });
+    await waitFor(() => expect(screen.queryByText("重构内核")).not.toBeInTheDocument());
+    expect(screen.getByText("写文档")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索任务..."), { target: { value: "" } });
+    await waitFor(() => {
+      expect(screen.getByText("重构内核")).toBeInTheDocument();
+      expect(screen.getByText("写文档")).toBeInTheDocument();
+    });
+  });
+});

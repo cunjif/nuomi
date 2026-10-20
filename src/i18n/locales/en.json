@@ -445,7 +445,20 @@
     "status_queued": "Queued",
     "status_running": "Running",
     "status_done": "Done",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "searchPlaceholder": "Search tasks...",
+    "runKindTeam": "Team",
+    "run_status_queued": "Queued",
+    "run_status_running": "Running",
+    "run_status_awaiting_approval": "Awaiting approval",
+    "run_status_succeeded": "Succeeded",
+    "run_status_cancelled": "Cancelled",
+    "run_status_failed": "Failed",
+    "run_status_timed_out": "Timed out",
+    "run_status_interrupted": "Interrupted",
+    "cancelRun": "Cancel run",
+    "cancelRunStarted": "Cancel request sent: {{runId}}",
+    "cancelRunFailed": "Failed to cancel run"
   },
   "trace": {
     "noSession": "Select a group-chat session to view its trace timeline",

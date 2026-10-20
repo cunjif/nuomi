@@ -33,7 +33,10 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
   const { scope, setScope } = useViewScope("board");
   const effectiveWorkspaceId = workspaceId ?? activeWorkspaceId;
   const workspaceFilter = scope === "focused" ? effectiveWorkspaceId : null;
+  const [search, setSearch] = useState("");
   const tasksQuery = useQuery({ queryKey: ["tasks", null, workspaceFilter], queryFn: () => ipc.listTasks(null, workspaceFilter) });
+  // One teams subscription for the whole board (was per-card in TaskCard).
+  const teamsQuery = useQuery({ queryKey: ["teams"], queryFn: ipc.listTeams });
 
   const moveMut = useMutation({
     mutationFn: ({ taskId, status }: { taskId: string; status: TaskStatus }) =>
@@ -114,13 +117,25 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
     }
   });
 
+  /** Local search over title+description (case-insensitive); the board data
+   * is already fully client-side, so filtering needs no extra IPC. */
+  const searchLower = search.trim().toLowerCase();
+  const visibleTasks = useMemo(() => {
+    if (searchLower === "") return tasksQuery.data ?? [];
+    return (tasksQuery.data ?? []).filter(
+      (task) =>
+        task.title.toLowerCase().includes(searchLower) ||
+        task.description.toLowerCase().includes(searchLower),
+    );
+  }, [tasksQuery.data, searchLower]);
+
   const grouped = useMemo(() => {
     const map = new Map<TaskStatus, TaskDto[]>(TASK_STATUSES.map((s) => [s, []]));
-    for (const task of tasksQuery.data ?? []) {
+    for (const task of visibleTasks) {
       if (isTaskStatus(task.status)) map.get(task.status)?.push(task);
     }
     return map;
-  }, [tasksQuery.data]);
+  }, [visibleTasks]);
 
   const queuedIds = (grouped.get("queued") ?? []).map((task) => task.id);
 
@@ -135,10 +150,18 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
 
   return (
     <div className="flex h-full flex-col p-3">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold">{t("shell.navBoard")}</h2>
           <ViewScopeToggle surface="board" scope={scope} onScopeChange={setScope} />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label={t("board.searchPlaceholder")}
+            placeholder={t("board.searchPlaceholder")}
+            className="w-40 rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-ink-muted/40 bg-surface px-2 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-accent"
+          />
         </div>
         <button
           type="button"
@@ -150,7 +173,7 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
         </button>
       </div>
       {formOpen && <NewTaskForm onDone={() => setFormOpen(false)} />}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-x-auto">
         <AsyncBoundary
           isLoading={tasksQuery.isLoading}
           error={tasksQuery.error}
@@ -158,13 +181,16 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
           onRetry={() => void tasksQuery.refetch()}
         >
           <DndContext onDragEnd={onDragEnd}>
-            <div className="grid h-full grid-cols-5 gap-2">
+            {/* min-w keeps the five columns readable on narrow windows — the
+                board scrolls horizontally instead of collapsing the cards. */}
+            <div className="grid h-full min-w-[880px] grid-cols-5 gap-2">
               {TASK_STATUSES.map((status) => (
                 <BoardColumn
                   key={status}
                   status={status}
                   tasks={grouped.get(status) ?? []}
                   scope={scope}
+                  teams={teamsQuery.data ?? []}
                   onOpenRuns={setRunDrawerTask}
                   onMove={(taskId, next) => moveMut.mutate({ taskId, status: next })}
                   onDelete={(taskId) => deleteMut.mutate(taskId)}
@@ -178,7 +204,7 @@ export function BoardView({ workspaceId }: { workspaceId: string | null }): Reac
           </DndContext>
         </AsyncBoundary>
       </div>
-      <RunDrawer />
+      <RunDrawer tasks={tasksQuery.data ?? []} />
       {planConfirm && (
         <AutoFormConfirmDialog
           taskTitle={planConfirm.taskTitle}

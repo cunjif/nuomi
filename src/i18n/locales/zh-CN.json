@@ -445,7 +445,20 @@
     "status_queued": "排队中",
     "status_running": "运行中",
     "status_done": "已完成",
-    "status_cancelled": "已取消"
+    "status_cancelled": "已取消",
+    "searchPlaceholder": "搜索任务...",
+    "runKindTeam": "团队",
+    "run_status_queued": "排队中",
+    "run_status_running": "运行中",
+    "run_status_awaiting_approval": "待审批",
+    "run_status_succeeded": "已成功",
+    "run_status_cancelled": "已取消",
+    "run_status_failed": "已失败",
+    "run_status_timed_out": "已超时",
+    "run_status_interrupted": "已中断",
+    "cancelRun": "取消运行",
+    "cancelRunStarted": "取消请求已发送：{{runId}}",
+    "cancelRunFailed": "取消运行失败"
   },
   "trace": {
     "noSession": "选择一个群聊会话查看 Trace 时间线",

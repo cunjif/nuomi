@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDroppable } from "@dnd-kit/core";
-import type { TaskDto } from "../../lib/ipc/bindings.gen";
+import type { TaskDto, TeamDto } from "../../lib/ipc/bindings.gen";
 import { TaskCard } from "./TaskCard";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { statusLabelKey, type TaskStatus } from "./taskStatuses";
@@ -12,6 +12,7 @@ interface BoardColumnProps {
   status: TaskStatus;
   tasks: TaskDto[];
   scope: ViewScope;
+  teams: TeamDto[];
   onOpenRuns: (taskId: string) => void;
   onMove: (taskId: string, status: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -29,6 +30,7 @@ export function BoardColumn({
   status,
   tasks,
   scope,
+  teams,
   onOpenRuns,
   onMove,
   onDelete,
@@ -98,6 +100,7 @@ export function BoardColumn({
             key={task.id}
             task={task}
             scope={scope}
+            teams={teams}
             onOpenRuns={onOpenRuns}
             onMove={onMove}
             onDelete={onDelete}
