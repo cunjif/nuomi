@@ -15,9 +15,9 @@ use tauri::Manager;
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
     AgentProfile, AgentRefKind, CliFlavor, ConversationKind, EventRecord, Integration,
-    IntegrationKind, ProposalStatus, ProviderConfig, ProviderProtocol, Role, RunState, Schedule,
-    ScheduleSessionMode, ScheduleTargetKind, Session, SessionCliHandle, Task, TaskStatus, Team,
-    TeamTopology, WhiteBoardNote,
+    IntegrationKind, Proposal, ProposalStatus, ProviderConfig, ProviderProtocol, Role, RunState,
+    Schedule, ScheduleSessionMode, ScheduleTargetKind, Session, SessionCliHandle, Task, TaskStatus,
+    Team, TeamTopology, WhiteBoardNote,
 };
 use nuomi_core::evolution::research::{
     online_authorized as core_online_authorized, set_online_authorized,
@@ -1841,6 +1841,54 @@ pub async fn impl_resolve_proposal(
             }),
         ));
     Ok(())
+}
+
+/// Persists a pending team-plan proposal and announces it on the bus. The
+/// shared producer path for scheduled spontaneous formation (P2-F 组 3) and
+/// idle backlog scans (组 4, ADR-0023) — not an IPC command; each producer
+/// keeps its own trigger logic and calls this with a finished draft.
+pub async fn impl_create_team_proposal(
+    state: &AppState,
+    draft: nuomi_core::services::TeamPlanDraft,
+    source: &str,
+    workspace_id: &str,
+) -> Result<Proposal, IpcError> {
+    let plan_json = serde_json::to_string(&draft)
+        .map_err(|error| IpcError::new("proposal.plan_unserializable", error.to_string()))?;
+    let proposal = Proposal {
+        id: nuomi_core::domain::new_id(),
+        kind: "team_plan".to_string(),
+        source: source.to_string(),
+        plan_json,
+        status: ProposalStatus::Pending,
+        workspace_id: workspace_id.to_string(),
+        resolved_at: None,
+        created_at: now_ms(),
+    };
+    let path = state.db_path.clone();
+    let row = proposal.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::proposals::insert(&db.0, &row)?;
+        Ok(())
+    })
+    .await??;
+    state
+        .kernel
+        .context()
+        .bus()
+        .publish(nuomi_core::harness::Event::new(
+            "proposal.created",
+            serde_json::json!({
+                "proposalId": proposal.id,
+                "source": source,
+                "taskId": draft.task_ids.first(),
+                "teamMemberCount": draft.members.len(),
+                "workspaceId": workspace_id,
+            }),
+        ));
+    Ok(proposal)
 }
 
 // ---------- workspace ----------
@@ -4213,8 +4261,9 @@ pub async fn impl_delete_team(state: &AppState, team_id: String) -> Result<(), I
 // ---------- team formation (SPEC auto-team-m1 F3) ----------
 
 /// Member ceiling handed to the planner (SPEC auto-team-m1 §5: parameterized,
-/// default 5; the UI entry point uses the default).
-const FORM_TEAM_MAX_MEMBERS: usize = 5;
+/// default 5; the UI entry point uses the default). Shared with the schedule
+/// dispatcher's spontaneous-formation path (P2-F 组 3).
+pub(crate) const FORM_TEAM_MAX_MEMBERS: usize = 5;
 
 /// Maps [`services::team_former`] failures onto stable IPC codes.
 ///
