@@ -43,6 +43,7 @@ fn is_domain_topic(topic: &str) -> bool {
     topic.starts_with("task.")
         || topic.starts_with("run.")
         || topic.starts_with("approval.")
+        || topic.starts_with("proposal.")
         || topic.starts_with("schedule.")
         || topic.starts_with("team.")
         || topic.starts_with("change.")
@@ -101,6 +102,9 @@ mod tests {
             ("task.status_changed", None, "event://domain"),
             ("run.state_changed", None, "event://domain"),
             ("approval.requested", None, "event://domain"),
+            // P2-F 组 2: proposal lifecycle reaches the approvals inbox.
+            ("proposal.created", None, "event://domain"),
+            ("proposal.resolved", None, "event://domain"),
             ("schedule.triggered", None, "event://domain"),
             ("team.formed", None, "event://domain"),
             // sandbox.<task_id> progress pushes (ADR-0022 §4)

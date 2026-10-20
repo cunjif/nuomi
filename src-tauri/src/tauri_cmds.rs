@@ -240,6 +240,25 @@ pub async fn resolve_approval(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_proposals(
+    state: tauri::State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<Vec<commands::ProposalDto>, IpcError> {
+    commands::impl_list_proposals(&state, workspace_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_proposal(
+    state: tauri::State<'_, AppState>,
+    proposal_id: String,
+    approved: bool,
+) -> Result<(), IpcError> {
+    commands::impl_resolve_proposal(&state, proposal_id, approved).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn list_dir(
     state: tauri::State<'_, AppState>,
     path: String,

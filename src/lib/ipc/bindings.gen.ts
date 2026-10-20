@@ -158,6 +158,22 @@ async resolveApproval(approvalId: string, approved: boolean) : Promise<Result<nu
     else return { status: "error", error: e  as any };
 }
 },
+async listProposals(workspaceId: string | null) : Promise<Result<ProposalDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_proposals", { workspaceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resolveProposal(proposalId: string, approved: boolean) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_proposal", { proposalId, approved }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listDir(path: string, workspaceId: string | null) : Promise<Result<FileEntryDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_dir", { path, workspaceId }) };
@@ -1744,6 +1760,7 @@ export type PluginListResultDto = { plugins: PluginInfoDto[]; skipped: string[];
 export type PluginPermissionsDto = { fsRead: string[]; fsWrite: string[]; network: string[]; shell: boolean }
 export type PromptOptimizeResultDto = { optimized: string }
 export type PromptVersionSummaryDto = { id: string; status: string }
+export type ProposalDto = { id: string; kind: string; source: string; plan: TeamPlanDraftDto; status: string; workspaceId: string; workspaceLabel: string | null; createdAt: number; resolvedAt: number | null }
 export type ProviderDto = { id: string; name: string; protocol: ProviderProtocolDto; baseUrl: string; hasKey: boolean; capabilities: string[]; isMaster: boolean; settings: ProviderSettingsDto }
 export type ProviderInput = { 
 /**
@@ -1910,6 +1927,12 @@ export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds
  * Topology-specific config (`max_rounds`, selector settings, ...).
  */
 config: JsonValue }
+/**
+ * Commit-complete projection of a stored team-plan proposal: everything the
+ * approval will build, including system-prompt overrides.
+ */
+export type TeamPlanDraftDto = { task: string; taskIds: string[]; topology: TeamTopologyDto; members: TeamPlanDraftMemberDto[]; maxRounds: number | null; required: string[]; rationale: string }
+export type TeamPlanDraftMemberDto = { kind: string; refId: string; roleName: string; systemPrompt: string | null }
 /**
  * Dry-run projection of a validated formation plan: what a commit would
  * build, without touching roles/teams/events (打磨③a).

@@ -55,6 +55,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::list_runs_by_task,
         tauri_cmds::list_pending_approvals,
         tauri_cmds::resolve_approval,
+        tauri_cmds::list_proposals,
+        tauri_cmds::resolve_proposal,
         tauri_cmds::list_dir,
         tauri_cmds::read_file,
         tauri_cmds::write_file,

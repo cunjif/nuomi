@@ -15,7 +15,7 @@ use tauri::Manager;
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
     AgentProfile, AgentRefKind, CliFlavor, ConversationKind, EventRecord, Integration,
-    IntegrationKind, ProviderConfig, ProviderProtocol, Role, RunState, Schedule,
+    IntegrationKind, ProposalStatus, ProviderConfig, ProviderProtocol, Role, RunState, Schedule,
     ScheduleSessionMode, ScheduleTargetKind, Session, SessionCliHandle, Task, TaskStatus, Team,
     TeamTopology, WhiteBoardNote,
 };
@@ -1613,6 +1613,233 @@ pub async fn impl_resolve_approval(
         },
     )
     .await?;
+    Ok(())
+}
+
+// ---------- proposals (P2-F 组 2: advisory team plans) ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamPlanDraftMemberDto {
+    pub kind: String,
+    pub ref_id: String,
+    pub role_name: String,
+    pub system_prompt: Option<String>,
+}
+
+/// Commit-complete projection of a stored team-plan proposal: everything the
+/// approval will build, including system-prompt overrides.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamPlanDraftDto {
+    pub task: String,
+    pub task_ids: Vec<String>,
+    pub topology: TeamTopologyDto,
+    pub members: Vec<TeamPlanDraftMemberDto>,
+    pub max_rounds: Option<i64>,
+    pub required: Vec<String>,
+    pub rationale: String,
+}
+
+impl From<nuomi_core::services::TeamPlanDraft> for TeamPlanDraftDto {
+    fn from(draft: nuomi_core::services::TeamPlanDraft) -> Self {
+        Self {
+            task: draft.task,
+            task_ids: draft.task_ids,
+            topology: topology_to_dto(draft.topology),
+            members: draft
+                .members
+                .into_iter()
+                .map(|m| TeamPlanDraftMemberDto {
+                    kind: m.kind,
+                    ref_id: m.id,
+                    role_name: m.role_name,
+                    system_prompt: m.system_prompt,
+                })
+                .collect(),
+            max_rounds: draft.max_rounds,
+            required: draft.required,
+            rationale: draft.rationale,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDto {
+    pub id: String,
+    pub kind: String,
+    pub source: String,
+    pub plan: TeamPlanDraftDto,
+    pub status: String,
+    pub workspace_id: String,
+    pub workspace_label: Option<String>,
+    pub created_at: i64,
+    pub resolved_at: Option<i64>,
+}
+
+/// Pending team-plan proposals for the approvals inbox (merged with tool
+/// approvals client-side). Only `kind = "team_plan"` rows surface; future
+/// kinds stay invisible until a consumer ships.
+pub async fn impl_list_proposals(
+    state: &AppState,
+    workspace_id: Option<String>,
+) -> Result<Vec<ProposalDto>, IpcError> {
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<ProposalDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let proposals = match &workspace_id {
+            Some(ws) => repos::proposals::list_pending_by_workspace(&db.0, ws)?,
+            None => repos::proposals::list_pending(&db.0)?,
+        };
+        let ws_map = workspace_label_map(&db.0)?;
+        let mut out = Vec::with_capacity(proposals.len());
+        for proposal in proposals {
+            if proposal.kind != "team_plan" {
+                tracing::warn!(
+                    proposal_id = %proposal.id, kind = %proposal.kind,
+                    "skipping proposal of unknown kind"
+                );
+                continue;
+            }
+            let plan: nuomi_core::services::TeamPlanDraft =
+                match serde_json::from_str(&proposal.plan_json) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        tracing::warn!(
+                            proposal_id = %proposal.id, error = %error,
+                            "skipping proposal with unreadable plan"
+                        );
+                        continue;
+                    }
+                };
+            out.push(ProposalDto {
+                workspace_label: ws_map.get(&proposal.workspace_id).cloned(),
+                id: proposal.id,
+                kind: proposal.kind,
+                source: proposal.source,
+                plan: TeamPlanDraftDto::from(plan),
+                status: proposal.status.as_str().to_string(),
+                workspace_id: proposal.workspace_id,
+                created_at: proposal.created_at,
+                resolved_at: proposal.resolved_at,
+            });
+        }
+        Ok(out)
+    })
+    .await?
+}
+
+/// Resolves a pending proposal.
+///
+/// Deny = guarded status flip only. Approve = `form_team_from_plan`
+/// (commits the recorded plan verbatim, re-validated against the current
+/// catalog; drift failures bubble up while the proposal stays pending —
+/// retryable or deniable) → mark approved → dispatch every recorded task
+/// onto the fresh team, skipping tasks that are no longer startable
+/// (deleted, or already running/done while the proposal waited).
+pub async fn impl_resolve_proposal(
+    state: &AppState,
+    proposal_id: String,
+    approved: bool,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    if !approved {
+        let pid = proposal_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            repos::proposals::resolve(&db.0, &pid, ProposalStatus::Denied, now_ms())?;
+            Ok(())
+        })
+        .await??;
+        state
+            .kernel
+            .context()
+            .bus()
+            .publish(nuomi_core::harness::Event::new(
+                "proposal.resolved",
+                serde_json::json!({ "proposalId": proposal_id, "approved": false }),
+            ));
+        return Ok(());
+    }
+
+    // ---- approve ----
+    let path = state.db_path.clone();
+    let pid = proposal_id.clone();
+    let draft = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::TeamPlanDraft, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let proposal = repos::proposals::get(&db.0, &pid)?;
+            if proposal.status != ProposalStatus::Pending {
+                return Err(IpcError::new(
+                    "proposal.already_resolved",
+                    format!("proposal#{pid} is already {}", proposal.status.as_str()),
+                ));
+            }
+            if proposal.kind != "team_plan" {
+                return Err(IpcError::new(
+                    "proposal.unsupported_kind",
+                    format!("proposal#{pid} has kind '{}'", proposal.kind),
+                ));
+            }
+            serde_json::from_str(&proposal.plan_json)
+                .map_err(|error| IpcError::new("proposal.plan_unreadable", error.to_string()))
+        },
+    )
+    .await??;
+
+    // Commit the recorded plan; the team row is the irreversible step, so
+    // it goes first — failures here leave the proposal pending.
+    let formed = nuomi_core::services::form_team_from_plan(
+        state.db_path.clone(),
+        Some(state.kernel.context().bus()),
+        None,
+        draft.clone(),
+        FORM_TEAM_MAX_MEMBERS,
+    )
+    .await
+    .map_err(map_form_error)?;
+
+    // The team exists — the proposal is settled from here on.
+    let path = state.db_path.clone();
+    let pid = proposal_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::proposals::resolve(&db.0, &pid, ProposalStatus::Approved, now_ms())?;
+        Ok(())
+    })
+    .await??;
+
+    // Dispatch every recorded task onto the fresh team. Tasks may have
+    // moved on while the proposal waited: skipping is the honest outcome,
+    // not an error.
+    for task_id in &draft.task_ids {
+        if let Err(error) =
+            impl_run_team_on_task(state, task_id.clone(), formed.team.id.clone()).await
+        {
+            tracing::warn!(
+                task_id = %task_id, error = %error,
+                "proposal dispatch skipped a task"
+            );
+        }
+    }
+
+    state
+        .kernel
+        .context()
+        .bus()
+        .publish(nuomi_core::harness::Event::new(
+            "proposal.resolved",
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "approved": true,
+                "teamId": formed.team.id,
+            }),
+        ));
     Ok(())
 }
 
