@@ -79,7 +79,10 @@ pub use session_context::{
     SessionContextUsage,
 };
 pub use single_role_materializer::{materialize_single_role, RoleOverlay, SingleRoleContext};
-pub use team_former::{form_team, preview_team, FormedTeam, TeamPlan, TeamPlanMember};
+pub use team_former::{
+    draft_team_plan, form_team, form_team_from_plan, preview_team, FormedTeam, TeamPlan,
+    TeamPlanDraft, TeamPlanDraftMember, TeamPlanMember,
+};
 pub use team_runner::{materialize, run_team, MaterializedProviders, TeamRunOutcome};
 pub use workspace::{FileEntry, WorkspaceError, WorkspaceService};
 pub use workspace_guard::{canonicalize as guard_canonicalize, is_blacklisted, PathGuardError};

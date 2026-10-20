@@ -12,6 +12,13 @@
 //! validation → name resolution) and returns a structured [`TeamPlan`] with
 //! zero writes and zero bus events — error paths are identical to
 //! [`form_team`].
+//!
+//! [`draft_team_plan`] / [`form_team_from_plan`] are the proposal halves of
+//! P2-F 组 2: the former projects a freshly planned formation into its
+//! serializable [`TeamPlanDraft`] (what a proposal producer persists), the
+//! latter commits such a draft — no LLM call, re-validated against the
+//! current catalog — so approving a preview builds exactly what the preview
+//! showed.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -61,6 +68,67 @@ pub struct TeamPlan {
     pub max_rounds: Option<u32>,
     pub required: Vec<String>,
     pub rationale: String,
+}
+
+/// Serializable formation draft persisted as `proposals.plan_json` (P2-F
+/// 组 2): everything [`form_team_from_plan`] needs to commit the exact plan
+/// a preview produced — including the optional system-prompt overrides the
+/// [`TeamPlan`] projection deliberately drops — plus the task text (feeds
+/// the auto team name) and the board tasks to dispatch onto the team after
+/// approval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamPlanDraft {
+    pub task: String,
+    pub task_ids: Vec<String>,
+    pub topology: TeamTopology,
+    pub members: Vec<TeamPlanDraftMember>,
+    pub max_rounds: Option<i64>,
+    #[serde(default)]
+    pub required: Vec<String>,
+    pub rationale: String,
+}
+
+/// One member of a [`TeamPlanDraft`] — the write-complete mirror of
+/// [`TeamPlanMember`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamPlanDraftMember {
+    /// `"role"` | `"provider"` | `"cli_profile"`.
+    pub kind: String,
+    /// Referenced role / provider / agent-profile id.
+    pub id: String,
+    pub role_name: String,
+    pub system_prompt: Option<String>,
+}
+
+impl TeamPlanDraft {
+    /// Projects a freshly parsed plan (plus its dispatch context) into the
+    /// serializable draft a proposal persists.
+    fn of(plan: ParsedPlan, task: String, task_ids: Vec<String>) -> Self {
+        Self {
+            task,
+            task_ids,
+            topology: plan.topology,
+            members: plan
+                .members
+                .into_iter()
+                .map(|m| TeamPlanDraftMember {
+                    kind: m.kind,
+                    id: m.id,
+                    role_name: m.role_name,
+                    system_prompt: m.system_prompt,
+                })
+                .collect(),
+            max_rounds: plan.config.max_rounds,
+            required: plan
+                .config
+                .required
+                .filter(|ids| !ids.is_empty())
+                .unwrap_or_default(),
+            rationale: plan.rationale,
+        }
+    }
 }
 
 /// Output of the shared planning phase: the raw parsed plan (consumed by the
@@ -141,6 +209,27 @@ pub async fn preview_team(
     Ok(plan_formation(db_path, secrets, cwd, task, max_members)
         .await?
         .preview)
+}
+
+/// Planning phase + draft projection: the commit-complete counterpart of
+/// [`preview_team`] for proposal producers (P2-F 组 3/组 4). Returns the
+/// [`TeamPlanDraft`] that lands in `proposals.plan_json` and that
+/// [`form_team_from_plan`] later commits — the preview a user approves is
+/// exactly what gets built.
+pub async fn draft_team_plan(
+    db_path: Arc<str>,
+    secrets: Arc<dyn SecretStore>,
+    cwd: Option<PathBuf>,
+    task: &str,
+    task_ids: Vec<String>,
+    max_members: usize,
+) -> Result<TeamPlanDraft, OrchestratorError> {
+    let planned = plan_formation(db_path, secrets, cwd, task, max_members).await?;
+    Ok(TeamPlanDraft::of(
+        planned.parsed,
+        task.to_string(),
+        task_ids,
+    ))
 }
 
 /// Projects a validated [`ParsedPlan`] into its structured [`TeamPlan`]:
@@ -240,6 +329,51 @@ pub async fn form_team(
     })
 }
 
+/// Commits a previously planned [`TeamPlanDraft`] (P2-F 组 2): skips the LLM
+/// planning phase entirely, re-validates the plan against the **current**
+/// catalog (referenced roles/providers/profiles may have drifted since the
+/// proposal was recorded), then persists through the exact same
+/// transactional path as [`form_team`] — unique-name resolution recomputed
+/// against today's roles table. Drift surfaces as an error while the
+/// proposal stays pending (retryable, or deniable); success means the
+/// approved preview was built verbatim.
+pub async fn form_team_from_plan(
+    db_path: Arc<str>,
+    bus: Option<EventBus>,
+    session_id: Option<&str>,
+    draft: TeamPlanDraft,
+    max_members: usize,
+) -> Result<FormedTeam, OrchestratorError> {
+    let task = draft.task.clone();
+    let plan = ParsedPlan::from_draft(draft);
+    let catalog = read_catalog(db_path.clone()).await?;
+    validate_plan(&plan, &catalog, max_members)?;
+    let rationale = plan.rationale.clone();
+
+    let (created_role_ids, team) =
+        tokio::task::spawn_blocking(move || persist_formed_team(db_path, plan, task))
+            .await
+            .map_err(|error| OrchestratorError::Store(error.to_string()))??;
+
+    if let Some(bus) = bus {
+        bus.publish(Event::new(
+            "team.formed",
+            json!({
+                "sessionId": session_id,
+                "teamId": team.id,
+                "memberCount": team.member_role_ids.len(),
+                "rationale": rationale,
+            }),
+        ));
+    }
+
+    Ok(FormedTeam {
+        team,
+        created_role_ids,
+        rationale,
+    })
+}
+
 // ---------------------------------------------------------------- planning
 
 const PLANNER_SYSTEM_PROMPT: &str = "You are the team-formation planner of an agent harness. \
@@ -317,6 +451,33 @@ struct ParsedPlan {
     members: Vec<PlannedMember>,
     config: PlanConfig,
     rationale: String,
+}
+
+impl ParsedPlan {
+    /// Reconstructs the internal plan from a persisted draft — the
+    /// round-trip every approved proposal goes through. An empty `required`
+    /// folds back to `None` so the persistence filters behave identically
+    /// to a freshly planned formation.
+    fn from_draft(draft: TeamPlanDraft) -> Self {
+        Self {
+            topology: draft.topology,
+            members: draft
+                .members
+                .into_iter()
+                .map(|m| PlannedMember {
+                    kind: m.kind,
+                    id: m.id,
+                    role_name: m.role_name,
+                    system_prompt: m.system_prompt,
+                })
+                .collect(),
+            config: PlanConfig {
+                max_rounds: draft.max_rounds,
+                required: (!draft.required.is_empty()).then_some(draft.required),
+            },
+            rationale: draft.rationale,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -484,6 +645,16 @@ fn persist_formed_team(
         .map(|role| role.name)
         .collect();
     let mut taken = taken;
+    // Team-name baseline read on the same pre-transaction connection: the
+    // id-suffix of `auto_team_name` collides when two formations commit
+    // within the same millisecond (uuid v7 shares its timestamp prefix) —
+    // reachable now that `form_team_from_plan` commits without an LLM
+    // round-trip in between.
+    let mut taken_teams: HashSet<String> = repos::teams::list(&conn.0)
+        .map_err(store_err)?
+        .into_iter()
+        .map(|team| team.name)
+        .collect();
 
     let ts = now_ms();
     let mut member_role_ids = Vec::with_capacity(plan.members.len());
@@ -550,7 +721,7 @@ fn persist_formed_team(
     if let Some(required) = plan.config.required.filter(|ids| !ids.is_empty()) {
         config["required"] = json!(required);
     }
-    let name = auto_team_name(&task, &team_id);
+    let name = uniquify_name(&auto_team_name(&task, &team_id), &mut taken_teams);
     let team = Team {
         id: team_id,
         name,
@@ -663,6 +834,195 @@ mod tests {
         assert_eq!(uniquify_name("planner", &mut taken), "planner-2");
         assert_eq!(uniquify_name("planner", &mut taken), "planner-3");
         assert_eq!(uniquify_name("other", &mut taken), "other");
+    }
+
+    // ---- P2-F 组 2: proposal drafts + form_team_from_plan ----
+
+    fn provider_cfg(id: &str, name: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: id.into(),
+            name: name.into(),
+            protocol: crate::domain::ProviderProtocol::OpenAiCompatible,
+            base_url: "http://localhost:9/v1".into(),
+            keyring_ref: Some(format!("kr/{id}")),
+            capabilities: vec!["code".into()],
+            is_master: false,
+            fallback_order: None,
+            params: json!({}),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn two_provider_draft() -> TeamPlanDraft {
+        TeamPlanDraft {
+            task: "Fix the storage layer".into(),
+            task_ids: vec!["t1".into(), "t2".into()],
+            topology: TeamTopology::Pipeline,
+            members: vec![
+                TeamPlanDraftMember {
+                    kind: "provider".into(),
+                    id: "p-a".into(),
+                    role_name: "alpha".into(),
+                    system_prompt: None,
+                },
+                TeamPlanDraftMember {
+                    kind: "provider".into(),
+                    id: "p-b".into(),
+                    role_name: "beta".into(),
+                    system_prompt: Some("execute the plan".into()),
+                },
+            ],
+            max_rounds: Some(4),
+            required: vec!["code".into()],
+            rationale: "write then execute".into(),
+        }
+    }
+
+    fn temp_db() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.db");
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        migrations::run(&conn).unwrap();
+        (dir, file)
+    }
+
+    #[test]
+    fn draft_json_roundtrip_preserves_every_commit_field() {
+        let draft = two_provider_draft();
+        let raw = serde_json::to_string(&draft).unwrap();
+        assert!(
+            raw.contains("\"taskIds\"")
+                && raw.contains("\"roleName\"")
+                && raw.contains("\"systemPrompt\""),
+            "camelCase keys are the plan_json contract: {raw}"
+        );
+        let back: TeamPlanDraft = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.task, draft.task);
+        assert_eq!(back.task_ids, draft.task_ids);
+        assert_eq!(back.topology, TeamTopology::Pipeline);
+        assert_eq!(back.members.len(), 2);
+        assert_eq!(
+            back.members[1].system_prompt.as_deref(),
+            Some("execute the plan")
+        );
+        assert_eq!(back.max_rounds, Some(4));
+        assert_eq!(back.required, vec!["code".to_string()]);
+        assert_eq!(back.rationale, "write then execute");
+    }
+
+    #[test]
+    fn draft_deserializes_plan_json_without_optional_keys() {
+        let back: TeamPlanDraft = serde_json::from_str(
+            r#"{"task":"t","taskIds":[],"topology":"group_chat",
+                "members":[{"kind":"role","id":"r1","roleName":"w"}],
+                "rationale":"r"}"#,
+        )
+        .unwrap();
+        assert_eq!(back.max_rounds, None);
+        assert!(back.required.is_empty());
+        assert_eq!(back.members[0].system_prompt, None);
+    }
+
+    #[tokio::test]
+    async fn form_team_from_plan_commits_the_preview_verbatim() {
+        let (_dir, file) = temp_db();
+        {
+            let conn = rusqlite::Connection::open(&file).unwrap();
+            repos::providers::insert_provider(&conn, &provider_cfg("p-a", "A")).unwrap();
+            repos::providers::insert_provider(&conn, &provider_cfg("p-b", "B")).unwrap();
+        }
+        let db_path: Arc<str> = Arc::from(file.to_string_lossy().to_string());
+
+        let formed = form_team_from_plan(db_path.clone(), None, None, two_provider_draft(), 5)
+            .await
+            .unwrap();
+
+        assert_eq!(formed.team.member_role_ids.len(), 2);
+        assert_eq!(formed.created_role_ids.len(), 2);
+        assert_eq!(formed.rationale, "write then execute");
+        assert!(
+            formed.team.name.starts_with("auto-fix-the-"),
+            "team name derives from the draft task: {}",
+            formed.team.name
+        );
+
+        // Read back: both roles persisted, provider pins + prompt override kept.
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        let team = repos::teams::get(&conn, &formed.team.id).unwrap();
+        assert_eq!(team.topology, TeamTopology::Pipeline);
+        assert_eq!(team.config["maxRounds"], json!(4));
+        assert_eq!(team.config["required"], json!(["code"]));
+        let roles: Vec<Role> = repos::roles::list(&conn).unwrap();
+        let beta = roles.iter().find(|r| r.name == "beta").unwrap();
+        assert_eq!(beta.provider_id.as_deref(), Some("p-b"));
+        assert_eq!(
+            beta.system_prompt_override.as_deref(),
+            Some("execute the plan")
+        );
+
+        // Committing the SAME draft again must not collide: unique-name
+        // resolution recomputes against today's roles table.
+        let again = form_team_from_plan(db_path, None, None, two_provider_draft(), 5)
+            .await
+            .unwrap();
+        assert_ne!(again.team.id, formed.team.id);
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        let roles: Vec<Role> = repos::roles::list(&conn).unwrap();
+        assert!(
+            roles.iter().any(|r| r.name == "beta-2"),
+            "uniquified: {:?}",
+            roles.iter().map(|r| r.name.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn form_team_from_plan_rejects_drifted_references_without_writing() {
+        let (_dir, file) = temp_db();
+        {
+            let conn = rusqlite::Connection::open(&file).unwrap();
+            repos::providers::insert_provider(&conn, &provider_cfg("p-a", "A")).unwrap();
+            // p-b deliberately absent: catalog drifted since the proposal.
+        }
+        let db_path: Arc<str> = Arc::from(file.to_string_lossy().to_string());
+
+        // Baseline before the drift rejection (builtin roles are seeded by
+        // migration 0031, so zero is not the baseline).
+        let (teams_before, roles_before) = {
+            let conn = rusqlite::Connection::open(&file).unwrap();
+            (
+                repos::teams::list(&conn).unwrap().len(),
+                repos::roles::list(&conn).unwrap().len(),
+            )
+        };
+
+        let error = form_team_from_plan(db_path, None, None, two_provider_draft(), 5)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("unknown members"),
+            "drift must surface as unknown members: {error}"
+        );
+
+        // Rejection wrote nothing: teams and roles unchanged.
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        assert_eq!(repos::teams::list(&conn).unwrap().len(), teams_before);
+        assert_eq!(repos::roles::list(&conn).unwrap().len(), roles_before);
+    }
+
+    #[tokio::test]
+    async fn form_team_from_plan_enforces_member_ceiling() {
+        let (_dir, file) = temp_db();
+        let db_path: Arc<str> = Arc::from(file.to_string_lossy().to_string());
+        let mut draft = two_provider_draft();
+        draft.members.truncate(1);
+        let error = form_team_from_plan(db_path, None, None, draft, 5)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("member(s)"),
+            "member count guard must fire: {error}"
+        );
     }
 
     #[derive(Debug)]
