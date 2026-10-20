@@ -223,10 +223,43 @@ export function setEditorExtensionEnabled(id: string, enabled: boolean): void {
 
 // --- registration -----------------------------------------------------------
 
-/** Register an extension; a later registration with the same id wins. */
+/** Drop every contribution made by `id` (registry lists, queues, caps). */
+function removeContributionsOf(id: string): void {
+  const owned = (entry: { extId: string }): boolean => entry.extId !== id;
+  const keep = <T extends { extId: string }>(list: T[]): T[] => {
+    const filtered = list.filter(owned);
+    list.length = 0;
+    list.push(...filtered);
+    return list;
+  };
+  keep(previews);
+  keep(outlines);
+  keep(wysiwygEditors);
+  keep(toolbarActions);
+  keep(overlays);
+  keep(monacoQueue);
+  keep(readyQueue);
+  // Flushed providers were registered against the queue indexes before this
+  // removal; shrink the flush cursor so nothing re-flushes stale entries.
+  flushedCount = Math.min(flushedCount, monacoQueue.length);
+  capabilities.forEach((cap) => {
+    if (cap.startsWith(`${id}:`)) capabilities.delete(cap);
+  });
+}
+
+/**
+ * Register an extension; a later registration with the same id fully
+ * replaces the earlier one — its contributions are dropped first, so
+ * re-contribute() never duplicates outline/preview providers (each
+ * editor-tab mount re-runs activation; without this the outline panel
+ * would list every symbol N times after N mounts).
+ */
 export function registerEditorExtension(ext: EditorExtension): void {
   const existing = extensions.findIndex((e) => e.id === ext.id);
-  if (existing >= 0) extensions.splice(existing, 1);
+  if (existing >= 0) {
+    extensions.splice(existing, 1);
+    removeContributionsOf(ext.id);
+  }
   extensions.push(ext);
   activated.delete(ext.id);
   notify();
@@ -251,26 +284,7 @@ export function unregisterEditorExtension(id: string): void {
   if (idx < 0) return;
   extensions.splice(idx, 1);
   activated.delete(id);
-  const owned = (entry: { extId: string }): boolean => entry.extId !== id;
-  const keep = <T extends { extId: string }>(list: T[]): T[] => {
-    const filtered = list.filter(owned);
-    list.length = 0;
-    list.push(...filtered);
-    return list;
-  };
-  keep(previews);
-  keep(outlines);
-  keep(wysiwygEditors);
-  keep(toolbarActions);
-  keep(overlays);
-  keep(monacoQueue);
-  keep(readyQueue);
-  // Flushed providers were registered against the queue indexes before this
-  // removal; shrink the flush cursor so nothing re-flushes stale entries.
-  flushedCount = Math.min(flushedCount, monacoQueue.length);
-  capabilities.forEach((cap) => {
-    if (cap.startsWith(`${id}:`)) capabilities.delete(cap);
-  });
+  removeContributionsOf(id);
   notify();
 }
 

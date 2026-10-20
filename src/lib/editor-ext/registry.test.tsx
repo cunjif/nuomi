@@ -63,6 +63,25 @@ describe("editor extension registry — registration", () => {
     expect(getRegisteredEditorExtensions().at(-1)?.titleI18nKey).toBe("editor.ext.replacement");
   });
 
+  it("re-registering the same id does not duplicate contributions on re-activation", () => {
+    // Each editor-tab mount re-runs register (same id) + ensure-activated.
+    // The replacement must drop the old contributions first, else every
+    // cycle pushes another outline provider and the outline panel lists
+    // each symbol once per mount (P2-E regression).
+    const ext = (): EditorExtension => ({
+      id: "builtin.again",
+      titleI18nKey: "editor.ext.again",
+      contribute: (ctx) => ctx.registerOutline({ id: "s", languages: ["*"], provideSymbols: () => [] }),
+    });
+    registerEditorExtension(ext());
+    ensureEditorExtensionsActivated();
+    registerEditorExtension(ext());
+    ensureEditorExtensionsActivated();
+    registerEditorExtension(ext());
+    ensureEditorExtensionsActivated();
+    expect(getOutlineProviders()).toHaveLength(1);
+  });
+
   it("unregister removes the extension and all of its contributions", () => {
     registerEditorExtension({
       id: "plugin.upper.editor",
