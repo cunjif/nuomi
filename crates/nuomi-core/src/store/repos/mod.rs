@@ -10,6 +10,7 @@ pub mod journal;
 pub mod memory;
 pub mod message_queue;
 pub mod prompts;
+pub mod proposals;
 pub mod providers;
 pub mod roles;
 pub mod sandbox_tasks;

@@ -725,6 +725,53 @@ pub struct Approval {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStatus {
+    Pending,
+    Approved,
+    Denied,
+}
+
+impl ProposalStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProposalStatus::Pending => "pending",
+            ProposalStatus::Approved => "approved",
+            ProposalStatus::Denied => "denied",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ProposalStatus> {
+        match s {
+            "pending" => Some(ProposalStatus::Pending),
+            "approved" => Some(ProposalStatus::Approved),
+            "denied" => Some(ProposalStatus::Denied),
+            _ => None,
+        }
+    }
+}
+
+/// An advisory team-formation plan awaiting a human decision (P2-F 组 2).
+/// Producers (`scheduled` auto-formation, `idle` backlog scans, future
+/// manual saves) record an LLM-planned draft here; approval materializes it
+/// through `services::team_former::form_team_from_plan` — nothing is written
+/// before the human says yes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Proposal {
+    pub id: String,
+    /// Proposal family; v1 ships `team_plan` only.
+    pub kind: String,
+    /// Producer of the proposal: `scheduled` | `idle` | `manual`.
+    pub source: String,
+    /// Serialized `services::team_former::TeamPlanDraft`.
+    pub plan_json: String,
+    pub status: ProposalStatus,
+    pub workspace_id: String,
+    pub resolved_at: Option<i64>,
+    pub created_at: i64,
+}
+
 /// Target type a schedule creates when it fires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
