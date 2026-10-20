@@ -282,6 +282,28 @@ export function testDoubleCommands(): CommandSet {
       else tdState.approvals.splice(idx, 1); // approved items leave the inbox too
       return ok(null);
     },
+    async listProposals(_workspaceId: string | null) {
+      return ok([...tdState.proposals]);
+    },
+    async resolveProposal(proposalId, approved) {
+      const idx = tdState.proposals.findIndex((p) => p.id === proposalId);
+      if (idx < 0) return err("store.not_found", `proposal#${proposalId} not found`);
+      // Resolved proposals leave the pending inbox either way; approving
+      // also materializes the planned team (mirror of the Rust path).
+      const proposal = tdState.proposals.splice(idx, 1)[0];
+      if (approved && proposal) {
+        tdState.teams.push({
+          id: `team-${proposalId}`,
+          name: `auto-${proposal.plan.task.slice(0, 12) || "task"}`,
+          topology: proposal.plan.topology,
+          memberRoleIds: proposal.plan.members.map((_, i) => `role-${proposalId}-${i}`),
+          config: {},
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      return ok(null);
+    },
     async listDir(path) {
       return ok(listDir(path));
     },

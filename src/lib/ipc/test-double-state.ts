@@ -32,6 +32,8 @@ interface DoubleState {
   tasks: TaskDto[];
   runs: RunDto[];
   approvals: ApprovalDto[];
+  /** Pending team-plan proposals (P2-F 组 2) served by listProposals. */
+  proposals: import("./bindings.gen").ProposalDto[];
   schedules: ScheduleDto[];
   providers: ProviderDto[];
   /** Catalog returned by listProviderModels (tests override per case). */
@@ -84,6 +86,7 @@ export const tdState: DoubleState = {
   tasks: [],
   runs: [],
   approvals: [],
+  proposals: [],
   schedules: [],
   providers: [],
   providerModels: ["gpt-4o", "gpt-4o-mini"],
@@ -212,6 +215,7 @@ export function tdReset(): void {
   tdState.tasks.length = 0;
   tdState.runs.length = 0;
   tdState.approvals.length = 0;
+  tdState.proposals.length = 0;
   tdState.schedules.length = 0;
   tdState.providers.length = 0;
   tdState.providerModels = ["gpt-4o", "gpt-4o-mini"];

@@ -486,7 +486,16 @@
     "approve": "批准",
     "deny": "拒绝",
     "resolveFailed": "处理审批失败",
-    "arguments": "参数"
+    "arguments": "参数",
+    "proposal": {
+      "heading": "组队提案",
+      "sourceScheduled": "定时自发",
+      "sourceIdle": "空闲扫描",
+      "sourceManual": "手动保存",
+      "members": "成员",
+      "taskCount": "{{count}} 个关联任务",
+      "maxRounds": "最大轮数 {{count}}"
+    }
   },
   "scheduler": {
     "heading": "定时任务",

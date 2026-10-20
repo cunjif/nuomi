@@ -117,6 +117,9 @@ export const ipc = {
   listPendingApprovals: (workspaceId: string | null) => unwrap(current.listPendingApprovals(workspaceId)),
   resolveApproval: (approvalId: string, approved: boolean) =>
     unwrap(current.resolveApproval(approvalId, approved)),
+  listProposals: (workspaceId: string | null) => unwrap(current.listProposals(workspaceId)),
+  resolveProposal: (proposalId: string, approved: boolean) =>
+    unwrap(current.resolveProposal(proposalId, approved)),
   listDir: (path: string, workspaceId?: string | null) =>
     unwrap(current.listDir(path, workspaceId ?? null)),
   readFile: (path: string, workspaceId?: string | null) =>

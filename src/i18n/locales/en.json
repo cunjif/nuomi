@@ -486,7 +486,16 @@
     "approve": "Approve",
     "deny": "Deny",
     "resolveFailed": "Failed to resolve approval",
-    "arguments": "Arguments"
+    "arguments": "Arguments",
+    "proposal": {
+      "heading": "Team proposal",
+      "sourceScheduled": "Scheduled",
+      "sourceIdle": "Idle scan",
+      "sourceManual": "Manual",
+      "members": "Members",
+      "taskCount": "{{count}} linked task(s)",
+      "maxRounds": "max rounds {{count}}"
+    }
   },
   "scheduler": {
     "heading": "Scheduled tasks",

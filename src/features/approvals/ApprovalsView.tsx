@@ -9,12 +9,15 @@ import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
 import { ApprovalRow } from "./ApprovalRow";
+import { ProposalRow } from "./ProposalRow";
 import { ViewScopeToggle } from "../common/ViewScopeToggle";
 import { useViewScope } from "../common/useViewScope";
 
 /**
  * Approvals inbox: polled as a safety net and invalidated immediately by
- * `approval.*` events on the global domain channel.
+ * `approval.*` / `proposal.*` events on the global domain channel. Holds two
+ * row families — sensitive-tool approvals and advisory team-plan proposals
+ * (P2-F 组 2) — in one list.
  */
 export function ApprovalsView({ workspaceId }: { workspaceId: string | null }): ReactNode {
   const { t } = useTranslation();
@@ -28,18 +31,38 @@ export function ApprovalsView({ workspaceId }: { workspaceId: string | null }): 
     queryFn: () => ipc.listPendingApprovals(workspaceFilter),
     refetchInterval: 5000,
   });
+  const proposalsQuery = useQuery({
+    queryKey: ["proposals", workspaceFilter],
+    queryFn: () => ipc.listProposals(workspaceFilter),
+    refetchInterval: 5000,
+  });
 
-  const resolveMut = useMutation({
-    mutationFn: ({ id, approved }: { id: string; approved: boolean }) => ipc.resolveApproval(id, approved),
+  const resolveApprovalMut = useMutation({
+    mutationFn: ({ id, approved }: { id: string; approved: boolean }) =>
+      ipc.resolveApproval(id, approved),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["approvals"] }),
+    onError: (e) => toast.error(`${t("approvals.resolveFailed")}: ${describeError(e)}`),
+  });
+  const resolveProposalMut = useMutation({
+    mutationFn: ({ id, approved }: { id: string; approved: boolean }) =>
+      ipc.resolveProposal(id, approved),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["proposals"] }),
     onError: (e) => toast.error(`${t("approvals.resolveFailed")}: ${describeError(e)}`),
   });
 
   useDomainEvents([DOMAIN_CHANNEL], (batch) => {
-    if (batch.some((e) => e.type.startsWith("approval."))) {
+    if (
+      batch.some(
+        (e) => e.type.startsWith("approval.") || e.type.startsWith("proposal."),
+      )
+    ) {
       void qc.invalidateQueries({ queryKey: ["approvals"] });
+      void qc.invalidateQueries({ queryKey: ["proposals"] });
     }
   });
+
+  const approvals = approvalsQuery.data ?? [];
+  const proposals = proposalsQuery.data ?? [];
 
   return (
     <div className="h-full overflow-y-auto p-3">
@@ -48,20 +71,32 @@ export function ApprovalsView({ workspaceId }: { workspaceId: string | null }): 
         <ViewScopeToggle surface="approvals" scope={scope} onScopeChange={setScope} />
       </div>
       <AsyncBoundary
-        isLoading={approvalsQuery.isLoading}
-        error={approvalsQuery.error}
-        isEmpty={(approvalsQuery.data?.length ?? 0) === 0}
+        isLoading={approvalsQuery.isLoading || proposalsQuery.isLoading}
+        error={approvalsQuery.error ?? proposalsQuery.error}
+        isEmpty={approvals.length === 0 && proposals.length === 0}
         emptyLabel={t("approvals.empty")}
-        onRetry={() => void approvalsQuery.refetch()}
+        onRetry={() => {
+          void approvalsQuery.refetch();
+          void proposalsQuery.refetch();
+        }}
       >
         <ul className="flex flex-col gap-2">
-          {(approvalsQuery.data ?? []).map((approval) => (
+          {approvals.map((approval) => (
             <ApprovalRow
               key={approval.id}
               approval={approval}
               scope={scope}
-              pending={resolveMut.isPending}
-              onResolve={(id, approved) => resolveMut.mutate({ id, approved })}
+              pending={resolveApprovalMut.isPending}
+              onResolve={(id, approved) => resolveApprovalMut.mutate({ id, approved })}
+            />
+          ))}
+          {proposals.map((proposal) => (
+            <ProposalRow
+              key={proposal.id}
+              proposal={proposal}
+              scope={scope}
+              pending={resolveProposalMut.isPending}
+              onResolve={(id, approved) => resolveProposalMut.mutate({ id, approved })}
             />
           ))}
         </ul>
