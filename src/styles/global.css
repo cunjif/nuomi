@@ -39,6 +39,12 @@
      kraft raised surface (#fffdf5) this lands near #d3cfc6 — visible as a
      hairline, never competing with the tab title. */
   --nuomi-divider: rgba(107, 99, 88, 0.28);
+  /* Selected-text ink (::selection). The light family puts near-white on its
+     deep accent (≈6.6:1 — the old hard-coded black only reached ~3.1:1); the
+     dark family flips to black on its bright accents (chalk blue ≈7.5:1,
+     high-contrast yellow 21:1). Guarded by themeContrast.test.ts; never used
+     with an alpha modifier, so no rgb mirror (same as scrim/divider). */
+  --nuomi-selection-ink: #fffdf5;
   /* RGB-channel mirrors of the hex tokens above — Tailwind maps these with
      `<alpha-value>` so `bg-ink-muted/30` (and every other alpha modifier)
      actually generates CSS; a plain `var()` color cannot take an alpha.
@@ -93,6 +99,8 @@
   /* Hairline separators — chalk dust on the blackboard: muted chalk (#9aa3ad)
      at low alpha over #0d0d0d lands near #33363a, a faint grey rule. */
   --nuomi-divider: rgba(154, 163, 173, 0.26);
+  /* Selected-text ink — black on the bright chalk-blue accent (see :root note). */
+  --nuomi-selection-ink: #000000;
   /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
   --nuomi-surface-rgb: 0 0 0;
   --nuomi-surface-raised-rgb: 13 13 13;
@@ -141,6 +149,8 @@
   --nuomi-scrollbar-hover: #9aa1ad;
   /* Hairline separators — pencil-grey on white, same recipe as paper-light. */
   --nuomi-divider: rgba(91, 101, 114, 0.28);
+  /* Selected-text ink — white on the deep notebook-blue accent (see :root note). */
+  --nuomi-selection-ink: #ffffff;
   /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
   --nuomi-surface-rgb: 248 249 250;
   --nuomi-surface-raised-rgb: 255 255 255;
@@ -152,6 +162,13 @@
   --nuomi-warn-rgb: 138 101 8;
   --nuomi-danger-rgb: 189 38 38;
   --nuomi-diff-add-rgb: 3 105 161;
+  /* Pencil-grey grain for .sketch-card etc. — redefinition of the paper
+     texture variable so cards on this theme stop inheriting :root's warm
+     kraft-brown speckle (which read as dirt over the blue ruled grid).
+     Same turbulence recipe, channels retuned to the ink-muted pencil tone
+     (#5b6572 → 0.36/0.40/0.45 offsets, same ~6% alpha). */
+  --nuomi-paper-texture:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.36 0 0 0 0 0.4 0 0 0 0 0.45 0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
   /* 24px blue ruling (review §4.2.2). */
   --nuomi-grid-texture:
     linear-gradient(rgba(49, 80, 203, 0.08) 1px, transparent 1px),
@@ -187,6 +204,8 @@
   /* Hairline separators — this theme trades subtlety for visibility, so the
      rule is roughly twice as opaque as the other three (near #666 on black). */
   --nuomi-divider: rgba(204, 204, 204, 0.5);
+  /* Selected-text ink — black on the pure-yellow accent, 21:1 (see :root note). */
+  --nuomi-selection-ink: #000000;
   /* RGB-channel mirrors (see :root note; hex ↔ rgb guard in themeContrast.test.ts). */
   --nuomi-surface-rgb: 0 0 0;
   --nuomi-surface-raised-rgb: 10 10 10;
@@ -269,7 +288,7 @@
 
   ::selection {
     background: var(--nuomi-accent);
-    color: #000000;
+    color: var(--nuomi-selection-ink);
   }
 }
 
@@ -527,11 +546,15 @@
   }
 }
 
-/* Print: paper texture and chalk dust are screen-only decoration — keep
-   toner on the content (review §4.2). */
+/* Print: paper texture, chalk dust and the notebook's blue ruling are
+   screen-only decoration — keep toner on the content (review §4.2). The
+   grid-notebook body rule needs its own selector here: [data-theme] body
+   (0,1,1) outranks a bare `body` (0,0,1) in the main sheet, and `.dark body`
+   never matches the light-family grid theme. */
 @media print {
   body,
-  .dark body {
+  .dark body,
+  [data-theme="grid-notebook"] body {
     background-image: none;
   }
 }

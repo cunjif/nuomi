@@ -55,6 +55,7 @@ const TOKEN_VARS = [
   "cap-vo",
   "cap-vi",
   "diff-add",
+  "selection-ink",
 ] as const;
 type TokenVar = (typeof TOKEN_VARS)[number];
 // resolveTheme stores vars camelCased via `toCamel` (surface-raised →
@@ -214,6 +215,13 @@ const PAIRS: ContrastPair[] = [
     fg: (t) => t.ink,
     bg: (t) => compositeOver(t.scrim, t.surface),
   },
+  {
+    name: "selection: selection-ink on accent",
+    threshold: TEXT_MIN,
+    rationale: "global.css ::selection rule (light family ≈6.6:1, chalk blue ≈7.5:1, yellow 21:1)",
+    fg: (t) => t.selectionInk,
+    bg: (t) => t.accent,
+  },
   // ── Diff rows (DiffView.tsx): the row tint is fg/10 over the panel the
   // diff renders on; the sign glyph and the line text must both stay legible,
   // and which theme+surface is worst case flips between the light (dark ink)
@@ -298,8 +306,9 @@ const THEMES: ReadonlyArray<{
 
 // Tokens that carry an `--nuomi-X-rgb` mirror (space-separated triple) in
 // tailwind.config.cjs via `rgb(var(--nuomi-X-rgb) / <alpha-value>)`. Scrim,
-// divider and cap-* deliberately have no mirror: their alpha is baked into
-// the value itself and they are never used with an alpha modifier.
+// divider, cap-* and selection-ink deliberately have no mirror: their alpha
+// is baked into the value itself (or they are plain opaque fills) and they
+// are never used with an alpha modifier.
 const RGB_MIRRORED_TOKENS = [
   "surface",
   "surface-raised",
