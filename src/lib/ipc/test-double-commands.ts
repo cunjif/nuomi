@@ -32,6 +32,7 @@ import type {
   DiffResultDto,
   FileReferenceDto,
   IpcError,
+  IdleProposalSettingsInput,
   InjectableRuleDto,
   InjectableSessionDto,
   IntegrationDto,
@@ -303,6 +304,21 @@ export function testDoubleCommands(): CommandSet {
           updatedAt: 1,
         });
       }
+      return ok(null);
+    },
+    async idleCheck() {
+      // The decision table lives in Rust; the double keeps the contract
+      // shape (no proposal unless a test seeds one explicitly).
+      return ok(null);
+    },
+    async getIdleProposalSettings() {
+      return ok({ ...tdState.idleProposalSettings });
+    },
+    async setIdleProposalSettings(input: IdleProposalSettingsInput) {
+      if (input.timeoutMinutes <= 0) {
+        return err("idle_proposal.invalid_timeout", "timeout_minutes must be greater than zero");
+      }
+      tdState.idleProposalSettings = { ...input };
       return ok(null);
     },
     async listDir(path) {

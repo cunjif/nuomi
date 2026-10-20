@@ -1891,6 +1891,158 @@ pub async fn impl_create_team_proposal(
     Ok(proposal)
 }
 
+// ---------- idle proposal (ADR 0023, P2-F 组 4) ----------
+
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleProposalSettingsDto {
+    pub enabled: bool,
+    pub timeout_minutes: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleProposalSettingsInput {
+    pub enabled: bool,
+    pub timeout_minutes: u32,
+}
+
+/// Frontend-reported idle check (ADR 0023): runs the decision table
+/// (config / focused-workspace backlog / anti-nag gates) and, on a pass,
+/// plans one backlog-cleanup team and records a pending advisory
+/// proposal. Returns the created proposal, or `None` when any gate said
+/// no. Planning failures degrade to `None` with a warn log — advisory
+/// proposals are never worth an error toast; the next idle window
+/// retries naturally.
+pub async fn impl_idle_check(state: &AppState) -> Result<Option<ProposalDto>, IpcError> {
+    let path = state.db_path.clone();
+    let verdict = tokio::task::spawn_blocking(
+        move || -> Result<(nuomi_core::services::IdleCheckOutcome, Option<String>), IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let focused = repos::workspace_open_state::find_focused(&db.0)?;
+            let workspace_id = focused.map(|r| r.workspace_id);
+            let now = now_ms();
+            let outcome =
+                nuomi_core::services::evaluate_idle_proposal(&db.0, now, workspace_id.as_deref())?;
+            Ok((outcome, workspace_id))
+        },
+    )
+    .await??;
+    let (outcome, workspace_id) = verdict;
+    let tasks = match outcome {
+        nuomi_core::services::IdleCheckOutcome::Trigger { tasks } => tasks,
+        nuomi_core::services::IdleCheckOutcome::SkipDisabled => {
+            tracing::info!("idle check: disabled — skipping");
+            return Ok(None);
+        }
+        nuomi_core::services::IdleCheckOutcome::SkipNoBacklog { queued } => {
+            tracing::info!(queued, "idle check: backlog below threshold — skipping");
+            return Ok(None);
+        }
+        nuomi_core::services::IdleCheckOutcome::SkipPendingProposal => {
+            tracing::info!("idle check: a pending idle proposal already exists — skipping");
+            return Ok(None);
+        }
+        nuomi_core::services::IdleCheckOutcome::SkipCooldown { remaining_ms } => {
+            tracing::info!(remaining_ms, "idle check: cooldown active — skipping");
+            return Ok(None);
+        }
+    };
+    let workspace_id = workspace_id.unwrap_or_else(|| "__migrated__".to_string());
+    let prompt = nuomi_core::services::backlog_prompt(&tasks);
+    let task_ids = tasks.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+    let draft = match nuomi_core::services::draft_team_plan(
+        state.db_path.clone(),
+        state.secrets.clone(),
+        Some(state.current_workspace()),
+        &prompt,
+        task_ids,
+        FORM_TEAM_MAX_MEMBERS,
+    )
+    .await
+    {
+        Ok(draft) => draft,
+        Err(e) => {
+            tracing::warn!(error = %e, "idle check: team planning failed — no proposal recorded");
+            return Ok(None);
+        }
+    };
+    let proposal = impl_create_team_proposal(
+        state,
+        draft,
+        nuomi_core::services::IDLE_PROPOSAL_SOURCE,
+        &workspace_id,
+    )
+    .await?;
+    let plan: nuomi_core::services::TeamPlanDraft = serde_json::from_str(&proposal.plan_json)
+        .map_err(|error| IpcError::new("proposal.plan_unreadable", error.to_string()))?;
+    Ok(Some(ProposalDto {
+        id: proposal.id,
+        kind: proposal.kind,
+        source: proposal.source,
+        plan: TeamPlanDraftDto::from(plan),
+        status: proposal.status.as_str().to_string(),
+        workspace_id: proposal.workspace_id,
+        workspace_label: None,
+        created_at: proposal.created_at,
+        resolved_at: proposal.resolved_at,
+    }))
+}
+
+/// Reads the two Settings-visible idle-proposal keys (ADR 0023 决策 7 —
+/// the backlog threshold / cooldown keys stay documented defaults).
+pub async fn impl_get_idle_proposal_settings(
+    state: &AppState,
+) -> Result<IdleProposalSettingsDto, IpcError> {
+    let path = state.db_path.clone();
+    let settings =
+        tokio::task::spawn_blocking(move || -> Result<IdleProposalSettingsDto, IpcError> {
+            let db = Db::open(&path)?;
+            migrations::run(&db.0)?;
+            let config = nuomi_core::services::IdleProposalConfig::load(&db.0);
+            Ok(IdleProposalSettingsDto {
+                enabled: config.enabled,
+                timeout_minutes: u32::try_from(config.timeout_minutes)
+                    .unwrap_or(nuomi_core::services::IDLE_DEFAULT_TIMEOUT_MINUTES as u32),
+            })
+        })
+        .await??;
+    Ok(settings)
+}
+
+/// Persists the two Settings-visible keys. `timeout_minutes` must be > 0;
+/// the backlog/cooldown keys are left untouched.
+pub async fn impl_set_idle_proposal_settings(
+    state: &AppState,
+    input: IdleProposalSettingsInput,
+) -> Result<(), IpcError> {
+    if input.timeout_minutes == 0 {
+        return Err(IpcError::new(
+            "idle_proposal.invalid_timeout",
+            "timeout_minutes must be greater than zero",
+        ));
+    }
+    let path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::settings::set(
+            &db.0,
+            nuomi_core::services::IDLE_ENABLED_KEY,
+            &input.enabled.to_string(),
+        )?;
+        repos::settings::set(
+            &db.0,
+            nuomi_core::services::IDLE_TIMEOUT_KEY,
+            &input.timeout_minutes.to_string(),
+        )?;
+        Ok(())
+    })
+    .await??;
+    Ok(())
+}
+
 // ---------- workspace ----------
 
 pub async fn impl_list_dir(

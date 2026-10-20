@@ -174,6 +174,30 @@ async resolveProposal(proposalId: string, approved: boolean) : Promise<Result<nu
     else return { status: "error", error: e  as any };
 }
 },
+async idleCheck() : Promise<Result<ProposalDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("idle_check") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getIdleProposalSettings() : Promise<Result<IdleProposalSettingsDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_idle_proposal_settings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setIdleProposalSettings(input: IdleProposalSettingsInput) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_idle_proposal_settings", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listDir(path: string, workspaceId: string | null) : Promise<Result<FileEntryDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_dir", { path, workspaceId }) };
@@ -1660,6 +1684,8 @@ export type GateDecisionDto = { kind: string; feedback?: string | null }
 export type GitCommitDto = { hash: string; subject: string; author: string }
 export type GitStatusDto = { indexStatus: string; worktreeStatus: string; path: string }
 export type GitWorktreeDto = { path: string; head: string | null; branch: string | null; isCurrent: boolean }
+export type IdleProposalSettingsDto = { enabled: boolean; timeoutMinutes: number }
+export type IdleProposalSettingsInput = { enabled: boolean; timeoutMinutes: number }
 export type InjectableRuleDto = { id: string; name: string; systemPrompt: string | null }
 export type InjectableSessionDto = { id: string; title: string; kind: string; updatedAt: number }
 /**

@@ -27,6 +27,7 @@ import {
   type JsonValue,
   type LayoutSnapshotDto,
   type OrphanSessionDto,
+  type IdleProposalSettingsInput,
   type RecentWorkspaceDto,
   type RemoveWorkspaceResult,
   type Result,
@@ -120,6 +121,10 @@ export const ipc = {
   listProposals: (workspaceId: string | null) => unwrap(current.listProposals(workspaceId)),
   resolveProposal: (proposalId: string, approved: boolean) =>
     unwrap(current.resolveProposal(proposalId, approved)),
+  idleCheck: () => unwrap(current.idleCheck()),
+  getIdleProposalSettings: () => unwrap(current.getIdleProposalSettings()),
+  setIdleProposalSettings: (input: IdleProposalSettingsInput) =>
+    unwrap(current.setIdleProposalSettings(input)),
   listDir: (path: string, workspaceId?: string | null) =>
     unwrap(current.listDir(path, workspaceId ?? null)),
   readFile: (path: string, workspaceId?: string | null) =>

@@ -479,6 +479,31 @@ pub async fn delete_schedule(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn idle_check(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<commands::ProposalDto>, IpcError> {
+    commands::impl_idle_check(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_idle_proposal_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::IdleProposalSettingsDto, IpcError> {
+    commands::impl_get_idle_proposal_settings(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_idle_proposal_settings(
+    state: tauri::State<'_, AppState>,
+    input: commands::IdleProposalSettingsInput,
+) -> Result<(), IpcError> {
+    commands::impl_set_idle_proposal_settings(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn upsert_provider(
     state: tauri::State<'_, AppState>,
     provider: commands::ProviderInput,
