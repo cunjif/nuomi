@@ -18,7 +18,7 @@ pub use research::{
     online_authorized, set_online_authorized, ResearchAllowlist, ResearchFetcher,
     ResearchReportEntry, ResearchScheduler,
 };
-pub use review::{DefaultReviewGate, ReviewGate, ReviewProposal, ReviewVerdict};
+pub use review::{DefaultReviewGate, LlmReviewGate, ReviewGate, ReviewProposal, ReviewVerdict};
 pub use scheduler::{CooldownDecision, CooldownGate, PeriodicResearch, DEFAULT_COOLDOWN};
 pub use trajectory::{TrajectoryAggregator, TrajectorySummary};
 pub use versioning::{ApplyBaseline, ApplySnapshot, PromptVersionManager};
