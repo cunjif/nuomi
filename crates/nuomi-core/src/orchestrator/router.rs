@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::domain::Role;
 use crate::providers::{ChatMessage, ChatRequest};
 
-use super::input::{ProviderResolver, TeamRunInput};
+use super::input::{recorded_cli_handle, ProviderResolver, RecordedCliHandle, TeamRunInput};
 use super::whiteboard::{record_turn, WhiteBoardService};
 use super::OrchestratorError;
 
@@ -18,6 +18,9 @@ pub struct RouterOutcome {
     pub role_id: String,
     pub role_name: String,
     pub output: String,
+    /// CLI Agent session handle observed during the run (ADR 0012 D8) —
+    /// team_runner upserts it into `session_cli_handles` at settlement.
+    pub cli_handles: Vec<RecordedCliHandle>,
 }
 
 /// Reads the `capabilities` string array out of `Role.params`.
@@ -137,7 +140,10 @@ impl RouterExecutor {
             max_tokens: role.max_tokens,
             cache_retention: Default::default(),
             cache_scope: None,
-            external_session_id: None,
+            // Resume the routed member's own CLI session when it ran before
+            // (ADR 0012 D8); non-CLI providers ignore the field. Ephemeral
+            // temp roles never carry a handle (nothing persisted for them).
+            external_session_id: input.cli_handles.get(&role.id).cloned(),
         };
 
         let response = provider
@@ -168,6 +174,7 @@ impl RouterExecutor {
         Ok(RouterOutcome {
             role_id: role.id.clone(),
             role_name: role.name.clone(),
+            cli_handles: recorded_cli_handle(&role, &response).into_iter().collect(),
             output: response.content,
         })
     }
@@ -178,6 +185,7 @@ mod tests {
     use super::*;
     use crate::domain::{new_id, Team, TeamTopology};
     use crate::providers::{FakeLlm, LlmProvider};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn role(name: &str, caps: &[&str]) -> Role {
@@ -221,6 +229,7 @@ mod tests {
             },
             model: "m".into(),
             workspace_id: None,
+            cli_handles: HashMap::new(),
         }
     }
 

@@ -54,6 +54,10 @@ pub struct TeamRunOutcome {
     pub converged: bool,
     /// Executed turns: pipeline stages / 1 for router / discussion rounds.
     pub rounds: usize,
+    /// CLI Agent session handles observed during the run (ADR 0012 D8) —
+    /// upserted into `session_cli_handles` at run settlement so later runs
+    /// resume each member's own CLI session.
+    pub cli_handles: Vec<crate::orchestrator::RecordedCliHandle>,
 }
 
 /// Builds every usable client from `provider_configs` + enabled
@@ -216,6 +220,14 @@ pub async fn run_team(
             wb = wb.with_bus(bus.clone());
         }
 
+        // CLI Agent resume handles (ADR 0012 D8) for members bound to an
+        // agent profile: role_id → that member's persisted CLI session id.
+        // Binding-change detection is simplified vs the single-chat path: a
+        // handle bound to a different profile is cleared (fresh start); the
+        // group's shared whiteboard context makes history truncation moot.
+        // Best-effort — a lookup failure just runs without resume.
+        let cli_handles = load_member_cli_handles(&db_path, session_id, &roles).await;
+
         let input = TeamRunInput {
             session_id: session_id.to_string(),
             task: task.to_string(),
@@ -223,6 +235,7 @@ pub async fn run_team(
             team: team.clone(),
             model,
             workspace_id,
+            cli_handles,
         };
 
         match team.topology {
@@ -232,6 +245,7 @@ pub async fn run_team(
                     final_output: outcome.final_output,
                     converged: true,
                     rounds: outcome.steps.len(),
+                    cli_handles: outcome.cli_handles,
                 })
             }
             TeamTopology::Router => {
@@ -263,6 +277,7 @@ pub async fn run_team(
                     final_output: outcome.output,
                     converged: true,
                     rounds: 1,
+                    cli_handles: outcome.cli_handles,
                 })
             }
             TeamTopology::GroupChat => {
@@ -309,11 +324,52 @@ pub async fn run_team(
                         .unwrap_or_default(),
                     converged: outcome.converged,
                     rounds: outcome.rounds,
+                    cli_handles: outcome.cli_handles,
                 })
             }
         }
     }
     .await;
+
+    // CLI handle persistence (ADR 0012 D8, team path): upsert each member
+    // agent's latest CLI session id so the next run resumes it. Success path
+    // only — a failed run's outcome carries no handles (fresh restart on the
+    // next attempt). Best-effort: a persistence failure never masks the run's
+    // own outcome, it only logs.
+    if let Ok(outcome) = &result {
+        if !outcome.cli_handles.is_empty() {
+            let handles = outcome.cli_handles.clone();
+            let sid = session_id.to_string();
+            let hs_path = db_path.clone();
+            let persisted = tokio::task::spawn_blocking(
+                move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                    let conn = Db::open(&hs_path)?;
+                    migrations::run(&conn.0)?;
+                    for h in handles {
+                        repos::session_cli_handles::upsert(
+                            &conn.0,
+                            &crate::domain::SessionCliHandle {
+                                session_id: sid.clone(),
+                                role_agent_id: h.role_id,
+                                agent_profile_id: h.agent_profile_id,
+                                cli_session_id: Some(h.cli_session_id),
+                                updated_at: crate::domain::now_ms(),
+                            },
+                        )?;
+                    }
+                    Ok(())
+                },
+            )
+            .await;
+            match persisted {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "failed to persist team cli handles; run output is already saved")
+                }
+                Err(e) => tracing::warn!(error = %e, "team cli handle persist join failed"),
+            }
+        }
+    }
 
     // Run-end GC — the SINGLE wiring point for ephemeral temp-role cleanup
     // (services::capability_router docs). Every run_team caller (task runs,
@@ -342,6 +398,68 @@ pub async fn run_team(
 }
 
 // ---------------------------------------------------------------- helpers
+
+/// Loads persisted CLI Agent resume handles for team members bound to an
+/// agent profile (ADR 0012 D8): role_id → CLI session id. A handle bound to
+/// a different profile than the role's current binding is cleared (fresh
+/// start). Best-effort: any failure yields an empty map — the run just
+/// proceeds without resume.
+async fn load_member_cli_handles(
+    db_path: &Arc<str>,
+    session_id: &str,
+    roles: &[Role],
+) -> HashMap<String, String> {
+    let members: Vec<(String, String)> = roles
+        .iter()
+        .filter_map(|r| {
+            r.params
+                .get("agent_profile_id")
+                .and_then(Value::as_str)
+                .map(|p| (r.id.clone(), p.to_string()))
+        })
+        .collect();
+    if members.is_empty() {
+        return HashMap::new();
+    }
+    let db_path = db_path.clone();
+    let sid = session_id.to_string();
+    let loaded = tokio::task::spawn_blocking(move || -> CoreResult<HashMap<String, String>> {
+        let conn = Db::open(&db_path)?;
+        migrations::run(&conn.0)?;
+        let mut map = HashMap::new();
+        for (role_id, profile_id) in members {
+            match repos::session_cli_handles::get(&conn.0, &sid, &role_id) {
+                Ok(Some(h)) if h.agent_profile_id == profile_id => {
+                    if let Some(cli_session_id) = h.cli_session_id {
+                        map.insert(role_id, cli_session_id);
+                    }
+                }
+                // Binding changed since the handle was written: drop it so
+                // the member starts a fresh CLI session.
+                Ok(Some(_)) => {
+                    let _ = repos::session_cli_handles::clear(&conn.0, &sid, &role_id);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "cli handle lookup failed; member will start fresh")
+                }
+            }
+        }
+        Ok(map)
+    })
+    .await;
+    match loaded {
+        Ok(Ok(map)) => map,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "cli handle lookup failed; members start fresh");
+            HashMap::new()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "cli handle lookup join failed; members start fresh");
+            HashMap::new()
+        }
+    }
+}
 
 /// Reads provider configs + agent profiles with one short-lived connection.
 async fn read_catalog(db_path: Arc<str>) -> CoreResult<(Vec<ProviderConfig>, Vec<AgentProfile>)> {

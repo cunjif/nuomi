@@ -14,7 +14,7 @@ pub use delegation::{
     DelegationTask, TaskId, TaskStatus,
 };
 pub use group_chat::{GroupChatExecutor, GroupChatOutcome, GroupDeltaBridge, HANDOFF_TOOL};
-pub use input::{ProviderResolver, TeamRunInput};
+pub use input::{recorded_cli_handle, ProviderResolver, RecordedCliHandle, TeamRunInput};
 pub use pipeline::{PipelineExecutor, PipelineOutcome, PipelineStep};
 pub use router::RouterExecutor;
 pub use selector::{

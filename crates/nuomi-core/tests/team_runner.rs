@@ -834,3 +834,89 @@ async fn run_team_gc_removes_ephemeral_temp_roles_on_failure() {
         .unwrap();
     assert_eq!(remaining, 0, "failure path must still GC temp roles");
 }
+
+/// ADR 0012 D8 (team path, end-to-end): a CLI-Agent member's reported
+/// session id is persisted to `session_cli_handles` at run settlement, and a
+/// stale handle from a DIFFERENT profile binding is replaced (binding-change
+/// fresh start) rather than resurrected.
+#[tokio::test]
+async fn run_team_persists_cli_member_session_handle_and_replaces_stale_binding() {
+    let session_id = "sess-cli-handle";
+    let store = seed_store(session_id);
+
+    let profile = AgentProfile {
+        id: "cli-cc".into(),
+        name: "claude fixture".into(),
+        adapter: "cli".into(),
+        flavor: CliFlavor::ClaudeCode,
+        command: "node".into(),
+        args: json!([fixture_path(), "claude_code"]),
+        env: json!({}),
+        working_dir: None,
+        enabled: true,
+        created_at: 1,
+        updated_at: 1,
+        model_id: None,
+        resume_args: None,
+    };
+
+    {
+        let conn = connect(&store);
+        repos::agent_profiles::insert(&conn, &profile).unwrap();
+        let mut exec_role = role_row("r-cli", "executor", None, &[]);
+        exec_role.params = json!({ "agent_profile_id": "cli-cc" });
+        repos::roles::insert(&conn, &exec_role).unwrap();
+        repos::teams::insert(
+            &conn,
+            &team_row(
+                "team-cli-h",
+                "cli handle crew",
+                TeamTopology::Pipeline,
+                &["r-cli"],
+                json!({}),
+            ),
+        )
+        .unwrap();
+        // Stale handle from a previous, different profile binding: the run
+        // must clear/replace it, not resume through it.
+        repos::session_cli_handles::upsert(
+            &conn,
+            &nuomi_core::domain::SessionCliHandle {
+                session_id: session_id.into(),
+                role_agent_id: "r-cli".into(),
+                agent_profile_id: "other-profile".into(),
+                cli_session_id: Some("stale-sid".into()),
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    let outcome = timeout(
+        Duration::from_secs(60),
+        run_team(
+            store.db_path.clone(),
+            None,
+            "team-cli-h",
+            session_id,
+            "task",
+            Arc::new(MemorySecretStore::default()),
+            None,
+            None,
+        ),
+    )
+    .await
+    .expect("run within timeout")
+    .expect("pipeline run");
+
+    // The claude_code fixture reports session id "s-1" in its init line.
+    assert_eq!(outcome.cli_handles.len(), 1);
+    assert_eq!(outcome.cli_handles[0].cli_session_id, "s-1");
+
+    let conn = connect(&store);
+    let persisted = repos::session_cli_handles::get(&conn, session_id, "r-cli")
+        .unwrap()
+        .expect("handle row exists after run");
+    assert_eq!(persisted.agent_profile_id, "cli-cc");
+    assert_eq!(persisted.cli_session_id.as_deref(), Some("s-1"));
+}

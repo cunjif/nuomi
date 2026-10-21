@@ -5,7 +5,7 @@ use nuomi_core::domain::{new_id, Role, Team, TeamTopology};
 use nuomi_core::orchestrator::{
     PipelineExecutor, ProviderResolver, TeamRunInput, WhiteBoardService,
 };
-use nuomi_core::providers::{FakeLlm, LlmProvider};
+use nuomi_core::providers::{ChatResponse, FakeLlm, LlmProvider};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -83,6 +83,7 @@ async fn pipeline_runs_three_roles_end_to_end_with_whiteboard_and_events() {
         team,
         model: "test-model".into(),
         workspace_id: None,
+        cli_handles: std::collections::HashMap::new(),
     };
 
     let mut resolver =
@@ -156,4 +157,81 @@ async fn pipeline_runs_three_roles_end_to_end_with_whiteboard_and_events() {
 
     // Final summary contains the last output.
     assert!(outcome.final_output.contains("review approved"));
+}
+
+/// ADR 0012 D8 (team path): a member bound to an agent profile receives its
+/// persisted CLI session id as `external_session_id` (resume), and a response
+/// carrying a `cli_session_id` is surfaced in the outcome for persistence.
+#[tokio::test]
+async fn pipeline_passes_cli_resume_handle_and_collects_reported_session() {
+    let mut cli_member = role("executor", "p1");
+    cli_member.params = json!({ "agent_profile_id": "prof-1" });
+    let input_session_id = new_id();
+
+    let scripted = ChatResponse {
+        content: "cli spoke".into(),
+        cli_session_id: Some("s-new".into()),
+        ..ChatResponse::default()
+    };
+    let llm = Arc::new(FakeLlm::new("p1", vec![scripted]));
+
+    let team = Team {
+        id: new_id(),
+        name: "cli crew".into(),
+        topology: TeamTopology::Pipeline,
+        member_role_ids: vec![cli_member.id.clone()],
+        config: json!({}),
+        created_at: 0,
+        updated_at: 0,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cli.db").to_string_lossy().to_string();
+    {
+        let db = nuomi_core::store::Db::open(&db_path).unwrap();
+        nuomi_core::store::migrations::run(&db.0).unwrap();
+        db.0.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, '', 1, 1)",
+            (input_session_id.as_str(),),
+        )
+        .unwrap();
+        db.0.execute(
+            "INSERT INTO roles (id, name, created_at, updated_at) VALUES (?1, ?2, 1, 1)",
+            (cli_member.id.as_str(), cli_member.name.as_str()),
+        )
+        .unwrap();
+    }
+    let wb = WhiteBoardService::new(db_path);
+
+    let mut handles = std::collections::HashMap::new();
+    handles.insert(cli_member.id.clone(), "s-old".to_string());
+    let input = TeamRunInput {
+        session_id: input_session_id,
+        task: "task".into(),
+        roles: vec![cli_member.clone()],
+        team,
+        model: "m".into(),
+        workspace_id: None,
+        cli_handles: handles,
+    };
+
+    let resolver =
+        ProviderResolver::new(llm.clone() as Arc<dyn LlmProvider>).with("p1", llm.clone());
+
+    let outcome = PipelineExecutor::run(&input, &resolver, &wb)
+        .await
+        .expect("pipeline run");
+
+    // Incoming side: the persisted handle reached the provider as the
+    // request's external_session_id (resume arg source).
+    let requests = llm.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].external_session_id.as_deref(), Some("s-old"));
+
+    // Outgoing side: the reported session id is surfaced for persistence.
+    assert_eq!(outcome.cli_handles.len(), 1);
+    let recorded = &outcome.cli_handles[0];
+    assert_eq!(recorded.role_id, cli_member.id);
+    assert_eq!(recorded.agent_profile_id, "prof-1");
+    assert_eq!(recorded.cli_session_id, "s-new");
 }

@@ -14,7 +14,7 @@ use crate::providers::{
     ChatMessage, ChatRequest, ChatResponse, LlmProvider, StreamEvent, ToolCall, ToolDef,
 };
 
-use super::input::{ProviderResolver, TeamRunInput};
+use super::input::{recorded_cli_handle, ProviderResolver, RecordedCliHandle, TeamRunInput};
 use super::selector::{GroupMember, GroupState};
 use super::whiteboard::{record_selector_decision, record_turn, WhiteBoardService};
 use super::OrchestratorError;
@@ -76,6 +76,9 @@ pub struct GroupChatOutcome {
     /// exhausting `max_rounds`.
     pub converged: bool,
     pub rounds: usize,
+    /// CLI Agent session handles observed during the run (ADR 0012 D8) —
+    /// team_runner upserts them into `session_cli_handles` at settlement.
+    pub cli_handles: Vec<RecordedCliHandle>,
 }
 
 /// Drives [`crate::domain::TeamTopology::GroupChat`] teams.
@@ -136,6 +139,7 @@ impl GroupChatExecutor {
         let mut pending_handoff: Option<usize> = None;
         let mut converged = false;
         let mut rounds = 0usize;
+        let mut cli_handles = Vec::new();
 
         while rounds < config.max_rounds {
             // ---- pick the next speaker ------------------------------------
@@ -212,6 +216,9 @@ impl GroupChatExecutor {
             };
 
             state.push_turn(speaker, response.content.clone());
+            if let Some(handle) = recorded_cli_handle(role, &response) {
+                cli_handles.push(handle);
+            }
             record_turn(
                 wb,
                 &input.session_id,
@@ -298,6 +305,7 @@ impl GroupChatExecutor {
             transcript: state.turns,
             converged,
             rounds,
+            cli_handles,
         })
     }
 
@@ -397,7 +405,9 @@ impl GroupChatExecutor {
             max_tokens: role.max_tokens,
             cache_retention: Default::default(),
             cache_scope: None,
-            external_session_id: None,
+            // Resume the speaker's own CLI session when it ran before
+            // (ADR 0012 D8); non-CLI providers ignore the field.
+            external_session_id: input.cli_handles.get(&role.id).cloned(),
         })
     }
 }

@@ -3,7 +3,7 @@
 
 use crate::providers::{ChatMessage, ChatRequest};
 
-use super::input::{ProviderResolver, TeamRunInput};
+use super::input::{recorded_cli_handle, ProviderResolver, RecordedCliHandle, TeamRunInput};
 use super::whiteboard::{record_turn, WhiteBoardService};
 use super::OrchestratorError;
 
@@ -21,6 +21,9 @@ pub struct PipelineOutcome {
     pub steps: Vec<PipelineStep>,
     /// Output of the last member (the pipeline's final answer).
     pub final_output: String,
+    /// CLI Agent session handles observed during the run (ADR 0012 D8) —
+    /// team_runner upserts them into `session_cli_handles` at settlement.
+    pub cli_handles: Vec<RecordedCliHandle>,
 }
 
 /// Drives [`crate::domain::TeamTopology::Pipeline`] teams.
@@ -34,6 +37,7 @@ impl PipelineExecutor {
     ) -> Result<PipelineOutcome, OrchestratorError> {
         let mut current = input.task.clone();
         let mut steps = Vec::new();
+        let mut cli_handles = Vec::new();
 
         for role_id in &input.team.member_role_ids {
             let role = input.require_role(role_id)?;
@@ -52,7 +56,9 @@ impl PipelineExecutor {
                 max_tokens: role.max_tokens,
                 cache_retention: Default::default(),
                 cache_scope: None,
-                external_session_id: None,
+                // Resume the member's own CLI session when it ran before
+                // (ADR 0012 D8); non-CLI providers ignore the field.
+                external_session_id: input.cli_handles.get(&role.id).cloned(),
             };
 
             let response = provider
@@ -74,6 +80,9 @@ impl PipelineExecutor {
             .await?;
 
             current = response.content.clone();
+            if let Some(handle) = recorded_cli_handle(role, &response) {
+                cli_handles.push(handle);
+            }
             steps.push(PipelineStep {
                 role_id: role.id.clone(),
                 role_name: role.name.clone(),
@@ -84,6 +93,7 @@ impl PipelineExecutor {
         Ok(PipelineOutcome {
             final_output: current,
             steps,
+            cli_handles,
         })
     }
 }
@@ -137,6 +147,7 @@ mod tests {
             team,
             model: "m".into(),
             workspace_id: None,
+            cli_handles: std::collections::HashMap::new(),
         };
         let providers =
             ProviderResolver::new(Arc::new(crate::providers::FakeLlm::new("d", vec![])));

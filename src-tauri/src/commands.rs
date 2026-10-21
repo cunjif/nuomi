@@ -342,6 +342,7 @@ pub async fn run_conversation_turn(
                         final_output: String::new(),
                         converged: false,
                         rounds: 0,
+                        cli_handles: Vec::new(),
                     }
                 }
             };

@@ -4,7 +4,37 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::{Role, Team};
-use crate::providers::LlmProvider;
+use crate::providers::{ChatResponse, LlmProvider};
+
+/// A CLI Agent session handle observed during a team run (ADR 0012 D8): the
+/// member role that spoke, the agent profile it was bound to, and the CLI
+/// session id its client reported. team_runner upserts these into
+/// `session_cli_handles` at run settlement so later runs resume each
+/// member's own CLI session.
+#[derive(Debug, Clone)]
+pub struct RecordedCliHandle {
+    pub role_id: String,
+    pub agent_profile_id: String,
+    pub cli_session_id: String,
+}
+
+/// Extracts a [`RecordedCliHandle`] from one member's response when the
+/// response carries a CLI session id AND the role is bound to an agent
+/// profile (the two always co-occur — only `CliAgentClient` reports one).
+/// Shared by all three topology executors.
+pub fn recorded_cli_handle(role: &Role, response: &ChatResponse) -> Option<RecordedCliHandle> {
+    let cli_session_id = response.cli_session_id.clone()?;
+    let agent_profile_id = role
+        .params
+        .get("agent_profile_id")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    Some(RecordedCliHandle {
+        role_id: role.id.clone(),
+        agent_profile_id,
+        cli_session_id,
+    })
+}
 
 /// Everything an executor needs to drive one team run over one session.
 #[derive(Debug, Clone)]
@@ -17,6 +47,10 @@ pub struct TeamRunInput {
     /// The workspace this run belongs to (for parallel-run isolation).
     /// `None` means the run is not bound to any workspace (legacy/CLI path).
     pub workspace_id: Option<String>,
+    /// Resume handles for CLI-Agent members (ADR 0012 D8): role_id → the
+    /// CLI session id persisted from that member's previous run. Loaded by
+    /// team_runner before dispatch; non-CLI providers ignore the field.
+    pub cli_handles: HashMap<String, String>,
 }
 
 impl TeamRunInput {

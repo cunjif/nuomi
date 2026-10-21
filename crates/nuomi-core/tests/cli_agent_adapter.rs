@@ -125,6 +125,7 @@ async fn cli_agent_joins_pipeline_team_end_to_end() {
         team,
         model: "test-model".into(),
         workspace_id: None,
+        cli_handles: std::collections::HashMap::new(),
     };
 
     let client = CliAgentClient::new(
