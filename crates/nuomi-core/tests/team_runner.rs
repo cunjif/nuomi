@@ -714,3 +714,123 @@ async fn unknown_team_fails_with_invalid_team_not_found() {
         other => panic!("expected InvalidTeam, got {other}"),
     }
 }
+
+// ------------------------------------------------------------ run-end GC
+
+/// Seeds an ephemeral temp role leftover (as a failed router fallback would)
+/// and asserts the run-end GC inside run_team removes it — while durable
+/// member roles survive.
+#[tokio::test]
+async fn run_team_gc_removes_ephemeral_temp_roles_on_success() {
+    let session_id = "sess-gc";
+    let store = seed_store(session_id);
+    let server = canned_server("done").await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-gc", "worker", server.uri().as_str(), true),
+        )
+        .unwrap();
+        repos::roles::insert(&conn, &role_row("r-gc", "worker", Some("p-gc"), &[])).unwrap();
+        let mut leftover = role_row("temp-stale", "stale temp", Some("p-gc"), &[]);
+        leftover.ephemeral = true;
+        repos::roles::insert(&conn, &leftover).unwrap();
+        repos::teams::insert(
+            &conn,
+            &team_row(
+                "team-gc",
+                "gc crew",
+                TeamTopology::Pipeline,
+                &["r-gc"],
+                json!({}),
+            ),
+        )
+        .unwrap();
+    }
+
+    let outcome = run_team(
+        store.db_path.clone(),
+        None,
+        "team-gc",
+        session_id,
+        "task",
+        secrets_for(&["kr-p-gc"]).await,
+        None,
+        None,
+    )
+    .await
+    .expect("pipeline run succeeds");
+    assert_eq!(outcome.rounds, 1);
+
+    {
+        let conn = connect(&store);
+        let count = |predicate: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM roles WHERE {predicate}"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count("ephemeral = 1"), 0, "temp role must be GCed");
+        assert_eq!(count("id = 'r-gc'"), 1, "durable member role survives");
+    }
+}
+
+/// The GC also covers the FAILURE exit path: a run that errors out (member
+/// lookup fails) still sweeps ephemeral leftovers — a failed router
+/// fallback is exactly what leaves them behind.
+#[tokio::test]
+async fn run_team_gc_removes_ephemeral_temp_roles_on_failure() {
+    let store = seed_store("sess-gc-fail");
+    let server = canned_server("unused").await;
+
+    {
+        let conn = connect(&store);
+        repos::providers::insert_provider(
+            &conn,
+            &provider_config("p-gcf", "worker", server.uri().as_str(), true),
+        )
+        .unwrap();
+        let mut leftover = role_row("temp-stale-fail", "stale temp", Some("p-gcf"), &[]);
+        leftover.ephemeral = true;
+        repos::roles::insert(&conn, &leftover).unwrap();
+        repos::teams::insert(
+            &conn,
+            &team_row(
+                "team-gc-fail",
+                "broken crew",
+                TeamTopology::Pipeline,
+                &["ghost-role"],
+                json!({}),
+            ),
+        )
+        .unwrap();
+    }
+
+    let error = run_team(
+        store.db_path.clone(),
+        None,
+        "team-gc-fail",
+        "sess-gc-fail",
+        "task",
+        Arc::new(MemorySecretStore::default()),
+        None,
+        None,
+    )
+    .await
+    .expect_err("member lookup must fail");
+    assert!(matches!(error, OrchestratorError::MemberNotFound { .. }));
+
+    let conn = connect(&store);
+    let remaining: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM roles WHERE ephemeral = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0, "failure path must still GC temp roles");
+}

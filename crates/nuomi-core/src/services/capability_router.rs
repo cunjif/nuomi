@@ -279,10 +279,10 @@ pub fn cleanup_temp(conn: &Connection, role_id: &str) -> Result<bool, RoutingErr
     Ok(deleted)
 }
 
-/// Run-end GC hook: deletes every ephemeral temp role. Wired at run
-/// settlement (src-tauri commands `spawn_team_run`) and available for the
-/// CLI/run-loop integration (TODO: kernel run loop in nuomi-cli once the
-/// kernel exposes a run-finished callback).
+/// Run-end GC hook: deletes every ephemeral temp role. Wired once inside
+/// `services::team_runner::run_team`'s settlement (covers every entry —
+/// task runs, session team turns, and any future CLI team path, which will
+/// reuse run_team rather than grow its own loop).
 pub fn cleanup_expired_temps(conn: &Connection) -> Result<usize, RoutingError> {
     Ok(repos::roles::delete_ephemeral(conn)?)
 }

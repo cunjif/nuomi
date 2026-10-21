@@ -160,150 +160,185 @@ pub async fn run_team(
     cwd: Option<PathBuf>,
     workspace_id: Option<String>,
 ) -> Result<TeamRunOutcome, OrchestratorError> {
-    let (team, mut roles) = load_team(db_path.clone(), team_id).await?;
-    let materialized = materialize(db_path.clone(), secrets, cwd)
-        .await
-        .map_err(|error| OrchestratorError::Store(error.to_string()))?;
+    // Whole-body async block so every arm-level AND setup-level `?` (team
+    // load, materialize, member lookup) returns from the block, not the
+    // function: the run-end GC below then covers BOTH exit paths — success
+    // and failure. A failed run is exactly what leaves ephemeral temp roles
+    // behind, so setup failures must sweep too.
+    let result: Result<TeamRunOutcome, OrchestratorError> = async {
+        let (team, mut roles) = load_team(db_path.clone(), team_id).await?;
+        let materialized = materialize(db_path.clone(), secrets, cwd)
+            .await
+            .map_err(|error| OrchestratorError::Store(error.to_string()))?;
 
-    // SPEC team-shell-m1 D2b: a Role binds to an agent profile through the
-    // `params_json.agent_profile_id` convention key, which takes priority
-    // over `provider_id`. The schema is untouched — the override happens on
-    // the in-memory copies; CLI clients are registered under their
-    // profile id, so plain resolver lookup does the rest.
-    for role in &mut roles {
-        if let Some(profile_id) = role.params.get("agent_profile_id").and_then(Value::as_str) {
-            role.provider_id = Some(profile_id.to_string());
+        // SPEC team-shell-m1 D2b: a Role binds to an agent profile through the
+        // `params_json.agent_profile_id` convention key, which takes priority
+        // over `provider_id`. The schema is untouched — the override happens on
+        // the in-memory copies; CLI clients are registered under their
+        // profile id, so plain resolver lookup does the rest.
+        for role in &mut roles {
+            if let Some(profile_id) = role.params.get("agent_profile_id").and_then(Value::as_str) {
+                role.provider_id = Some(profile_id.to_string());
+            }
         }
-    }
 
-    let has_default = materialized.default.is_some();
-    let (default_provider, model) = match materialized.default.clone() {
-        Some(provider) => {
-            let id = provider.id().to_string();
-            (provider, id)
+        let has_default = materialized.default.is_some();
+        let (default_provider, model) = match materialized.default.clone() {
+            Some(provider) => {
+                let id = provider.id().to_string();
+                (provider, id)
+            }
+            None => {
+                // No single default endpoint: fall back to any materialized
+                // client so roles that pin their own provider still resolve.
+                let fallback =
+                    materialized
+                        .providers
+                        .values()
+                        .next()
+                        .cloned()
+                        .ok_or_else(|| {
+                            OrchestratorError::InvalidTeam(
+                                "no provider config or enabled agent profile".to_string(),
+                            )
+                        })?;
+                (fallback, "mixed".to_string())
+            }
+        };
+
+        let mut resolver = ProviderResolver::new(default_provider.clone());
+        for (id, provider) in &materialized.providers {
+            resolver = resolver.with(id.clone(), provider.clone());
         }
-        None => {
-            // No single default endpoint: fall back to any materialized
-            // client so roles that pin their own provider still resolve.
-            let fallback = materialized
-                .providers
-                .values()
-                .next()
-                .cloned()
-                .ok_or_else(|| {
-                    OrchestratorError::InvalidTeam(
-                        "no provider config or enabled agent profile".to_string(),
-                    )
-                })?;
-            (fallback, "mixed".to_string())
+
+        let mut wb = WhiteBoardService::new(db_path.clone());
+        if let Some(ref bus) = bus {
+            wb = wb.with_bus(bus.clone());
         }
-    };
 
-    let mut resolver = ProviderResolver::new(default_provider.clone());
-    for (id, provider) in &materialized.providers {
-        resolver = resolver.with(id.clone(), provider.clone());
-    }
+        let input = TeamRunInput {
+            session_id: session_id.to_string(),
+            task: task.to_string(),
+            roles,
+            team: team.clone(),
+            model,
+            workspace_id,
+        };
 
-    let mut wb = WhiteBoardService::new(db_path.clone());
-    if let Some(ref bus) = bus {
-        wb = wb.with_bus(bus.clone());
-    }
-
-    let input = TeamRunInput {
-        session_id: session_id.to_string(),
-        task: task.to_string(),
-        roles,
-        team: team.clone(),
-        model,
-        workspace_id,
-    };
-
-    match team.topology {
-        TeamTopology::Pipeline => {
-            let outcome = PipelineExecutor::run(&input, &resolver, &wb).await?;
-            Ok(TeamRunOutcome {
-                final_output: outcome.final_output,
-                converged: true,
-                rounds: outcome.steps.len(),
-            })
-        }
-        TeamTopology::Router => {
-            let required: Vec<String> = team
-                .config
-                .get("required")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
+        match team.topology {
+            TeamTopology::Pipeline => {
+                let outcome = PipelineExecutor::run(&input, &resolver, &wb).await?;
+                Ok(TeamRunOutcome {
+                    final_output: outcome.final_output,
+                    converged: true,
+                    rounds: outcome.steps.len(),
                 })
-                .unwrap_or_default();
-            // Capability-router fallback: when no member role matches the
-            // required capabilities, the DB-backed router may resolve (or
-            // ephemeral-create + auto-GC) a role from the provider catalog.
-            let fallback = super::capability_router::DbCapabilityFallback::new(db_path.clone());
-            let outcome = RouterExecutor::run_with_fallback(
-                &input,
-                &resolver,
-                &wb,
-                &required,
-                Some(&fallback),
-            )
-            .await?;
-            Ok(TeamRunOutcome {
-                final_output: outcome.output,
-                converged: true,
-                rounds: 1,
-            })
-        }
-        TeamTopology::GroupChat => {
-            let selector: Arc<dyn SpeakerSelector> =
-                if !has_default || wants_round_robin(team.config.get("selector")) {
-                    Arc::new(RoundRobinSelector)
-                } else {
-                    Arc::new(LlmSelector::new(default_provider, input.model.clone()))
-                };
-            // Live-stream bridge (SPEC 5.8.1-4): publish every speaker delta
-            // as a `session.delta` event carrying the speaking agent's
-            // identity so group-chat views can render per-agent streaming.
-            let delta_bridge: crate::orchestrator::GroupDeltaBridge = if let Some(ref bus) = bus {
-                let bus = bus.clone();
-                let sid = session_id.to_string();
-                let counter = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
-                Arc::new(move |role_id: &str, role_name: &str, delta: &str| {
-                    let seq = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    bus.publish(crate::harness::Event::new(
-                        "session.delta",
-                        serde_json::json!({
-                            "sessionId": sid,
-                            "text": delta,
-                            "seq": seq,
-                            "roleId": role_id,
-                            "roleName": role_name,
-                        }),
-                    ));
-                })
-            } else {
-                Arc::new(|_role_id: &str, _role_name: &str, _delta: &str| {})
-            };
-            let outcome = GroupChatExecutor::new(selector)
-                .with_memory(MemoryService::new(db_path.clone()))
-                .with_delta_bridge(delta_bridge)
-                .run(&input, &resolver, &wb)
+            }
+            TeamTopology::Router => {
+                let required: Vec<String> = team
+                    .config
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Capability-router fallback: when no member role matches the
+                // required capabilities, the DB-backed router may resolve (or
+                // ephemeral-create + auto-GC) a role from the provider catalog.
+                let fallback = super::capability_router::DbCapabilityFallback::new(db_path.clone());
+                let outcome = RouterExecutor::run_with_fallback(
+                    &input,
+                    &resolver,
+                    &wb,
+                    &required,
+                    Some(&fallback),
+                )
                 .await?;
-            Ok(TeamRunOutcome {
-                final_output: outcome
-                    .transcript
-                    .last()
-                    .map(|turn| turn.text.clone())
-                    .unwrap_or_default(),
-                converged: outcome.converged,
-                rounds: outcome.rounds,
-            })
+                Ok(TeamRunOutcome {
+                    final_output: outcome.output,
+                    converged: true,
+                    rounds: 1,
+                })
+            }
+            TeamTopology::GroupChat => {
+                let selector: Arc<dyn SpeakerSelector> =
+                    if !has_default || wants_round_robin(team.config.get("selector")) {
+                        Arc::new(RoundRobinSelector)
+                    } else {
+                        Arc::new(LlmSelector::new(default_provider, input.model.clone()))
+                    };
+                // Live-stream bridge (SPEC 5.8.1-4): publish every speaker delta
+                // as a `session.delta` event carrying the speaking agent's
+                // identity so group-chat views can render per-agent streaming.
+                let delta_bridge: crate::orchestrator::GroupDeltaBridge = if let Some(ref bus) = bus
+                {
+                    let bus = bus.clone();
+                    let sid = session_id.to_string();
+                    let counter = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+                    Arc::new(move |role_id: &str, role_name: &str, delta: &str| {
+                        let seq = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        bus.publish(crate::harness::Event::new(
+                            "session.delta",
+                            serde_json::json!({
+                                "sessionId": sid,
+                                "text": delta,
+                                "seq": seq,
+                                "roleId": role_id,
+                                "roleName": role_name,
+                            }),
+                        ));
+                    })
+                } else {
+                    Arc::new(|_role_id: &str, _role_name: &str, _delta: &str| {})
+                };
+                let outcome = GroupChatExecutor::new(selector)
+                    .with_memory(MemoryService::new(db_path.clone()))
+                    .with_delta_bridge(delta_bridge)
+                    .run(&input, &resolver, &wb)
+                    .await?;
+                Ok(TeamRunOutcome {
+                    final_output: outcome
+                        .transcript
+                        .last()
+                        .map(|turn| turn.text.clone())
+                        .unwrap_or_default(),
+                    converged: outcome.converged,
+                    rounds: outcome.rounds,
+                })
+            }
         }
     }
+    .await;
+
+    // Run-end GC — the SINGLE wiring point for ephemeral temp-role cleanup
+    // (services::capability_router docs). Every run_team caller (task runs,
+    // session team turns, any future CLI team path) inherits it without
+    // per-entry wiring. Best-effort: a GC failure never masks the run's own
+    // outcome, it only logs.
+    {
+        let gc_path = db_path.clone();
+        let gc = tokio::task::spawn_blocking(
+            move || -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+                let conn = Db::open(&gc_path)?;
+                migrations::run(&conn.0)?;
+                Ok(super::capability_router::cleanup_expired_temps(&conn.0)?)
+            },
+        )
+        .await;
+        match gc {
+            Ok(Ok(removed)) if removed > 0 => tracing::info!(removed, "ephemeral role GC"),
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::warn!(error = %e, "ephemeral role GC failed"),
+            Err(e) => tracing::warn!(error = %e, "ephemeral role GC join failed"),
+        }
+    }
+
+    result
 }
 
 // ---------------------------------------------------------------- helpers

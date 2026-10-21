@@ -4758,11 +4758,9 @@ fn spawn_team_run(
                     transition_run(&db.0, &rid, current, RunEvent::Cancel).map(|_| ())
                 }
             }?;
-            // Run-end GC: remove ephemeral capability-router temp roles
-            // (services::capability_router docs).
-            if let Err(e) = nuomi_core::services::capability_router::cleanup_expired_temps(&db.0) {
-                tracing::warn!(error = %e, run = %rid, "ephemeral role GC failed");
-            }
+            // Run-end GC for ephemeral temp roles lives inside
+            // services::team_runner::run_team (single wiring point — covers
+            // this entry, session team turns, and future CLI team runs).
             Ok(())
         })
         .await;
