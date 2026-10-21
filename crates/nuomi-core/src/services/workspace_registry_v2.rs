@@ -33,6 +33,16 @@ use crate::store::repos::workspaces as repo;
 use crate::store::repos::workspaces::WorkspaceEntry;
 use crate::store::{migrations, Db, StoreError};
 
+/// One active run of a workspace, as shown by the close-confirm dialog
+/// (`close_preview`). `task_title` falls back to the task id when the task
+/// row is gone (deleted task with an orphaned run).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RunningTaskSummary {
+    pub run_id: String,
+    pub task_title: String,
+    pub status: crate::domain::run_state::RunState,
+}
+
 #[derive(Debug, Error)]
 pub enum RegistryV2Error {
     #[error("path does not exist or is not a directory: {0}")]
@@ -49,6 +59,15 @@ pub enum RegistryV2Error {
     AlreadyOpen(String),
     #[error("workspace has no directories to open: {0}")]
     NoDirectories(String),
+    /// Close refused without `force`: the workspace has active runs. The
+    /// payload carries the run ids so callers (and users) can see what is
+    /// still running before confirming. Unsaved editor edits are NOT part of
+    /// this check — they are a frontend ephemeral fact guarded client-side.
+    #[error("workspace '{workspace_id}' has running tasks: {running_tasks:?}")]
+    NeedConfirm {
+        workspace_id: String,
+        running_tasks: Vec<String>,
+    },
     #[error("store error: {0}")]
     Store(#[from] StoreError),
     #[error("io error: {0}")]
@@ -315,7 +334,14 @@ impl WorkspaceRegistryV2 {
 
     /// Closes a workspace (empty state) when it is open. Returns whether it
     /// was open. Idempotent. Does not touch the registry row or the disk.
-    pub fn close(&self, workspace_id: &str) -> Result<bool, RegistryV2Error> {
+    ///
+    /// Without `force`, an open workspace with active runs
+    /// (`running`/`queued`/`awaiting_approval`) refuses with
+    /// [`RegistryV2Error::NeedConfirm`] — closing does not kill runs, but the
+    /// user should know they will lose the surface watching them. Unsaved
+    /// editor edits are guarded client-side (frontend ephemeral state) and
+    /// are deliberately not checked here.
+    pub fn close(&self, workspace_id: &str, force: bool) -> Result<bool, RegistryV2Error> {
         let conn = self.conn()?;
         let was_open = workspace_open_state::list(&conn)?
             .iter()
@@ -323,12 +349,49 @@ impl WorkspaceRegistryV2 {
         if !was_open {
             return Ok(false);
         }
+        if !force {
+            let running = crate::store::repos::tasks_runs::list_active_runs_by_workspace(
+                &conn,
+                workspace_id,
+            )?;
+            if !running.is_empty() {
+                return Err(RegistryV2Error::NeedConfirm {
+                    workspace_id: workspace_id.to_string(),
+                    running_tasks: running.into_iter().map(|r| r.id).collect(),
+                });
+            }
+        }
         workspace_open_state::remove(&conn, workspace_id)?;
         if current_open_id(&conn)?.is_none() {
             clear_active(&conn)?;
         }
         emit(&conn, workspace_id, "workspace.closed");
         Ok(true)
+    }
+
+    /// Read-only close preview (ADR-0021 v2 close guard): the workspace's
+    /// active runs with their task titles, in `created_at` order — what the
+    /// close-confirm dialog shows. Zero side effects, safe to call any time.
+    pub fn close_preview(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<RunningTaskSummary>, RegistryV2Error> {
+        let conn = self.conn()?;
+        let runs =
+            crate::store::repos::tasks_runs::list_active_runs_by_workspace(&conn, workspace_id)?;
+        let mut summaries = Vec::with_capacity(runs.len());
+        for run in runs {
+            let task_title = crate::store::repos::tasks_runs::get_task(&conn, &run.task_id)
+                .ok()
+                .map(|t| t.title)
+                .unwrap_or_else(|| run.task_id.clone());
+            summaries.push(RunningTaskSummary {
+                run_id: run.id,
+                task_title,
+                status: run.status,
+            });
+        }
+        Ok(summaries)
     }
 
     /// The currently open workspace with its directories and availability
@@ -553,7 +616,7 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let first = reg.add_directory(&x).unwrap();
-        reg.close(&first.entry.id).unwrap();
+        reg.close(&first.entry.id, true).unwrap();
         assert!(reg.get_open().unwrap().is_none());
 
         // Re-opening the same directory reopens ITS workspace — no new one.
@@ -574,7 +637,7 @@ mod tests {
 
         // Close W1, create W2 from z, then re-add x: it must MOVE from the
         // closed W1 into the open W2 (globally-unique ownership).
-        reg.close(&w1.entry.id).unwrap();
+        reg.close(&w1.entry.id, true).unwrap();
         let w2 = reg.add_directory(&z).unwrap();
         let moved = reg.add_directory(&x).unwrap();
         assert_eq!(moved.entry.id, w2.entry.id);
@@ -626,7 +689,7 @@ mod tests {
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
         let w1 = reg.add_directory(&x).unwrap();
-        reg.close(&w1.entry.id).unwrap();
+        reg.close(&w1.entry.id, true).unwrap();
         let w2 = reg.add_directory(&z).unwrap();
 
         // 单开不变式：W2 打开时打开 W1 被拒
@@ -648,7 +711,7 @@ mod tests {
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
         let w1 = reg.add_directory(&x).unwrap();
-        reg.close(&w1.entry.id).unwrap();
+        reg.close(&w1.entry.id, true).unwrap();
         let w2 = reg.add_directory(&z).unwrap();
 
         let switched = reg.switch(&w1.entry.id).unwrap();
@@ -687,7 +750,7 @@ mod tests {
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
         let w1 = reg.add_directory(&x).unwrap();
-        reg.close(&w1.entry.id).unwrap();
+        reg.close(&w1.entry.id, true).unwrap();
         let w2 = reg.add_directory(&z).unwrap();
 
         // 强制布局快照保存失败：BEFORE INSERT 触发器 RAISE
@@ -780,7 +843,7 @@ mod tests {
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
         let w1 = reg.add_directory(&x).unwrap();
-        reg.close(&w1.entry.id).unwrap();
+        reg.close(&w1.entry.id, true).unwrap();
         let w2 = reg.add_directory(&z).unwrap();
         let w1_dir = w1.directories[0].directory.id.clone();
         assert!(matches!(
@@ -805,5 +868,87 @@ mod tests {
             reg.mount_directory("ghost", &dir_id),
             Err(RegistryV2Error::DirectoryNotFound(_))
         ));
+    }
+
+    /// Seeds one active run bound to the workspace (mirrors the shell's
+    /// insert_task + insert_run + bind_run_workspace write path).
+    fn seed_active_run(reg: &WorkspaceRegistryV2, ws_id: &str, title: &str) -> String {
+        use crate::domain::{Run, RunState, Task, TaskStatus};
+        let conn = raw_conn(reg);
+        let now = 1000i64;
+        let task = Task {
+            id: format!("task-{title}"),
+            session_id: None,
+            title: title.into(),
+            description: String::new(),
+            status: TaskStatus::Running,
+            created_at: now,
+            updated_at: now,
+            workspace_id: ws_id.into(),
+        };
+        crate::store::repos::tasks_runs::insert_task(&conn, &task).unwrap();
+        let run = Run {
+            id: format!("run-{title}"),
+            task_id: task.id.clone(),
+            session_id: "sess".into(),
+            status: RunState::Running,
+            heartbeat_at: now,
+            created_at: now,
+            updated_at: now,
+        };
+        crate::store::repos::tasks_runs::insert_run(&conn, &run).unwrap();
+        crate::store::repos::tasks_runs::bind_run_workspace(&conn, &run.id, ws_id).unwrap();
+        run.id
+    }
+
+    #[test]
+    fn close_refuses_with_running_tasks_unless_forced() {
+        let (reg, dir) = v2();
+        let x = make_dir(dir.path(), "alpha");
+        let w1 = reg.add_directory(&x).unwrap();
+        let run_id = seed_active_run(&reg, &w1.entry.id, "deploy");
+
+        // Non-forced close refuses and reports the active run.
+        match reg.close(&w1.entry.id, false) {
+            Err(RegistryV2Error::NeedConfirm {
+                workspace_id,
+                running_tasks,
+            }) => {
+                assert_eq!(workspace_id, w1.entry.id);
+                assert_eq!(run_id, *running_tasks.first().unwrap());
+            }
+            other => panic!("expected NeedConfirm, got {other:?}"),
+        }
+        // The workspace is still open after the refusal.
+        assert!(reg.get_open().unwrap().is_some());
+
+        // Forced close goes through.
+        assert!(reg.close(&w1.entry.id, true).unwrap());
+        assert!(reg.get_open().unwrap().is_none());
+    }
+
+    #[test]
+    fn close_preview_lists_active_runs_with_task_titles() {
+        let (reg, dir) = v2();
+        let x = make_dir(dir.path(), "alpha");
+        let w1 = reg.add_directory(&x).unwrap();
+        seed_active_run(&reg, &w1.entry.id, "deploy");
+
+        let preview = reg.close_preview(&w1.entry.id).unwrap();
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].run_id, "run-deploy");
+        assert_eq!(preview[0].task_title, "deploy");
+        assert_eq!(
+            preview[0].status,
+            crate::domain::run_state::RunState::Running
+        );
+
+        // A workspace without active runs previews empty.
+        let (reg2, dir2) = v2();
+        let y = make_dir(dir2.path(), "beta");
+        let w2 = reg2.add_directory(&y).unwrap();
+        assert!(reg2.close_preview(&w2.entry.id).unwrap().is_empty());
+        // Preview never closes anything — the workspace stays open.
+        assert!(reg2.get_open().unwrap().is_some());
     }
 }

@@ -702,8 +702,18 @@ pub async fn workspace_unmount_directory(
 pub async fn workspace_close(
     state: tauri::State<'_, AppState>,
     workspace_id: String,
+    force: Option<bool>,
 ) -> Result<bool, IpcError> {
-    commands::impl_workspace_close(&state, workspace_id).await
+    commands::impl_workspace_close(&state, workspace_id, force).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_close_preview(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<commands::RunningTaskSummaryDto>, IpcError> {
+    commands::impl_workspace_close_preview(&state, workspace_id).await
 }
 
 #[tauri::command]

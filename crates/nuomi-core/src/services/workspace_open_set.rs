@@ -272,7 +272,11 @@ fn emit_event(conn: &Connection, workspace_id: &str, kind: &str) {
 }
 
 fn find_dirty_files(_conn: &Connection, _workspace_id: &str) -> Result<Vec<String>, OpenSetError> {
-    // TODO: integrate with editor dirty-state tracking (ephemeral, not persisted).
+    // Editor dirty state is a FRONTEND ephemeral fact (uiStore buckets),
+    // deliberately never persisted — so the backend cannot see it. The
+    // client-side guard (uiStore requestSwitch/CloseWorkspace +
+    // WorkspaceGuardDialog, P2-K) owns unsaved-edit confirmation; this stub
+    // is the correct boundary, not a TODO.
     Ok(Vec::new())
 }
 

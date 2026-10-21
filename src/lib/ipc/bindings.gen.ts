@@ -550,9 +550,17 @@ async workspaceUnmountDirectory(workspaceId: string, directoryId: string) : Prom
     else return { status: "error", error: e  as any };
 }
 },
-async workspaceClose(workspaceId: string) : Promise<Result<boolean, IpcError>> {
+async workspaceClose(workspaceId: string, force: boolean | null) : Promise<Result<boolean, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("workspace_close", { workspaceId }) };
+    return { status: "ok", data: await TAURI_INVOKE("workspace_close", { workspaceId, force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceClosePreview(workspaceId: string) : Promise<Result<RunningTaskSummaryDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_close_preview", { workspaceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1896,6 +1904,14 @@ createdTemp: boolean }
 export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number; kind: string; cancelable: boolean }
 export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
+/**
+ * One active run as shown by the close-confirm dialog.
+ */
+export type RunningTaskSummaryDto = { runId: string; taskTitle: string; 
+/**
+ * Run state string (RunState::as_str — same shape as RunDto.status).
+ */
+status: string }
 export type SandboxBuildAppRequest = { runtime: string; 
 /**
  * Build script executed inside the sandbox.

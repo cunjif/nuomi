@@ -105,6 +105,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::workspace_mount_directory,
         tauri_cmds::workspace_unmount_directory,
         tauri_cmds::workspace_close,
+        tauri_cmds::workspace_close_preview,
         tauri_cmds::workspace_switch,
         tauri_cmds::workspace_get_open,
         tauri_cmds::workspace_focus_directory,

@@ -7268,15 +7268,22 @@ pub async fn impl_workspace_unmount_directory(
 /// its directories stay intact — reopening restores the workspace. The v2
 /// replacement for the retired `close_workspace` shim. Idempotent; returns
 /// whether the workspace was open.
+///
+/// Without `force` an open workspace with active runs refuses with the
+/// `workspace.close_needs_confirm` IPC error — the frontend normally guards
+/// via `workspace_close_preview` first, so this is the backend backstop.
+/// Unsaved editor edits are guarded client-side (frontend ephemeral state).
 pub async fn impl_workspace_close(
     state: &AppState,
     workspace_id: String,
+    force: Option<bool>,
 ) -> Result<bool, IpcError> {
     let db_path = state.db_path.clone();
     let id_for_close = workspace_id.clone();
+    let force = force.unwrap_or(false);
     let was_open = tokio::task::spawn_blocking(move || -> Result<bool, IpcError> {
         let svc = nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
-        Ok(svc.close(&id_for_close)?)
+        Ok(svc.close(&id_for_close, force)?)
     })
     .await
     .map_err(join_err)??;
@@ -7284,6 +7291,43 @@ pub async fn impl_workspace_close(
     // starts clean when the next workspace opens.
     state.clear_active_directory(&workspace_id, None);
     Ok(was_open)
+}
+
+/// One active run as shown by the close-confirm dialog.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningTaskSummaryDto {
+    pub run_id: String,
+    pub task_title: String,
+    /// Run state string (RunState::as_str — same shape as RunDto.status).
+    pub status: String,
+}
+
+/// Read-only close preview: the workspace's active runs with task titles —
+/// what the frontend guard dialog shows before a guarded close. Zero side
+/// effects.
+pub async fn impl_workspace_close_preview(
+    state: &AppState,
+    workspace_id: String,
+) -> Result<Vec<RunningTaskSummaryDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    let summaries =
+        tokio::task::spawn_blocking(move || -> Result<Vec<RunningTaskSummaryDto>, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            Ok(svc
+                .close_preview(&workspace_id)?
+                .into_iter()
+                .map(|s| RunningTaskSummaryDto {
+                    run_id: s.run_id,
+                    task_title: s.task_title,
+                    status: s.status.as_str().to_string(),
+                })
+                .collect())
+        })
+        .await
+        .map_err(join_err)??;
+    Ok(summaries)
 }
 
 pub async fn impl_workspace_switch(

@@ -103,6 +103,7 @@ fn map_registry_v2_error(err: &nuomi_core::services::RegistryV2Error) -> IpcErro
         E::DirectoryNotFound(_) => IpcError::new("workspace.directory_not_found", err.to_string()),
         E::AlreadyOpen(_) => IpcError::new("workspace.already_open", err.to_string()),
         E::NoDirectories(_) => IpcError::new("workspace.no_directories", err.to_string()),
+        E::NeedConfirm { .. } => IpcError::new("workspace.close_needs_confirm", err.to_string()),
         E::Store(_) => IpcError::new("store.failed", err.to_string()),
         E::Io(_) => IpcError::new("workspace.io", err.to_string()),
     }
