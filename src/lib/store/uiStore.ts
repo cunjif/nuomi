@@ -98,6 +98,23 @@ function emptyEditorState(): WorkspaceEditorState {
 /** Layout mode for the main content area (split retired with ADR-0021). */
 export type LayoutMode = "single" | "overview";
 
+/**
+ * A workspace-level action (switch away / close) intercepted by the unsaved
+ * edits guard: the action is parked here while the guard dialog asks the
+ * user to discard or cancel. `dirtyFiles` is snapshotted at request time so
+ * the dialog shows exactly what would be lost. For a switch,
+ * `workspaceId` is the workspace being LEFT (the dirty bucket) and
+ * `targetWorkspaceId` is the destination; for a close they are the same.
+ */
+export interface PendingWorkspaceAction {
+  kind: "switch" | "close";
+  workspaceId: string;
+  targetWorkspaceId: string;
+  /** Workspace label for dialog copy (the workspace carrying the edits). */
+  workspaceLabel: string;
+  dirtyFiles: string[];
+}
+
 interface UiState {
   view: View;
   activeArea: ActiveArea;
@@ -112,6 +129,11 @@ interface UiState {
   /** Per-workspace editor state buckets (ADR 0017). Keyed by workspace id. */
   editorByWorkspace: Record<string, WorkspaceEditorState>;
   runDrawerTaskId: string | null;
+  /**
+   * Parked workspace switch/close intercepted by the unsaved-edits guard
+   * (non-null → the guard dialog is showing). Ephemeral UI state.
+   */
+  pendingWorkspaceAction: PendingWorkspaceAction | null;
   /**
    * The single open workspace id (ADR-0021 single-open); null = empty state.
    * Also the pointer for the workbench's editor bucket.
@@ -187,6 +209,33 @@ interface UiState {
    * Calls IPC workspaceSwitch.
    */
   switchToWorkspace: (id: string) => Promise<void>;
+  /**
+   * Guarded switch: same as switchToWorkspace, but when the workspace being
+   * LEFT has unsaved editor edits the action is parked in
+   * `pendingWorkspaceAction` instead (the guard dialog asks the user to
+   * discard or cancel). Returns true when the switch was executed (or is
+   * in flight), false when it was parked behind the guard.
+   */
+  requestSwitchToWorkspace: (id: string, label?: string) => boolean;
+  /**
+   * Guarded close: same as the direct close, but when the workspace being
+   * CLOSED has unsaved editor edits the action is parked in
+   * `pendingWorkspaceAction` instead. Returns true when the close was
+   * executed, false when it was parked behind the guard.
+   */
+  requestCloseWorkspace: (id: string, label?: string) => boolean;
+  /** Discards the pending action's dirty marks and executes it. */
+  confirmPendingWorkspaceAction: () => Promise<void>;
+  /** Drops the pending action without executing it. */
+  cancelPendingWorkspaceAction: () => void;
+  /** Unsaved file paths of one workspace's editor bucket (true entries only). */
+  dirtyFilesOf: (workspaceId: string) => string[];
+  /**
+   * Closes a workspace over IPC (v2 semantics, ADR-0021: drops the open
+   * state only — registry row and directories stay) and re-syncs the
+   * active-workspace mirror. Shared by the direct and guarded close paths.
+   */
+  closeWorkspaceViaIpc: (workspaceId: string) => Promise<void>;
   /** Sets the layout mode and persists via IPC. */
   setLayoutMode: (mode: LayoutMode) => Promise<void>;
   /** Syncs the open-workspace mirror from the backend (call on startup). */
@@ -201,6 +250,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   openSessionIds: [],
   editorByWorkspace: {},
   runDrawerTaskId: null,
+  pendingWorkspaceAction: null,
   activeWorkspaceId: null,
   layoutMode: "single",
   conversationWorkspaceFilter: "all",
@@ -426,6 +476,82 @@ export const useUiStore = create<UiState>((set, get) => ({
       { workspaceId: id },
     );
     set({ activeWorkspaceId: id });
+  },
+  // Unsaved-edits guard (workspace-level actions): editor dirty state is a
+  // FRONTEND ephemeral fact (uiStore buckets — the backend deliberately
+  // never persists it, see find_dirty_files in workspace_open_set), so the
+  // guard lives here. MonacoTab unmounts on switch/close and reloads from
+  // disk, which silently discards unsaved input — the guard makes that an
+  // explicit choice. Switch guards the workspace being LEFT; close guards
+  // the workspace being CLOSED (defensively also for non-active ones).
+  requestSwitchToWorkspace: (id, label) => {
+    const active = get().activeWorkspaceId;
+    const dirtyFiles = active !== null ? get().dirtyFilesOf(active) : [];
+    if (dirtyFiles.length > 0 && active !== null && active !== id) {
+      set({
+        pendingWorkspaceAction: {
+          kind: "switch",
+          workspaceId: active,
+          targetWorkspaceId: id,
+          workspaceLabel: label ?? active,
+          dirtyFiles,
+        },
+      });
+      return false;
+    }
+    void get().switchToWorkspace(id);
+    return true;
+  },
+  requestCloseWorkspace: (id, label) => {
+    const dirtyFiles = get().dirtyFilesOf(id);
+    if (dirtyFiles.length > 0) {
+      set({
+        pendingWorkspaceAction: {
+          kind: "close",
+          workspaceId: id,
+          targetWorkspaceId: id,
+          workspaceLabel: label ?? id,
+          dirtyFiles,
+        },
+      });
+      return false;
+    }
+    void get()
+      .closeWorkspaceViaIpc(id)
+      .catch(() => { /* close failures surface via open-state sync */ });
+    return true;
+  },
+  confirmPendingWorkspaceAction: async () => {
+    const pending = get().pendingWorkspaceAction;
+    if (pending === null) return;
+    // The user explicitly discarded the edits: drop the dirty marks so the
+    // stale flags don't mislead a later guard for the same bucket.
+    const bucket = get().editorByWorkspace[pending.workspaceId];
+    if (bucket !== undefined) {
+      set({
+        editorByWorkspace: {
+          ...get().editorByWorkspace,
+          [pending.workspaceId]: { ...bucket, dirtyPaths: {} },
+        },
+      });
+    }
+    set({ pendingWorkspaceAction: null });
+    if (pending.kind === "switch") {
+      await get().switchToWorkspace(pending.targetWorkspaceId);
+    } else {
+      await get().closeWorkspaceViaIpc(pending.workspaceId).catch(() => {
+        /* close failures surface via open-state sync */
+      });
+    }
+  },
+  cancelPendingWorkspaceAction: () => set({ pendingWorkspaceAction: null }),
+  dirtyFilesOf: (workspaceId) => {
+    const dirtyPaths = get().editorByWorkspace[workspaceId]?.dirtyPaths ?? {};
+    return Object.keys(dirtyPaths).filter((p) => dirtyPaths[p] === true);
+  },
+  closeWorkspaceViaIpc: async (workspaceId) => {
+    await ipc.workspaceClose(workspaceId);
+    await get().syncOpenWorkspace();
   },
   setLayoutMode: async (mode) => {
     set({ layoutMode: mode });

@@ -12,7 +12,7 @@ import { workspaceColorClass } from "./workspaceColors";
  */
 export function OverviewGrid() {
   const { t } = useTranslation();
-  const { activeWorkspaceId, switchToWorkspace, setLayoutMode } = useUiStore();
+  const { activeWorkspaceId, requestSwitchToWorkspace, setLayoutMode } = useUiStore();
 
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
@@ -36,8 +36,11 @@ export function OverviewGrid() {
           <button
             key={ws.id}
             onClick={() => {
-              void switchToWorkspace(ws.id);
-              void setLayoutMode("single");
+              // Guarded: leave overview only once the switch actually ran
+              // (a parked action must not collapse the grid underneath it).
+              if (requestSwitchToWorkspace(ws.id, ws.label ?? ws.id)) {
+                void setLayoutMode("single");
+              }
             }}
             className="flex flex-col gap-2 p-4 rounded-lg border border-divider bg-surface hover:border-ink-accent/60 transition-colors text-left"
           >

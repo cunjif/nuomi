@@ -131,15 +131,16 @@ export function WorkspaceListDialog({
     }
   };
 
-  const handleActivate = async (id: string): Promise<void> => {
-    try {
-      await useUiStore.getState().switchToWorkspace(id);
-      invalidate();
-      toast.success(t("workspace.switched"));
-      onClose();
-    } catch (e) {
-      toast.error(`${t("workspace.switchFailed")}: ${String(e)}`);
-    }
+  const handleActivate = (id: string): void => {
+    // Guarded switch: a parked action keeps this dialog open — the guard
+    // dialog finishes the switch if the user confirms.
+    const executed = useUiStore
+      .getState()
+      .requestSwitchToWorkspace(id);
+    if (!executed) return;
+    invalidate();
+    toast.success(t("workspace.switched"));
+    onClose();
   };
 
   const handleRemove = async (id: string): Promise<void> => {

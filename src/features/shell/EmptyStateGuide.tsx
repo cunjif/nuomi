@@ -13,7 +13,7 @@ import { useRecentWorkspaces } from "../../lib/store/workspaceQueries";
 export function EmptyStateGuide() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { openDirectory, switchToWorkspace } = useUiStore();
+  const { openDirectory, requestSwitchToWorkspace } = useUiStore();
   const { data: recentWorkspaces } = useRecentWorkspaces(10);
 
   // Same invalidation set as WorkspaceListDialog: switching/opening changes
@@ -36,9 +36,9 @@ export function EmptyStateGuide() {
     }
   };
 
-  const handleSwitch = async (id: string) => {
-    await switchToWorkspace(id);
-    invalidate();
+  const handleSwitch = (id: string): void => {
+    // Empty state: no active workspace → the guard always passes.
+    if (requestSwitchToWorkspace(id)) void invalidate();
   };
 
   return (

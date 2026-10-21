@@ -625,7 +625,6 @@
       "directorBindingTitle": "角色导演绑定",
       "directorBindingHint": "此绑定用于角色导演自身，不会被生成的角色继承",
       "directorNoModel": "暂无可用模型，请先在设置中配置 Provider 或 CLI Agent",
-      "bindingProvider": "Provider",
       "bindingCli": "CLI Agent",
       "bindingFailed": "绑定设置失败",
       "directorNoBinding": "角色导演未绑定执行模型，无法工作",
@@ -1075,7 +1074,16 @@
     "recentTitle": "最近使用",
     "overviewHint": "概览模式 · 仅用于监控与跳转，点击卡片进入单个工作区以启动 Agent",
     "dirAccessible": "可访问",
-    "anomaly": "工作区迁移异常，需人工处理"
+    "anomaly": "工作区迁移异常，需人工处理",
+    "guard": {
+      "switchTitle": "切换工作区确认",
+      "closeTitle": "关闭工作区确认",
+      "body": "工作区「{{label}}」有未保存的编辑，切换或关闭后将丢失：",
+      "saveHint": "提示：先在编辑器中 Ctrl+S 保存，可避免丢失。",
+      "cancel": "取消",
+      "discardAndSwitch": "放弃更改并切换",
+      "discardAndClose": "放弃更改并关闭"
+    }
   },
   "capability": {
     "reasoning": "推理",

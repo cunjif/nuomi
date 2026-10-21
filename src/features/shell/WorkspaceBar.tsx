@@ -1,19 +1,17 @@
 import { useEffect, useRef } from "react";
 import { useUiStore } from "../../lib/store/uiStore";
 import { useQuery } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
 import { ipc } from "../../lib/ipc/client";
-import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
 import { workspaceColorClass } from "./workspaceColors";
 
 export function WorkspaceBar() {
   // Single-open (ADR-0021): the bar lists the open workspace only; the
   // dedicated switch surface lands with task 6.7.
-  const { activeWorkspaceId, switchToWorkspace } = useUiStore();
+  const { activeWorkspaceId, requestSwitchToWorkspace, requestCloseWorkspace } = useUiStore();
 
   const { data: workspaces } = useQuery({
     queryKey: ["workspaces"],
-    queryFn: () => invoke<WorkspaceEntryDto[]>("list_workspaces"),
+    queryFn: () => ipc.listWorkspaces(),
     // Unread indicators ride the same query (unreadCount on the DTO) — the
     // 5s cadence matches the retired get_open_set polling.
     refetchInterval: 5000,
@@ -74,7 +72,7 @@ export function WorkspaceBar() {
         return (
           <button
             key={ws.id}
-            onClick={() => void switchToWorkspace(ws.id)}
+            onClick={() => requestSwitchToWorkspace(ws.id, ws.label ?? ws.id)}
             style={{ contain: "layout style" }}
             className={`group flex items-center gap-1.5 px-3 py-1 rounded-t-md text-sm transition-colors ${
               isFocused
@@ -100,9 +98,9 @@ export function WorkspaceBar() {
                   e.stopPropagation();
                   // v2 close (ADR-0021): drops the open state only — the
                   // registry row and directories stay, reopening restores.
-                  void ipc.workspaceClose(ws.id)
-                    .then(() => useUiStore.getState().syncOpenWorkspace())
-                    .catch(() => { /* close failures surface via open-state sync */ });
+                  // Guarded: unsaved edits park the action in the guard
+                  // dialog instead of silently discarding them.
+                  requestCloseWorkspace(ws.id, ws.label ?? ws.id);
                 }}
                 className="ml-1 text-xs text-ink-muted opacity-0 group-hover:opacity-100 hover:text-ink"
               >

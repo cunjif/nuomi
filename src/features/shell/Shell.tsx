@@ -28,6 +28,7 @@ import { WorkspaceSetup } from "./WorkspaceSetup";
 import { OverviewGrid } from "./OverviewGrid";
 import { EmptyStateGuide } from "./EmptyStateGuide";
 import { useIdleProposalTimer } from "./useIdleProposalTimer";
+import { WorkspaceGuardDialog } from "./WorkspaceGuardDialog";
 
 type WorkspaceInfo = { root: string; configured: boolean };
 
@@ -283,6 +284,8 @@ export function Shell(): ReactNode {
       </div>
       {/* Global palette overlay (Ctrl+P / Ctrl+Shift+P / Ctrl+F). */}
       <QuickOpen />
+      {/* Unsaved-edits guard for workspace switch/close (parked action). */}
+      <WorkspaceGuardDialog />
     </div>
   );
 }

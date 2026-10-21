@@ -625,7 +625,6 @@
       "directorBindingTitle": "Director Binding",
       "directorBindingHint": "This binding is for the director itself; it is NOT inherited by generated roles.",
       "directorNoModel": "No model available. Configure a Provider or CLI Agent in Settings first.",
-      "bindingProvider": "Provider",
       "bindingCli": "CLI Agent",
       "bindingFailed": "Binding failed",
       "directorNoBinding": "Role director has no self-binding; cannot run.",
@@ -1069,7 +1068,16 @@
     "recentTitle": "Recently used",
     "overviewHint": "Overview mode · monitoring and navigation only; click a card to enter a workspace and launch agents",
     "dirAccessible": "accessible",
-    "anomaly": "Workspace migration issue — manual attention required"
+    "anomaly": "Workspace migration issue — manual attention required",
+    "guard": {
+      "switchTitle": "Switch workspace?",
+      "closeTitle": "Close workspace?",
+      "body": "Workspace \"{{label}}\" has unsaved edits that will be lost on switch/close:",
+      "saveHint": "Tip: press Ctrl+S in the editor first to keep them.",
+      "cancel": "Cancel",
+      "discardAndSwitch": "Discard and switch",
+      "discardAndClose": "Discard and close"
+    }
   },
   "capability": {
     "reasoning": "Reasoning",
