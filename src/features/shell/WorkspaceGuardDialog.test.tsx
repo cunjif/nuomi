@@ -20,6 +20,7 @@ function parkSwitch(dirtyFiles: string[]): void {
       targetWorkspaceId: "ws-b",
       workspaceLabel: "proj-a",
       dirtyFiles,
+      runningTasks: [],
     },
   });
 }
@@ -33,6 +34,7 @@ function parkClose(dirtyFiles: string[]): void {
       targetWorkspaceId: "ws-a",
       workspaceLabel: "proj-a",
       dirtyFiles,
+      runningTasks: [],
     },
   });
 }
@@ -125,5 +127,50 @@ describe("WorkspaceGuardDialog", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
     expect(useUiStore.getState().activeWorkspaceId).toBe("ws-a");
+  });
+});
+
+/// Close-only guard section: active runs show with task titles, and the
+/// confirm wording drops the "discard" phrasing when there is nothing dirty.
+describe("WorkspaceGuardDialog — running tasks section", () => {
+  it("lists active runs with titles and status for a parked close", () => {
+    useUiStore.setState({
+      activeWorkspaceId: "ws-a",
+      pendingWorkspaceAction: {
+        kind: "close",
+        workspaceId: "ws-a",
+        targetWorkspaceId: "ws-a",
+        workspaceLabel: "proj-a",
+        dirtyFiles: [],
+        runningTasks: [
+          { runId: "r1", taskTitle: "deploy site", status: "running" },
+          { runId: "r2", taskTitle: "run tests", status: "queued" },
+        ],
+      },
+    });
+    renderWithProviders(<WorkspaceGuardDialog />);
+    expect(screen.getByText("deploy site")).toBeInTheDocument();
+    expect(screen.getByText("run tests")).toBeInTheDocument();
+    // Pure-running close uses the "close anyway" wording.
+    expect(screen.getByRole("button", { name: "仍要关闭" })).toBeInTheDocument();
+  });
+
+  it("shows both sections when dirty files AND active runs coexist", () => {
+    useUiStore.setState({
+      activeWorkspaceId: "ws-a",
+      pendingWorkspaceAction: {
+        kind: "close",
+        workspaceId: "ws-a",
+        targetWorkspaceId: "ws-a",
+        workspaceLabel: "proj-a",
+        dirtyFiles: ["draft.md"],
+        runningTasks: [{ runId: "r1", taskTitle: "deploy site", status: "running" }],
+      },
+    });
+    renderWithProviders(<WorkspaceGuardDialog />);
+    expect(screen.getByText("draft.md")).toBeInTheDocument();
+    expect(screen.getByText("deploy site")).toBeInTheDocument();
+    // Dirty present → discard wording.
+    expect(screen.getByRole("button", { name: "放弃更改并关闭" })).toBeInTheDocument();
   });
 });

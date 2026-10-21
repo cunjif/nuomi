@@ -92,17 +92,17 @@ describe("requestSwitchToWorkspace — guard", () => {
 });
 
 describe("requestCloseWorkspace — guard", () => {
-  it("closes directly when the bucket is clean", () => {
-    const executed = useUiStore.getState().requestCloseWorkspace("ws-a");
+  it("closes directly when the bucket is clean", async () => {
+    const executed = await useUiStore.getState().requestCloseWorkspace("ws-a");
     expect(executed).toBe(true);
     expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
     // closeWorkspaceViaIpc re-syncs the mirror; test-double marks ws-a closed.
     expect(tdState.workspaces.find((w) => w.id === "ws-a")?.isActive).toBe(false);
   });
 
-  it("parks the action when the bucket is dirty", () => {
+  it("parks the action when the bucket is dirty", async () => {
     markDirty("ws-a", "draft.md");
-    const executed = useUiStore.getState().requestCloseWorkspace("ws-a");
+    const executed = await useUiStore.getState().requestCloseWorkspace("ws-a");
     expect(executed).toBe(false);
     const pending = useUiStore.getState().pendingWorkspaceAction;
     expect(pending?.kind).toBe("close");
@@ -123,7 +123,7 @@ describe("confirmPendingWorkspaceAction", () => {
 
   it("drops dirty marks and executes the parked close", async () => {
     markDirty("ws-a", "draft.md");
-    useUiStore.getState().requestCloseWorkspace("ws-a");
+    await useUiStore.getState().requestCloseWorkspace("ws-a");
     await useUiStore.getState().confirmPendingWorkspaceAction();
     expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
     expect(useUiStore.getState().dirtyFilesOf("ws-a")).toEqual([]);
@@ -144,5 +144,61 @@ describe("cancelPendingWorkspaceAction", () => {
     expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
     expect(useUiStore.getState().activeWorkspaceId).toBe("ws-a");
     expect(useUiStore.getState().dirtyFilesOf("ws-a")).toEqual(["draft.md"]);
+  });
+});
+
+describe("requestCloseWorkspace — running-task probe", () => {
+  function seedRunningRun(runId: string, title: string): void {
+    tdState.tasks.push({
+      id: `task-${runId}`,
+      sessionId: null,
+      title,
+      description: "",
+      status: "running",
+      createdAt: 1,
+      updatedAt: 1,
+      workspaceId: "ws-a",
+      workspaceLabel: null,
+    });
+    tdState.runs.push({
+      id: runId,
+      taskId: `task-${runId}`,
+      sessionId: "sess",
+      status: "running",
+      heartbeatAt: 1,
+      kind: "single",
+      cancelable: true,
+    });
+  }
+
+  it("parks the close when the workspace has active runs (clean bucket)", async () => {
+    seedRunningRun("r-1", "deploy site");
+    const executed = await useUiStore.getState().requestCloseWorkspace("ws-a");
+    expect(executed).toBe(false);
+    const pending = useUiStore.getState().pendingWorkspaceAction;
+    expect(pending?.kind).toBe("close");
+    expect(pending?.dirtyFiles).toEqual([]);
+    expect(pending?.runningTasks).toHaveLength(1);
+    expect(pending?.runningTasks[0]?.taskTitle).toBe("deploy site");
+    // Still open — the guard did not close.
+    expect(tdState.workspaces.find((w) => w.id === "ws-a")?.isActive).toBe(true);
+  });
+
+  it("confirm force-closes past the backend refusal", async () => {
+    seedRunningRun("r-2", "run tests");
+    await useUiStore.getState().requestCloseWorkspace("ws-a");
+    await useUiStore.getState().confirmPendingWorkspaceAction();
+    expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
+    // force=true skips the close_needs_confirm refusal in the double.
+    expect(tdState.workspaces.find((w) => w.id === "ws-a")?.isActive).toBe(false);
+  });
+
+  it("a clean workspace with no runs closes without parking", async () => {
+    const executed = await useUiStore.getState().requestCloseWorkspace("ws-a");
+    expect(executed).toBe(true);
+    await waitFor(() => {
+      expect(tdState.workspaces.find((w) => w.id === "ws-a")?.isActive).toBe(false);
+    });
+    expect(useUiStore.getState().pendingWorkspaceAction).toBeNull();
   });
 });

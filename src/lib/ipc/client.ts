@@ -334,7 +334,10 @@ export const ipc = {
     unwrap(current.workspaceMountDirectory(workspaceId, directoryId)),
   workspaceUnmountDirectory: (workspaceId: string, directoryId: string) =>
     unwrap(current.workspaceUnmountDirectory(workspaceId, directoryId)),
-  workspaceClose: (workspaceId: string) => unwrap(current.workspaceClose(workspaceId)),
+  workspaceClose: (workspaceId: string, force = false) =>
+    unwrap(current.workspaceClose(workspaceId, force)),
+  workspaceClosePreview: (workspaceId: string) =>
+    unwrap(current.workspaceClosePreview(workspaceId)),
   workspaceSwitch: (workspaceId: string) => unwrap(current.workspaceSwitch(workspaceId)),
   workspaceGetOpen: () => unwrap(current.workspaceGetOpen()),
   workspaceFocusDirectory: (workspaceId: string, directoryId: string) =>

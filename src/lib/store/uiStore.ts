@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { ipc } from "../ipc/client";
 import { measureAsync } from "../perf/metrics";
+import type { RunningTaskSummaryDto } from "../ipc/bindings.gen";
 
 export type View = "chat" | "board" | "trace" | "git" | "sandbox" | "approvals" | "scheduler" | "settings" | "plugins" | "steward";
 
@@ -81,6 +82,17 @@ interface WorkspaceEditorState {
   crossRefs: Record<string, { sourceWorkspaceId: string; sourcePath: string }>;
 }
 
+/** Best-effort active-run probe for the guarded close (backend truth).
+ * Any failure resolves to an empty list — the backend's NeedConfirm
+ * refusal remains the backstop, so a failed probe just skips the dialog. */
+async function previewRunningTasks(workspaceId: string): Promise<RunningTaskSummaryDto[]> {
+  try {
+    return await ipc.workspaceClosePreview(workspaceId);
+  } catch {
+    return [];
+  }
+}
+
 /** Empty editor bucket for a freshly opened workspace. */
 function emptyEditorState(): WorkspaceEditorState {
   return {
@@ -105,6 +117,9 @@ export type LayoutMode = "single" | "overview";
  * the dialog shows exactly what would be lost. For a switch,
  * `workspaceId` is the workspace being LEFT (the dirty bucket) and
  * `targetWorkspaceId` is the destination; for a close they are the same.
+ * `runningTasks` only applies to closes (switching never kills runs) —
+ * the backend's active runs with task titles, snapshotted via
+ * `workspaceClosePreview`.
  */
 export interface PendingWorkspaceAction {
   kind: "switch" | "close";
@@ -113,6 +128,8 @@ export interface PendingWorkspaceAction {
   /** Workspace label for dialog copy (the workspace carrying the edits). */
   workspaceLabel: string;
   dirtyFiles: string[];
+  /** Active runs that keep running in the background after a close. */
+  runningTasks: RunningTaskSummaryDto[];
 }
 
 interface UiState {
@@ -219,11 +236,11 @@ interface UiState {
   requestSwitchToWorkspace: (id: string, label?: string) => boolean;
   /**
    * Guarded close: same as the direct close, but when the workspace being
-   * CLOSED has unsaved editor edits the action is parked in
-   * `pendingWorkspaceAction` instead. Returns true when the close was
-   * executed, false when it was parked behind the guard.
+   * CLOSED has unsaved editor edits OR active backend runs, the action is
+   * parked in `pendingWorkspaceAction` instead. Resolves to true when the
+   * close was executed, false when it was parked behind the guard.
    */
-  requestCloseWorkspace: (id: string, label?: string) => boolean;
+  requestCloseWorkspace: (id: string, label?: string) => Promise<boolean>;
   /** Discards the pending action's dirty marks and executes it. */
   confirmPendingWorkspaceAction: () => Promise<void>;
   /** Drops the pending action without executing it. */
@@ -233,9 +250,11 @@ interface UiState {
   /**
    * Closes a workspace over IPC (v2 semantics, ADR-0021: drops the open
    * state only — registry row and directories stay) and re-syncs the
-   * active-workspace mirror. Shared by the direct and guarded close paths.
+   * active-workspace mirror. `force` skips the backend's active-run
+   * refusal (the confirm path passes true). Shared by the direct and
+   * guarded close paths.
    */
-  closeWorkspaceViaIpc: (workspaceId: string) => Promise<void>;
+  closeWorkspaceViaIpc: (workspaceId: string, force?: boolean) => Promise<void>;
   /** Sets the layout mode and persists via IPC. */
   setLayoutMode: (mode: LayoutMode) => Promise<void>;
   /** Syncs the open-workspace mirror from the backend (call on startup). */
@@ -495,6 +514,7 @@ export const useUiStore = create<UiState>((set, get) => ({
           targetWorkspaceId: id,
           workspaceLabel: label ?? active,
           dirtyFiles,
+          runningTasks: [],
         },
       });
       return false;
@@ -502,9 +522,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     void get().switchToWorkspace(id);
     return true;
   },
-  requestCloseWorkspace: (id, label) => {
+  // Guarded close, two probes: unsaved edits are a local ephemeral fact
+  // (bucket dirtyPaths — checked synchronously); active runs are backend
+  // truth (workspaceClosePreview, checked when the bucket is clean). Either
+  // probe non-empty parks the action; the confirm path force-closes.
+  requestCloseWorkspace: async (id, label) => {
     const dirtyFiles = get().dirtyFilesOf(id);
     if (dirtyFiles.length > 0) {
+      const runningTasks = await previewRunningTasks(id);
       set({
         pendingWorkspaceAction: {
           kind: "close",
@@ -512,6 +537,21 @@ export const useUiStore = create<UiState>((set, get) => ({
           targetWorkspaceId: id,
           workspaceLabel: label ?? id,
           dirtyFiles,
+          runningTasks,
+        },
+      });
+      return false;
+    }
+    const runningTasks = await previewRunningTasks(id);
+    if (runningTasks.length > 0) {
+      set({
+        pendingWorkspaceAction: {
+          kind: "close",
+          workspaceId: id,
+          targetWorkspaceId: id,
+          workspaceLabel: label ?? id,
+          dirtyFiles,
+          runningTasks,
         },
       });
       return false;
@@ -539,7 +579,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (pending.kind === "switch") {
       await get().switchToWorkspace(pending.targetWorkspaceId);
     } else {
-      await get().closeWorkspaceViaIpc(pending.workspaceId).catch(() => {
+      // Confirmed through the guard: force past the backend's active-run
+      // refusal (the runs keep going in the background either way).
+      await get().closeWorkspaceViaIpc(pending.workspaceId, true).catch(() => {
         /* close failures surface via open-state sync */
       });
     }
@@ -549,8 +591,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     const dirtyPaths = get().editorByWorkspace[workspaceId]?.dirtyPaths ?? {};
     return Object.keys(dirtyPaths).filter((p) => dirtyPaths[p] === true);
   },
-  closeWorkspaceViaIpc: async (workspaceId) => {
-    await ipc.workspaceClose(workspaceId);
+  closeWorkspaceViaIpc: async (workspaceId, force = false) => {
+    await ipc.workspaceClose(workspaceId, force);
     await get().syncOpenWorkspace();
   },
   setLayoutMode: async (mode) => {

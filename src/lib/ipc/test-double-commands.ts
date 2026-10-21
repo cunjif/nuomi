@@ -52,6 +52,7 @@ import type {
   RoleInput,
   RunDto,
   ScheduleDto,
+  RunningTaskSummaryDto,
   ScheduleInput,
   StewardSessionDto,
   StewardMessageDto,
@@ -103,6 +104,28 @@ const errWithDetails = (code: string, message: string, details: JsonValue): Resu
  * when still mounted+available, else the first mounted+available one
  * (added_at order). Marks `isActive` on every directory of `ws`.
  */
+/** Active runs of one workspace as RunningTaskSummaryDto[] — mirrors the
+ * backend close preview (tasks joined to runs, active statuses only). */
+function activeRunSummaries(workspaceId: string): RunningTaskSummaryDto[] {
+  const taskIds = new Set(
+    tdState.tasks.filter((t) => t.workspaceId === workspaceId).map((t) => t.id),
+  );
+  const titleOf = new Map(
+    tdState.tasks.filter((t) => t.workspaceId === workspaceId).map((t) => [t.id, t.title] as const),
+  );
+  return tdState.runs
+    .filter(
+      (r) =>
+        taskIds.has(r.taskId) &&
+        (r.status === "running" || r.status === "queued" || r.status === "awaiting_approval"),
+    )
+    .map((r) => ({
+      runId: r.id,
+      taskTitle: titleOf.get(r.taskId) ?? r.taskId,
+      status: r.status,
+    }));
+}
+
 function markActiveDirectories(ws: WorkspaceEntryDto): WorkspaceEntryDto {
   const dirs = ws.directories ?? [];
   const mounted = dirs.filter((d) => d.mounted && d.available);
@@ -533,18 +556,31 @@ export function testDoubleCommands(): CommandSet {
       if (tdState.activeDirectoryId === directoryId) tdState.activeDirectoryId = null;
       return ok(null);
     },
-    async workspaceClose(workspaceId: string) {
+    async workspaceClose(workspaceId: string, force: boolean | null) {
       // Mirror backend: idempotent close — the registry row and its
-      // directories stay intact, only the open state is dropped.
+      // directories stay intact, only the open state is dropped. Without
+      // force an open workspace with active runs refuses.
       const target = (tdState.workspaces ?? []).find((w) => w.id === workspaceId);
       if (!target) return err("workspace.not_found", `workspace #${workspaceId} not found`);
       const wasOpen = target.isActive === true;
+      if (wasOpen && force !== true) {
+        const running = activeRunSummaries(workspaceId);
+        if (running.length > 0) {
+          return err(
+            "workspace.close_needs_confirm",
+            `workspace #${workspaceId} has running tasks`,
+          );
+        }
+      }
       if (wasOpen) {
         target.isActive = false;
         target.isFocused = false;
         tdState.activeDirectoryId = null;
       }
       return ok(wasOpen);
+    },
+    async workspaceClosePreview(workspaceId: string) {
+      return ok(activeRunSummaries(workspaceId));
     },
     async workspaceSwitch(id: string) {
       const existing = tdState.workspaces ?? [];

@@ -1082,7 +1082,9 @@
       "saveHint": "提示：先在编辑器中 Ctrl+S 保存，可避免丢失。",
       "cancel": "取消",
       "discardAndSwitch": "放弃更改并切换",
-      "discardAndClose": "放弃更改并关闭"
+      "discardAndClose": "放弃更改并关闭",
+      "runningBody": "以下任务仍在运行，关闭工作区后它们将转入后台继续：",
+      "stillClose": "仍要关闭"
     }
   },
   "capability": {

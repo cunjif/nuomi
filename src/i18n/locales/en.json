@@ -1076,7 +1076,9 @@
       "saveHint": "Tip: press Ctrl+S in the editor first to keep them.",
       "cancel": "Cancel",
       "discardAndSwitch": "Discard and switch",
-      "discardAndClose": "Discard and close"
+      "discardAndClose": "Discard and close",
+      "runningBody": "These tasks are still running; they keep going in the background after closing:",
+      "stillClose": "Close anyway"
     }
   },
   "capability": {

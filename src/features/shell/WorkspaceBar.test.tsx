@@ -63,7 +63,10 @@ describe("WorkspaceBar — guarded × close", () => {
     renderBar();
     // The × affordance is a nested span inside the workspace tab button.
     fireEvent.click(await screen.findByText("×"));
-    expect(useUiStore.getState().pendingWorkspaceAction?.kind).toBe("close");
+    // The guarded close probes asynchronously — the action parks shortly.
+    await waitFor(() => {
+      expect(useUiStore.getState().pendingWorkspaceAction?.kind).toBe("close");
+    });
     expect(useUiStore.getState().dirtyFilesOf("ws-a")).toEqual(["draft.md"]);
     // The guard dialog (mounted alongside) shows what would be lost.
     expect(await screen.findByText("draft.md")).toBeInTheDocument();
