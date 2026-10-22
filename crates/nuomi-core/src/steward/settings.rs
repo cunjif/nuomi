@@ -52,6 +52,11 @@ pub struct SoulConfig {
 pub struct BindingConfig {
     pub mode: BindingMode,
     pub provider_id: Option<String>,
+    /// The model id pinned for the Provider binding (`params.model_id`).
+    /// `None` in Cli mode (the CLI agent profile carries its own model) and
+    /// in None mode. When `None` in Provider mode the effective model falls
+    /// back to the provider's `settings.default_model` / first model.
+    pub model_id: Option<String>,
     pub agent_profile_id: Option<String>,
 }
 
@@ -163,11 +168,22 @@ pub fn read_agent_profile_id(params: &serde_json::Value) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Reads the explicit `model_id` pin from a Role's params JSON (the
+/// provider-binding model picked in the settings panel).
+pub fn read_model_id(params: &serde_json::Value) -> Option<String> {
+    params
+        .get("model_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 /// Extracts binding config from a Role.
 fn binding_from_role(role: &crate::domain::Role) -> BindingConfig {
     BindingConfig {
         mode: infer_binding_mode(role),
         provider_id: role.provider_id.clone(),
+        model_id: read_model_id(&role.params),
         agent_profile_id: read_agent_profile_id(&role.params),
     }
 }
@@ -347,6 +363,7 @@ pub async fn get_settings(
                 BindingConfig {
                     mode: BindingMode::None,
                     provider_id: None,
+                    model_id: None,
                     agent_profile_id: None,
                 },
             ),
@@ -448,11 +465,14 @@ pub async fn update_soul(
 /// Updates the binding of the steward main role.
 ///
 /// Validates target existence:
-/// - Provider mode: `provider_id` must exist in `list_providers`.
+/// - Provider mode: `provider_id` must exist in `list_providers`; when
+///   `model_id` is given it must be one of the provider's configured model
+///   ids (`settings.models`) when that list is non-empty.
 /// - CLI mode: `agent_profile_id` must exist in `list_agent_profiles`.
 ///
 /// Submit mapping mirrors `RoleBindingPanel`:
-/// - Provider: `provider_id = target, provider_ids = [target], params = {}`
+/// - Provider: `provider_id = target, provider_ids = [target],
+///   params = { model_id }` (key omitted when no model was picked)
 /// - CLI: `provider_id = null, provider_ids = [], params = {agent_profile_id: target}`
 /// - None: all null/empty
 ///
@@ -462,10 +482,15 @@ pub async fn update_binding(
     session_id: &str,
     mode: BindingMode,
     provider_id: Option<&str>,
+    model_id: Option<&str>,
     agent_profile_id: Option<&str>,
 ) -> Result<(), SettingsError> {
     let session_id = session_id.to_string();
     let provider_id = provider_id.map(|s| s.to_string());
+    let model_id = model_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let agent_profile_id = agent_profile_id.map(|s| s.to_string());
     spawn_blocking(move || {
         let mut db = Db::open(&db_path)?;
@@ -483,10 +508,23 @@ pub async fn update_binding(
                     SettingsError::BindingTargetNotFound("provider_id is null".into())
                 })?;
                 let providers = providers::list_providers(&tx)?;
-                if !providers.iter().any(|p| p.id == *pid) {
+                let Some(config) = providers.iter().find(|p| p.id == *pid) else {
                     return Err(SettingsError::BindingTargetNotFound(format!(
                         "provider#{pid}"
                     )));
+                };
+                // A pinned model must be one the provider actually exposes —
+                // but only when the provider has any models configured at
+                // all (otherwise free-form ids pass through untouched).
+                if let Some(mid) = &model_id {
+                    let settings =
+                        crate::domain::entities::ProviderSettings::from_params(&config.params);
+                    let known = settings.model_ids();
+                    if !known.is_empty() && !known.contains(mid) {
+                        return Err(SettingsError::BindingTargetNotFound(format!(
+                            "provider#{pid} has no model '{mid}'"
+                        )));
+                    }
                 }
             }
             BindingMode::Cli => {
@@ -511,7 +549,11 @@ pub async fn update_binding(
             BindingMode::Provider => {
                 role.provider_id = provider_id.clone();
                 role.provider_ids = provider_id.iter().cloned().collect();
-                role.params = serde_json::json!({});
+                let mut params = serde_json::Map::new();
+                if let Some(mid) = &model_id {
+                    params.insert("model_id".into(), serde_json::json!(mid));
+                }
+                role.params = serde_json::Value::Object(params);
             }
             BindingMode::Cli => {
                 role.provider_id = None;
@@ -538,6 +580,8 @@ pub async fn update_binding(
                 "session_id": session_id,
                 "old_mode": format!("{:?}", old_binding.mode),
                 "new_mode": format!("{mode:?}"),
+                "old_model_id": old_binding.model_id,
+                "new_model_id": model_id,
             }),
         )?;
 
@@ -1026,5 +1070,180 @@ mod tests {
             )
             .unwrap();
         assert!(ca.is_some(), "cleared_at should be set");
+    }
+
+    // ------------------------------------------------- binding updates
+
+    /// Seeds a steward session (sess1) + a provider row with the given
+    /// params JSON; returns the tempdir guard (must outlive the test body)
+    /// and the db path.
+    async fn seed_binding_db(provider_params: &str) -> (tempfile::TempDir, Arc<str>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let path_str = path.to_string_lossy().to_string();
+        let db_conn = Db::open(&path_str).unwrap();
+        migrations::run(&db_conn.0).unwrap();
+        drop(db_conn);
+        let dbp: Arc<str> = Arc::from(path_str);
+
+        let db = Db::open(&dbp).unwrap();
+        db.0.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, kind)
+             VALUES ('sess1', 'test', 1, 1, 'background')",
+            [],
+        )
+        .unwrap();
+        db.0.execute(
+            "INSERT INTO steward_ai (id, ready, online_authorized, created_at)
+             VALUES ('sai1', 1, 0, 1)",
+            [],
+        )
+        .unwrap();
+        db.0.execute(
+            "INSERT INTO steward_sessions (id, steward_id, title, created_at, updated_at)
+             VALUES ('sess1', 'sai1', 'test', 1, 1)",
+            [],
+        )
+        .unwrap();
+        db.0.execute(
+            "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, params_json, created_at, updated_at)
+             VALUES ('p1', 'P1', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', ?1, 1, 1)",
+            [provider_params],
+        )
+        .unwrap();
+        (dir, dbp)
+    }
+
+    #[tokio::test]
+    async fn update_binding_persists_model_id_and_reads_back() {
+        let (_dir, dbp) = seed_binding_db(
+            r#"{"settings":{"default_model":"provider-default","models":[
+                {"id":"provider-default","capabilities":["reasoning"]},
+                {"id":"provider-alt","capabilities":["reasoning"]}
+            ]}}"#,
+        )
+        .await;
+
+        update_binding(
+            dbp.clone(),
+            "sess1",
+            BindingMode::Provider,
+            Some("p1"),
+            Some("provider-alt"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let settings = get_settings(dbp, "sess1").await.unwrap();
+        assert_eq!(settings.binding.mode, BindingMode::Provider);
+        assert_eq!(settings.binding.provider_id.as_deref(), Some("p1"));
+        assert_eq!(settings.binding.model_id.as_deref(), Some("provider-alt"));
+    }
+
+    #[tokio::test]
+    async fn update_binding_without_model_leaves_params_clean() {
+        let (_dir, dbp) = seed_binding_db(
+            r#"{"settings":{"models":[{"id":"only-model","capabilities":["reasoning"]}]}}"#,
+        )
+        .await;
+
+        update_binding(
+            dbp.clone(),
+            "sess1",
+            BindingMode::Provider,
+            Some("p1"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let settings = get_settings(dbp.clone(), "sess1").await.unwrap();
+        assert_eq!(settings.binding.model_id, None);
+        // No model_id key on the role params — the provider default applies.
+        let db = Db::open(&dbp).unwrap();
+        let role = roles::get(&db.0, STEWARD_MAIN_ROLE_ID).unwrap();
+        assert!(role.params.get("model_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn update_binding_rejects_unknown_model_when_models_configured() {
+        let (_dir, dbp) = seed_binding_db(
+            r#"{"settings":{"models":[{"id":"known-model","capabilities":["reasoning"]}]}}"#,
+        )
+        .await;
+
+        let result = update_binding(
+            dbp,
+            "sess1",
+            BindingMode::Provider,
+            Some("p1"),
+            Some("not-a-model"),
+            None,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(SettingsError::BindingTargetNotFound(ref msg)) if msg.contains("not-a-model")
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_binding_cli_mode_drops_model_id() {
+        let (_dir, dbp) = seed_binding_db("{}").await;
+        {
+            let db = Db::open(&dbp).unwrap();
+            crate::store::repos::agent_profiles::insert(
+                &db.0,
+                &crate::domain::AgentProfile {
+                    id: "cli-1".into(),
+                    name: "agent".into(),
+                    adapter: "cli".into(),
+                    flavor: crate::domain::CliFlavor::Plain,
+                    command: "cmd".into(),
+                    args: serde_json::json!([]),
+                    env: serde_json::json!({}),
+                    working_dir: None,
+                    enabled: true,
+                    model_id: None,
+                    resume_args: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )
+            .unwrap();
+        }
+
+        // First bind provider+model, then switch to CLI — the model pin
+        // must not survive the mode switch.
+        update_binding(
+            dbp.clone(),
+            "sess1",
+            BindingMode::Provider,
+            Some("p1"),
+            Some("any-model"),
+            None,
+        )
+        .await
+        .unwrap();
+        update_binding(
+            dbp.clone(),
+            "sess1",
+            BindingMode::Cli,
+            None,
+            None,
+            Some("cli-1"),
+        )
+        .await
+        .unwrap();
+
+        let settings = get_settings(dbp.clone(), "sess1").await.unwrap();
+        assert_eq!(settings.binding.mode, BindingMode::Cli);
+        assert_eq!(settings.binding.agent_profile_id.as_deref(), Some("cli-1"));
+        assert_eq!(settings.binding.model_id, None);
+        let db = Db::open(&dbp).unwrap();
+        let role = roles::get(&db.0, STEWARD_MAIN_ROLE_ID).unwrap();
+        assert!(role.params.get("model_id").is_none());
     }
 }

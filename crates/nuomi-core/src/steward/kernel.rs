@@ -86,7 +86,7 @@ pub(crate) fn check_safety_policy(message: &str) -> Result<(), StewardReply> {
 /// Guidance shown when the steward has no bound model service. The rule
 /// intent recognizer's remaining scope: tailoring this hint (steward_workbench
 /// v2 — the recognizer no longer drives the reply path).
-const BINDING_GUIDANCE: &str = "管家尚未绑定模型服务，暂时无法对话。请前往「管家设置 → Provider 绑定」绑定一个 Provider 或 CLI Agent 后再试。";
+const BINDING_GUIDANCE: &str = "管家尚未绑定可用的模型服务，暂时无法对话。请前往「管家设置 → Provider 绑定」绑定一个 Provider（并确认其已配置模型，或指定 ModelId）或 CLI Agent 后再试。";
 
 /// Maximum prior turns loaded into the loop context (the pruning pipeline
 /// enforces the actual token budget).
@@ -138,10 +138,41 @@ pub(crate) async fn resolve_steward_binding(
             .map_err(|e| StewardError::Store(e.to_string()))?;
     let bound_provider_id = role.provider_id.clone();
     let key = super::settings::read_agent_profile_id(&role.params).or(role.provider_id);
-    let provider = key.and_then(|k| materialized.providers.get(&k).cloned());
+    let provider = key
+        .as_deref()
+        .and_then(|k| materialized.providers.get(k).cloned());
     let Some(provider) = provider else {
         // Bound target missing (deleted provider / disabled profile) — treat
         // as unbound and guide the user back to settings.
+        return Ok(None);
+    };
+    // The wire model id (the loop's ChatRequest.model):
+    // 1. the steward role's explicit `params.model_id` pin,
+    // 2. the bound binding's resolved model (provider `settings.default_model`
+    //    > first configured model; CLI profiles carry their own `model_id`).
+    // A Provider binding that resolves no model at all is treated as
+    // unbound — sending a placeholder model id to the wire would only
+    // produce a guaranteed-rejected request. CLI bindings never need a
+    // model id (the CLI client ignores ChatRequest.model), so they fall
+    // back to the client tag for display purposes.
+    let model = match (
+        &bound_provider_id,
+        super::settings::read_model_id(&role.params),
+    ) {
+        (Some(_), pinned) => pinned.or_else(|| {
+            bound_provider_id
+                .as_deref()
+                .and_then(|pid| materialized.models.get(pid).cloned())
+        }),
+        (None, _) => Some(
+            key.as_deref()
+                .and_then(|k| materialized.models.get(k).cloned())
+                .unwrap_or_else(|| provider.id().to_string()),
+        ),
+    };
+    let Some(model) = model else {
+        // Provider bound but no model knowable (settings.default_model and
+        // settings.models both empty) — same guidance path as unbound.
         return Ok(None);
     };
     // Vision capability: only a directly bound ProviderConfig can carry the
@@ -168,7 +199,7 @@ pub(crate) async fn resolve_steward_binding(
         false
     };
     Ok(Some(StewardBinding {
-        model: provider.id().to_string(),
+        model,
         provider,
         soul: role.system_prompt_override,
         temperature: role.temperature,
@@ -756,9 +787,9 @@ mod tests {
             let db = Db::open(&dbp).unwrap();
             db.0
                 .execute(
-                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, created_at, updated_at)
-                     VALUES ('p1', 'Bound', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', 1, 1)",
-                    [],
+                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, params_json, created_at, updated_at)
+                     VALUES ('p1', 'Bound', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', ?1, 1, 1)",
+                    [r#"{"settings":{"models":[{"id":"gpt-4o-mini","capabilities":["reasoning"]}]}}"#],
                 )
                 .unwrap();
             db.0.execute(
@@ -805,9 +836,9 @@ mod tests {
             let db = Db::open(&dbp).unwrap();
             db.0
                 .execute(
-                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, created_at, updated_at)
-                     VALUES ('p1', 'Bound', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', 1, 1)",
-                    [],
+                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, params_json, created_at, updated_at)
+                     VALUES ('p1', 'Bound', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', ?1, 1, 1)",
+                    [r#"{"settings":{"models":[{"id":"gpt-4o-mini","capabilities":["reasoning"]}]}}"#],
                 )
                 .unwrap();
             db.0.execute(
@@ -949,7 +980,7 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap();
         assert!(
-            text.starts_with("管家尚未绑定模型服务") && text.contains("Provider 绑定"),
+            text.starts_with("管家尚未绑定") && text.contains("Provider 绑定"),
             "authoritative text should be the full guidance, got: {text}"
         );
 
@@ -996,7 +1027,7 @@ mod tests {
             e1.payload
                 .get("text")
                 .and_then(|v| v.as_str())
-                .is_some_and(|t| t.contains("管家尚未绑定模型服务")),
+                .is_some_and(|t| t.contains("管家尚未绑定")),
             "bus mirror must carry the authoritative text, got: {}",
             e1.payload
         );
@@ -1032,7 +1063,7 @@ mod tests {
         match reply {
             StewardReply::Text { content } => {
                 assert!(
-                    content.contains("尚未绑定模型服务"),
+                    content.contains("尚未绑定"),
                     "unbound steward must return binding guidance, got: {content}"
                 );
                 assert!(
@@ -1079,9 +1110,9 @@ mod tests {
             let db = Db::open(&dbp).unwrap();
             db.0
                 .execute(
-                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, created_at, updated_at)
-                     VALUES ('p1', 'Unreachable', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', 1, 1)",
-                    [],
+                    "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, params_json, created_at, updated_at)
+                     VALUES ('p1', 'Unreachable', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', ?1, 1, 1)",
+                    [r#"{"settings":{"models":[{"id":"gpt-4o-mini","capabilities":["reasoning"]}]}}"#],
                 )
                 .unwrap();
             db.0.execute(
@@ -1218,5 +1249,100 @@ mod tests {
         assert_eq!(msgs[0].role, StewardMessageRole::User);
         // Second should be steward
         assert_eq!(msgs[1].role, StewardMessageRole::Steward);
+    }
+
+    // ------------------------------------------------- binding model resolution
+
+    fn insert_bound_provider(dbp: &Arc<str>, params_json: &str) {
+        let db = Db::open(dbp).unwrap();
+        db.0.execute(
+            "INSERT INTO provider_configs (id, name, protocol, base_url, keyring_ref, params_json, created_at, updated_at)
+             VALUES ('p1', 'Bound', 'openai_compatible', 'http://127.0.0.1:9', 'kr/p1', ?1, 1, 1)",
+            [params_json],
+        )
+        .unwrap();
+        db.0.execute(
+            "UPDATE roles SET provider_id = 'p1' WHERE id = 'role_steward_main'",
+            [],
+        )
+        .unwrap();
+    }
+
+    async fn bound_secrets() -> Arc<dyn SecretStore> {
+        let secrets: Arc<dyn SecretStore> =
+            Arc::new(crate::providers::MemorySecretStore::default());
+        secrets.set("kr/p1", "sk-test").await.unwrap();
+        secrets
+    }
+
+    #[tokio::test]
+    async fn resolve_binding_uses_explicit_model_id_pin_first() {
+        let dbp = db_path().await;
+        insert_bound_provider(
+            &dbp,
+            r#"{"settings":{"default_model":"provider-default","models":[
+                {"id":"provider-default","capabilities":["reasoning"]},
+                {"id":"provider-alt","capabilities":["reasoning"]}
+            ]}}"#,
+        );
+        {
+            let db = Db::open(&dbp).unwrap();
+            db.0.execute(
+                "UPDATE roles SET params_json = '{\"model_id\":\"provider-alt\"}' WHERE id = 'role_steward_main'",
+                [],
+            )
+            .unwrap();
+        }
+        let binding = resolve_steward_binding(&dbp, bound_secrets().await)
+            .await
+            .unwrap()
+            .expect("explicit pin must resolve");
+        assert_eq!(binding.model, "provider-alt");
+    }
+
+    #[tokio::test]
+    async fn resolve_binding_falls_back_to_provider_default_model() {
+        let dbp = db_path().await;
+        insert_bound_provider(
+            &dbp,
+            r#"{"settings":{"default_model":"provider-default","models":[
+                {"id":"provider-default","capabilities":["reasoning"]}
+            ]}}"#,
+        );
+        let binding = resolve_steward_binding(&dbp, bound_secrets().await)
+            .await
+            .unwrap()
+            .expect("provider default must resolve");
+        assert_eq!(binding.model, "provider-default");
+    }
+
+    #[tokio::test]
+    async fn resolve_binding_falls_back_to_first_configured_model() {
+        let dbp = db_path().await;
+        insert_bound_provider(
+            &dbp,
+            r#"{"settings":{"models":[
+                {"id":"first-model","capabilities":["reasoning"]},
+                {"id":"second-model","capabilities":["reasoning"]}
+            ]}}"#,
+        );
+        let binding = resolve_steward_binding(&dbp, bound_secrets().await)
+            .await
+            .unwrap()
+            .expect("first configured model must resolve");
+        assert_eq!(binding.model, "first-model");
+    }
+
+    #[tokio::test]
+    async fn resolve_binding_without_any_model_is_unbound() {
+        let dbp = db_path().await;
+        // Provider bound and reachable, but no default_model and no models
+        // list — no knowable wire model id, so the binding is treated as
+        // incomplete (guidance) instead of sending a placeholder model.
+        insert_bound_provider(&dbp, r#"{"settings":{}}"#);
+        let binding = resolve_steward_binding(&dbp, bound_secrets().await)
+            .await
+            .unwrap();
+        assert!(binding.is_none(), "no model configured must be unbound");
     }
 }
