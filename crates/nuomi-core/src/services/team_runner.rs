@@ -35,10 +35,19 @@ pub struct MaterializedProviders {
     /// Keyed by provider id (LLM endpoints) or agent-profile id (CLI agents);
     /// `Role.provider_id` may point at either kind of key.
     pub providers: HashMap<String, Arc<dyn LlmProvider>>,
+    /// Keyed like `providers`: the model id an outbound request should carry
+    /// for that binding. HTTP providers resolve `settings.default_model`
+    /// then the first configured model; CLI profiles carry their own
+    /// `model_id` (informational — the CLI client ignores `ChatRequest.model`).
+    /// Entries are omitted when no model id is knowable.
+    pub models: HashMap<String, String>,
     /// Master provider if any config is flagged master, else the first
     /// provider in list order; `None` when no provider config exists at all
     /// (the caller decides what that means).
     pub default: Option<Arc<dyn LlmProvider>>,
+    /// The resolved model id for [`MaterializedProviders::default`], when the
+    /// default is an HTTP provider with at least one configured model.
+    pub default_model: Option<String>,
     /// Non-fatal skip reasons collected while materializing.
     pub warnings: Vec<String>,
 }
@@ -78,8 +87,10 @@ pub async fn materialize(
     let (configs, profiles) = read_catalog(db_path).await?;
 
     let mut providers: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
+    let mut models: HashMap<String, String> = HashMap::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut default: Option<Arc<dyn LlmProvider>> = None;
+    let mut default_model: Option<String> = None;
 
     for config in &configs {
         let Some(api_key) = resolve_api_key(&secrets, config).await else {
@@ -102,6 +113,18 @@ pub async fn materialize(
                 continue;
             }
         };
+        let settings = crate::domain::entities::ProviderSettings::from_params(&config.params);
+        // The wire model id for this endpoint: default_model > models[0].
+        // A provider without any configured model stays usable for
+        // capability routing but carries no model id — callers fall back
+        // (steward treats it as unbound).
+        let resolved_model = settings.resolve_model();
+        if resolved_model.is_none() {
+            warnings.push(format!(
+                "provider '{}' has no model configured (settings.default_model / settings.models are empty); requests cannot carry a model id",
+                config.name
+            ));
+        }
         let client: Arc<dyn LlmProvider> = match config.protocol {
             ProviderProtocol::OpenAiCompatible => Arc::new(
                 OpenAiCompatibleClient::new(config.base_url.clone(), api_key)
@@ -119,6 +142,10 @@ pub async fn materialize(
         // Master wins over list order; otherwise the first entry sticks.
         if config.is_master || default.is_none() {
             default = Some(client.clone());
+            default_model = resolved_model.clone();
+        }
+        if let Some(model) = resolved_model {
+            models.insert(config.id.clone(), model);
         }
         providers.insert(config.id.clone(), client);
     }
@@ -135,12 +162,20 @@ pub async fn materialize(
         if let Some(dir) = &cwd {
             client = client.with_default_cwd(dir.clone());
         }
+        // Informational only — the CLI client composes its own prompt and
+        // ignores ChatRequest.model; the entry lets callers surface the
+        // profile's pinned model alongside provider models.
+        if let Some(model_id) = &profile.model_id {
+            models.insert(profile.id.clone(), model_id.clone());
+        }
         providers.insert(profile.id.clone(), Arc::new(client));
     }
 
     Ok(MaterializedProviders {
         providers,
+        models,
         default,
+        default_model,
         warnings,
     })
 }
@@ -189,8 +224,16 @@ pub async fn run_team(
         let has_default = materialized.default.is_some();
         let (default_provider, model) = match materialized.default.clone() {
             Some(provider) => {
-                let id = provider.id().to_string();
-                (provider, id)
+                // The default endpoint's resolved model id
+                // (settings.default_model > first configured model). A
+                // default without any configured model keeps the dialect-tag
+                // fallback so the run still proceeds (the caller surfaces
+                // the materialization warning).
+                let model = materialized
+                    .default_model
+                    .clone()
+                    .unwrap_or_else(|| provider.id().to_string());
+                (provider, model)
             }
             None => {
                 // No single default endpoint: fall back to any materialized
@@ -234,6 +277,7 @@ pub async fn run_team(
             roles,
             team: team.clone(),
             model,
+            models: materialized.models,
             workspace_id,
             cli_handles,
         };
@@ -633,11 +677,13 @@ mod tests {
         let (_dir, file) = temp_db();
         {
             let conn = rusqlite::Connection::open(&file).unwrap();
-            repos::providers::insert_provider(
-                &conn,
-                &cfg("p1", "primary", Some("kr/p1"), false, 1),
-            )
-            .unwrap();
+            let mut p1 = cfg("p1", "primary", Some("kr/p1"), false, 1);
+            p1.params = json!({
+                "settings": { "models": [
+                    { "id": "gpt-4o-mini", "capabilities": ["reasoning"] }
+                ] }
+            });
+            repos::providers::insert_provider(&conn, &p1).unwrap();
             repos::providers::insert_provider(&conn, &cfg("p2", "keyless", None, false, 2))
                 .unwrap();
         }
@@ -650,6 +696,13 @@ mod tests {
 
         assert!(result.providers.contains_key("p1"));
         assert!(!result.providers.contains_key("p2"));
+        // The configured model rides along under the provider key and as
+        // the default model (default_model unset → first model wins).
+        assert_eq!(
+            result.models.get("p1").map(String::as_str),
+            Some("gpt-4o-mini")
+        );
+        assert_eq!(result.default_model.as_deref(), Some("gpt-4o-mini"));
         assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
         assert!(
             result.warnings[0].contains("keyless"),
@@ -660,6 +713,37 @@ mod tests {
             .default
             .expect("first keyed provider becomes default");
         assert_eq!(default.id(), "openai_compatible");
+    }
+
+    #[tokio::test]
+    async fn provider_without_models_warns_and_carries_no_model_id() {
+        let (_dir, file) = temp_db();
+        {
+            let conn = rusqlite::Connection::open(&file).unwrap();
+            repos::providers::insert_provider(&conn, &cfg("p1", "bare", Some("kr/p1"), true, 1))
+                .unwrap();
+        }
+        let secrets = Arc::new(MemorySecretStore::default());
+        secrets.set("kr/p1", "sk-test").await.unwrap();
+
+        let result = materialize(Arc::from(file.to_string_lossy().to_string()), secrets, None)
+            .await
+            .unwrap();
+
+        assert!(result.providers.contains_key("p1"));
+        assert!(result.default.is_some());
+        // No models configured → no model id anywhere, plus a warning so
+        // callers can surface the incomplete configuration.
+        assert!(result.models.is_empty());
+        assert_eq!(result.default_model, None);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("has no model configured")),
+            "{:?}",
+            result.warnings
+        );
     }
 
     #[tokio::test]

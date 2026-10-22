@@ -48,7 +48,7 @@ impl PipelineExecutor {
                 .clone()
                 .unwrap_or_else(|| format!("You are {}.", role.name));
             let request = ChatRequest {
-                model: input.model.clone(),
+                model: input.model_for(role),
                 system_prompt: Some(system),
                 messages: vec![ChatMessage::user(current.clone())],
                 tools: Vec::new(),
@@ -146,6 +146,7 @@ mod tests {
             roles: vec![role("a")],
             team,
             model: "m".into(),
+            models: std::collections::HashMap::new(),
             workspace_id: None,
             cli_handles: std::collections::HashMap::new(),
         };

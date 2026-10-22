@@ -142,7 +142,14 @@ pub async fn generate_role(
         .get(target_id)
         .cloned()
         .ok_or(RoleDirectorError::NoBinding)?;
-    let model = provider.id().to_string();
+    // The bound binding's resolved model id (provider default_model /
+    // first model, or the CLI profile's pinned model_id); the dialect tag
+    // only when nothing is knowable (CLI bindings ignore the field).
+    let model = materialized
+        .models
+        .get(target_id)
+        .cloned()
+        .unwrap_or_else(|| provider.id().to_string());
 
     let request = ChatRequest::simple(
         &model,

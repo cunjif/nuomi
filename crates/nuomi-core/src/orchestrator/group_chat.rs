@@ -397,7 +397,7 @@ impl GroupChatExecutor {
         }
 
         Ok(ChatRequest {
-            model: input.model.clone(),
+            model: input.model_for(role),
             system_prompt: Some(system),
             messages: vec![ChatMessage::user(convo)],
             tools: vec![handoff_tool_def()],

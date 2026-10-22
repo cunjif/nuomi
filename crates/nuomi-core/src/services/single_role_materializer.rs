@@ -62,9 +62,9 @@ pub async fn materialize_single_role(
     }
 
     let warnings = materialized.warnings.clone();
-    let (provider, overlay) = select_provider(&materialized, resolved, &db_path).await?;
+    let selected = select_provider(&materialized, resolved, &db_path).await?;
 
-    let Some(provider) = provider else {
+    let Some(provider) = selected.provider else {
         tracing::warn!(
             has_default = materialized.default.is_some(),
             provider_count = materialized.providers.len(),
@@ -73,26 +73,53 @@ pub async fn materialize_single_role(
         return Ok(SingleRoleContext::EnvFallback);
     };
 
-    let model = provider.id().to_string();
+    // The wire model id: the role's explicit `params.model_id` pin first,
+    // then the resolved model of the selected binding
+    // (`settings.default_model` > first configured model; CLI profiles
+    // carry their own `model_id`). Falls back to the dialect tag only when
+    // nothing is knowable (CLI bindings ignore ChatRequest.model, so the
+    // fallback is display-only there).
+    let model = selected
+        .pinned_model
+        .or_else(|| {
+            selected
+                .key
+                .as_deref()
+                .and_then(|k| materialized.models.get(k).cloned())
+        })
+        .unwrap_or_else(|| provider.id().to_string());
     tracing::info!(
-        provider_id = %model,
-        has_overlay = overlay.is_some(),
+        provider_id = %provider.id(),
+        wire_model = %model,
+        has_overlay = selected.overlay.is_some(),
         warning_count = warnings.len(),
         "materialize_single_role: Materialized",
     );
     Ok(SingleRoleContext::Materialized {
         provider,
         model,
-        overlay,
+        overlay: selected.overlay,
         warnings,
     })
+}
+
+/// Outcome of provider selection for one resolved agent.
+struct Selected {
+    provider: Option<Arc<dyn LlmProvider>>,
+    overlay: Option<RoleOverlay>,
+    /// The binding key the provider was found under — the role's
+    /// `agent_profile_id` / `provider_id`, or `None` when the default
+    /// provider was used. Keys the `MaterializedProviders::models` lookup.
+    key: Option<String>,
+    /// The role's explicit `params.model_id` pin (Role bindings only).
+    pinned_model: Option<String>,
 }
 
 async fn select_provider(
     materialized: &MaterializedProviders,
     resolved: Option<&ResolvedAgent>,
     db_path: &Arc<str>,
-) -> CoreResult<(Option<Arc<dyn LlmProvider>>, Option<RoleOverlay>)> {
+) -> CoreResult<Selected> {
     match resolved {
         Some(r) => match r.kind {
             AgentRefKind::Role => select_for_role(materialized, &r.id, db_path).await,
@@ -102,10 +129,20 @@ async fn select_provider(
                     .get(&r.id)
                     .cloned()
                     .or_else(|| materialized.default.clone());
-                Ok((provider, None))
+                Ok(Selected {
+                    provider,
+                    overlay: None,
+                    key: Some(r.id.clone()),
+                    pinned_model: None,
+                })
             }
         },
-        None => Ok((materialized.default.clone(), None)),
+        None => Ok(Selected {
+            provider: materialized.default.clone(),
+            overlay: None,
+            key: None,
+            pinned_model: None,
+        }),
     }
 }
 
@@ -113,7 +150,7 @@ async fn select_for_role(
     materialized: &MaterializedProviders,
     role_id: &str,
     db_path: &Arc<str>,
-) -> CoreResult<(Option<Arc<dyn LlmProvider>>, Option<RoleOverlay>)> {
+) -> CoreResult<Selected> {
     let role = {
         let path = db_path.clone();
         let rid = role_id.to_string();
@@ -126,7 +163,12 @@ async fn select_for_role(
     };
 
     let Some(role) = role else {
-        return Ok((materialized.default.clone(), None));
+        return Ok(Selected {
+            provider: materialized.default.clone(),
+            overlay: None,
+            key: None,
+            pinned_model: None,
+        });
     };
 
     let provider_key = role
@@ -135,6 +177,13 @@ async fn select_for_role(
         .and_then(serde_json::Value::as_str)
         .map(|s| s.to_string())
         .or(role.provider_id.clone());
+
+    let pinned_model = role
+        .params
+        .get("model_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
     let provider = provider_key
         .as_deref()
@@ -163,7 +212,12 @@ async fn select_for_role(
         memory_config,
     };
 
-    Ok((provider, Some(overlay)))
+    Ok(Selected {
+        provider,
+        overlay: Some(overlay),
+        key: provider_key,
+        pinned_model,
+    })
 }
 
 fn join_err(e: tokio::task::JoinError) -> CoreError {
@@ -295,6 +349,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(provider.id(), "openai_compatible");
+                // No models configured on the provider → dialect-tag fallback.
                 assert_eq!(model, "openai_compatible");
                 let ov = overlay.expect("should have overlay");
                 assert_eq!(ov.system_prompt.as_deref(), Some("You are a coder."));
@@ -304,6 +359,67 @@ mod tests {
                     vec!["read".to_string(), "write".to_string()]
                 );
             }
+            _ => panic!("expected Materialized"),
+        }
+    }
+
+    #[tokio::test]
+    async fn role_resolves_provider_default_model_and_explicit_pin() {
+        let (_dir, file) = temp_db();
+        {
+            let conn = rusqlite::Connection::open(&file).unwrap();
+            let mut cfg = provider_cfg("p1", Some("kr/p1"), true);
+            cfg.params = json!({
+                "settings": { "default_model": "prov-default", "models": [
+                    { "id": "prov-default", "capabilities": ["reasoning"] },
+                    { "id": "prov-alt", "capabilities": ["reasoning"] }
+                ] }
+            });
+            crate::store::repos::providers::insert_provider(&conn, &cfg).unwrap();
+            let mut r = role("r1", Some("p1"));
+            r.params = json!({});
+            crate::store::repos::roles::insert(&conn, &r).unwrap();
+            let mut pinned = role("r2", Some("p1"));
+            pinned.params = json!({ "model_id": "prov-alt" });
+            crate::store::repos::roles::insert(&conn, &pinned).unwrap();
+        }
+        let secrets = Arc::new(MemorySecretStore::default());
+        secrets.set("kr/p1", "sk-test").await.unwrap();
+        let db_path: Arc<str> = Arc::from(file.to_string_lossy().to_string());
+
+        // Unpinned role → the provider's default_model.
+        let ctx = materialize_single_role(
+            db_path.clone(),
+            secrets.clone(),
+            None,
+            Some(&ResolvedAgent {
+                kind: AgentRefKind::Role,
+                id: "r1".into(),
+                name: "r1".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        match ctx {
+            SingleRoleContext::Materialized { model, .. } => assert_eq!(model, "prov-default"),
+            _ => panic!("expected Materialized"),
+        }
+
+        // Pinned role → params.model_id wins over the provider default.
+        let ctx = materialize_single_role(
+            db_path,
+            secrets,
+            None,
+            Some(&ResolvedAgent {
+                kind: AgentRefKind::Role,
+                id: "r2".into(),
+                name: "r2".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        match ctx {
+            SingleRoleContext::Materialized { model, .. } => assert_eq!(model, "prov-alt"),
             _ => panic!("expected Materialized"),
         }
     }

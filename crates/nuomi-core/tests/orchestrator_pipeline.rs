@@ -82,6 +82,7 @@ async fn pipeline_runs_three_roles_end_to_end_with_whiteboard_and_events() {
         roles,
         team,
         model: "test-model".into(),
+        models: std::collections::HashMap::new(),
         workspace_id: None,
         cli_handles: std::collections::HashMap::new(),
     };
@@ -211,6 +212,7 @@ async fn pipeline_passes_cli_resume_handle_and_collects_reported_session() {
         roles: vec![cli_member.clone()],
         team,
         model: "m".into(),
+        models: std::collections::HashMap::new(),
         workspace_id: None,
         cli_handles: handles,
     };

@@ -170,8 +170,15 @@ async fn plan_formation(
     })?;
 
     let catalog = read_catalog(db_path.clone()).await?;
+    // The planner model: the default endpoint's resolved model id
+    // (settings.default_model > first configured model); the dialect tag
+    // only when the provider has no models configured.
+    let planner_model = materialized
+        .default_model
+        .clone()
+        .unwrap_or_else(|| planner.id().to_string());
     let request = ChatRequest::simple(
-        planner.id(),
+        &planner_model,
         PLANNER_SYSTEM_PROMPT,
         &build_planner_user_message(&catalog, task, max_members),
     );

@@ -132,7 +132,7 @@ impl RouterExecutor {
             .clone()
             .unwrap_or_else(|| format!("You are {}.", role.name));
         let request = ChatRequest {
-            model: input.model.clone(),
+            model: input.model_for(&role),
             system_prompt: Some(system),
             messages: vec![ChatMessage::user(input.task.clone())],
             tools: Vec::new(),
@@ -228,6 +228,7 @@ mod tests {
                 updated_at: 0,
             },
             model: "m".into(),
+            models: HashMap::new(),
             workspace_id: None,
             cli_handles: HashMap::new(),
         }

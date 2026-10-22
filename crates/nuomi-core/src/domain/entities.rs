@@ -386,6 +386,17 @@ impl ProviderSettings {
         self.models.iter().map(|m| m.id.clone()).collect()
     }
 
+    /// The model id an outbound `ChatRequest.model` should carry for this
+    /// endpoint: `default_model` first, then the first configured model.
+    /// `None` means the provider has no usable model id — callers treat
+    /// that as "binding incomplete" (guide back to settings) rather than
+    /// sending a placeholder model to the wire.
+    pub fn resolve_model(&self) -> Option<String> {
+        self.default_model
+            .clone()
+            .or_else(|| self.models.first().map(|m| m.id.clone()))
+    }
+
     /// Extracts the `"settings"` key from a provider `params` object;
     /// missing/malformed payloads fall back to defaults.
     /// Post-processing applies legacy top-level hyperparams as per-model

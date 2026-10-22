@@ -43,7 +43,13 @@ pub struct TeamRunInput {
     pub task: String,
     pub roles: Vec<Role>,
     pub team: Team,
+    /// Fallback model id for requests (the default endpoint's resolved
+    /// model, or a dialect tag / `"mixed"` when unknown).
     pub model: String,
+    /// Per-binding model ids keyed by provider id / agent-profile id — the
+    /// same keys as the `ProviderResolver` map. Takes precedence over
+    /// [`TeamRunInput::model`] for roles that pin a binding.
+    pub models: HashMap<String, String>,
     /// The workspace this run belongs to (for parallel-run isolation).
     /// `None` means the run is not bound to any workspace (legacy/CLI path).
     pub workspace_id: Option<String>,
@@ -66,6 +72,31 @@ impl TeamRunInput {
                 team: self.team.name.clone(),
                 member: role_id.to_string(),
             })
+    }
+
+    /// The model id one member's outbound request should carry:
+    /// 1. the role's explicit `params.model_id` pin (set by the binding
+    ///    panel when the user picked provider + model),
+    /// 2. the resolved model of the binding the role pins
+    ///    (`models[provider_id]` / `models[agent_profile_id]`),
+    /// 3. the run-level fallback [`TeamRunInput::model`].
+    ///
+    /// CLI-bound roles resolve through 2/3 too, but the CLI client ignores
+    /// `ChatRequest.model` — the value is display-only there.
+    pub fn model_for(&self, role: &Role) -> String {
+        if let Some(pinned) = role
+            .params
+            .get("model_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            return pinned.to_string();
+        }
+        role.provider_id
+            .as_deref()
+            .and_then(|key| self.models.get(key))
+            .cloned()
+            .unwrap_or_else(|| self.model.clone())
     }
 }
 
