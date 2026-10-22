@@ -98,6 +98,7 @@ export function RoleQuickBinding(): ReactNode {
         if (decoded.kind === "provider" && decoded.providerId) {
           base.providerId = decoded.providerId;
           base.providerIds = [decoded.providerId];
+          if (decoded.modelId) base.params = { model_id: decoded.modelId };
         } else if (decoded.kind === "cli" && decoded.agentProfileId) {
           base.params = { agent_profile_id: decoded.agentProfileId };
         }

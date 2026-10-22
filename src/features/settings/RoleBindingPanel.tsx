@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CapabilityDto, JsonValue, RoleDto, RoleInput } from "../../lib/ipc/bindings.gen";
-import { readAgentProfileId, readMemoryConfig } from "../../lib/conversation/roleReady";
+import { readAgentProfileId, readMemoryConfig, readModelId } from "../../lib/conversation/roleReady";
 import { CAPABILITY_KEYS, type BindingMode } from "./RoleForm";
 import { ToolTagInput } from "./ToolTagInput";
 import { describeError } from "../../i18n";
@@ -51,6 +51,9 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
   );
   const [providerId, setProviderId] = useState(
     presetBinding?.providerId ?? initialRole?.providerId ?? "",
+  );
+  const [modelId, setModelId] = useState(
+    initialRole ? (readModelId(initialRole.params) ?? "") : "",
   );
   const [agentProfileId, setAgentProfileId] = useState(
     presetBinding?.agentProfileId ?? (initialRole ? (readAgentProfileId(initialRole.params) ?? "") : ""),
@@ -107,6 +110,7 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
             if (bindingMode === "cli" && boundAgent === "") return;
             const params: Record<string, JsonValue> = {};
             if (boundAgent !== null) params["agent_profile_id"] = boundAgent;
+            if (boundProvider !== null && modelId !== "") params["model_id"] = modelId;
             if (memEnabled) {
               params["memory"] = {
                 enabled: true,
@@ -155,24 +159,57 @@ export function RoleBindingPanel({ initialRole, presetBinding, onClose }: RoleBi
               </select>
             </label>
             {bindingMode === "provider" && (
-              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                {t("settings.roles.providerTarget")}
-                <select
-                  value={providerId}
-                  onChange={(e) => setProviderId(e.target.value)}
-                  required
-                  className={`${field} bg-surface text-sm w-44`}
-                >
-                  <option value="" disabled>
-                    {t("settings.roles.providerTarget")}
-                  </option>
-                  {(providersQuery.data ?? []).map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
+              <>
+                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                  {t("settings.roles.providerTarget")}
+                  <select
+                    value={providerId}
+                    onChange={(e) => {
+                      setProviderId(e.target.value);
+                      // A model id from the previous provider is meaningless
+                      // for the new one — reset the pin.
+                      setModelId("");
+                    }}
+                    required
+                    className={`${field} bg-surface text-sm w-44`}
+                  >
+                    <option value="" disabled>
+                      {t("settings.roles.providerTarget")}
                     </option>
-                  ))}
-                </select>
-              </label>
+                    {(providersQuery.data ?? []).map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                  {t("provider.modelId")}
+                  <select
+                    value={modelId}
+                    onChange={(e) => setModelId(e.target.value)}
+                    className={`${field} bg-surface text-sm w-44`}
+                  >
+                    <option value="">
+                      {(() => {
+                        const selected = (providersQuery.data ?? []).find(
+                          (p) => p.id === providerId,
+                        );
+                        const def =
+                          selected?.settings.defaultModel ??
+                          selected?.settings.models?.[0]?.id ??
+                          null;
+                        return def !== null ? t("provider.modelDefault", { model: def }) : t("provider.modelDefaultNoPick");
+                      })()}
+                    </option>
+                    {((providersQuery.data ?? []).find((p) => p.id === providerId)?.settings.models ?? []).map(
+                      (m) => (
+                        <option key={m.id} value={m.id}>{m.id}</option>
+                      ),
+                    )}
+                  </select>
+                </label>
+              </>
             )}
             {bindingMode === "cli" && (
               <label className="flex flex-col gap-0.5 text-xs text-ink-muted">

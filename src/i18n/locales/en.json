@@ -889,6 +889,8 @@
     "retry": "Retries",
     "maxConcurrency": "Max concurrency",
     "modelId": "Model ID",
+    "modelDefault": "Default ({{model}})",
+    "modelDefaultNoPick": "Default",
     "modelExpand": "Expand",
     "modelCollapse": "Collapse",
     "recommendHyperparams": "Auto-recommend",

@@ -9,6 +9,15 @@ export function readAgentProfileId(params: JsonValue): string | null {
   return null;
 }
 
+/** Reads the `model_id` convention key (provider-binding model pin) out of a role's params JSON. */
+export function readModelId(params: JsonValue): string | null {
+  if (params !== null && typeof params === "object" && !Array.isArray(params)) {
+    const value = params["model_id"];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
 /** Reads the `memory` config from a role's params JSON. */
 export function readMemoryConfig(params: JsonValue): {
   enabled: boolean;

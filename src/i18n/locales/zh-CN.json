@@ -889,6 +889,8 @@
     "retry": "重试次数",
     "maxConcurrency": "最大并发",
     "modelId": "Model ID",
+    "modelDefault": "默认（{{model}}）",
+    "modelDefaultNoPick": "默认",
     "modelExpand": "展开超参",
     "modelCollapse": "收起超参",
     "recommendHyperparams": "自动推荐",
