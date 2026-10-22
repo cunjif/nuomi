@@ -31,6 +31,7 @@ export function LeftRail(): ReactNode {
           <button
             key={item.view}
             type="button"
+            data-view={item.view}
             onClick={() => {
               // setView already releases the editor area (see uiStore).
               setView(item.view);

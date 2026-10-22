@@ -394,3 +394,48 @@ describe("hex↔rgb mirror consistency (alpha-capable tokens)", () => {
     }
   });
 });
+
+// E-Ink dopamine icon tints (design v2 §11): the reference launcher colours
+// its app icons on a greyscale chrome — nuomi's counterpart is the left-rail
+// view icons under eink-paper only. Icon strokes are non-text UI components
+// (WCAG 1.4.11 ≥ 3:1) rendered on the raised rail background and, when
+// hovered/active, on the overlay tone — both surfaces asserted.
+describe("eink-paper dopamine icon tints (WCAG 1.4.11 non-text ≥ 3:1)", () => {
+  const EINK_ICONS = [
+    "ic-chat",
+    "ic-steward",
+    "ic-board",
+    "ic-trace",
+    "ic-git",
+    "ic-sandbox",
+    "ic-approvals",
+    "ic-scheduler",
+    "ic-plugins",
+    "ic-settings",
+  ] as const;
+
+  it("every view icon tint clears 3:1 on the raised rail and the overlay hover/active tone", async () => {
+    const vars = parseVars(extractBlock(await readGlobalCss(), '[data-theme="eink-paper"]'));
+    const raisedRaw = vars.get("surface-raised");
+    const overlayRaw = vars.get("surface-overlay");
+    expect(raisedRaw, "eink-paper block must define --nuomi-surface-raised").toBeDefined();
+    expect(overlayRaw, "eink-paper block must define --nuomi-surface-overlay").toBeDefined();
+    if (raisedRaw === undefined || overlayRaw === undefined) return;
+    const raised = parseColor(raisedRaw);
+    const overlay = parseColor(overlayRaw);
+    for (const icon of EINK_ICONS) {
+      const raw = vars.get(icon);
+      expect(raw, `global.css eink-paper block is missing --nuomi-${icon} (dopamine icon tint)`).toBeDefined();
+      if (raw === undefined) continue;
+      const tint = parseColor(raw);
+      expect(
+        contrastRatio(tint, raised),
+        `eink-paper --nuomi-${icon} (${raw}) measures ${contrastRatio(tint, raised).toFixed(2)}:1 on the raised rail (${raisedRaw}) — needs ≥ 3:1 (WCAG 1.4.11).`,
+      ).toBeGreaterThanOrEqual(UI_MIN);
+      expect(
+        contrastRatio(tint, overlay),
+        `eink-paper --nuomi-${icon} (${raw}) measures ${contrastRatio(tint, overlay).toFixed(2)}:1 on the overlay tone (${overlayRaw}) — needs ≥ 3:1 (WCAG 1.4.11).`,
+      ).toBeGreaterThanOrEqual(UI_MIN);
+    }
+  });
+});
