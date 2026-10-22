@@ -1302,9 +1302,9 @@ async stewardUpdateSoul(sessionId: string, content: string) : Promise<Result<nul
     else return { status: "error", error: e  as any };
 }
 },
-async stewardUpdateBinding(sessionId: string, mode: BindingModeDto, providerId: string | null, agentProfileId: string | null) : Promise<Result<null, IpcError>> {
+async stewardUpdateBinding(sessionId: string, mode: BindingModeDto, providerId: string | null, modelId: string | null, agentProfileId: string | null) : Promise<Result<null, IpcError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("steward_update_binding", { sessionId, mode, providerId, agentProfileId }) };
+    return { status: "ok", data: await TAURI_INVOKE("steward_update_binding", { sessionId, mode, providerId, modelId, agentProfileId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1607,7 +1607,12 @@ export type AppStateSnapshotDto = { providers: ProviderSummaryDto[]; roles: Role
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceLabel: string | null }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
-export type BindingConfigDto = { mode: BindingModeDto; providerId: string | null; agentProfileId: string | null }
+export type BindingConfigDto = { mode: BindingModeDto; providerId: string | null; 
+/**
+ * The model id pinned for the Provider binding (`params.model_id`);
+ * `None` means the provider's default/first model applies.
+ */
+modelId: string | null; agentProfileId: string | null }
 export type BindingModeDto = "none" | "provider" | "cli"
 /**
  * System modality capability (mirrors `nuomi_core::domain::Capability`).

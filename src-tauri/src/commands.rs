@@ -8638,6 +8638,9 @@ pub struct SoulConfigDto {
 pub struct BindingConfigDto {
     pub mode: BindingModeDto,
     pub provider_id: Option<String>,
+    /// The model id pinned for the Provider binding (`params.model_id`);
+    /// `None` means the provider's default/first model applies.
+    pub model_id: Option<String>,
     pub agent_profile_id: Option<String>,
 }
 
@@ -8699,6 +8702,7 @@ pub async fn impl_steward_get_settings(
                 nuomi_core::steward::settings::BindingMode::Cli => BindingModeDto::Cli,
             },
             provider_id: settings.binding.provider_id,
+            model_id: settings.binding.model_id,
             agent_profile_id: settings.binding.agent_profile_id,
         },
         run_status: StewardRunStatusDto {
@@ -8762,6 +8766,7 @@ pub async fn impl_steward_update_binding(
     session_id: String,
     mode: BindingModeDto,
     provider_id: Option<String>,
+    model_id: Option<String>,
     agent_profile_id: Option<String>,
 ) -> Result<(), IpcError> {
     let core_mode = match mode {
@@ -8774,6 +8779,7 @@ pub async fn impl_steward_update_binding(
         &session_id,
         core_mode,
         provider_id.as_deref(),
+        model_id.as_deref(),
         agent_profile_id.as_deref(),
     )
     .await

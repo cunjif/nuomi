@@ -1596,7 +1596,7 @@ export function testDoubleCommands(): CommandSet {
     async stewardGetSettings(_sessionId) {
       const settings: StewardSettingsDto = {
         soul: { content: null, maxLength: 16000 },
-        binding: { mode: "none", providerId: null, agentProfileId: null },
+        binding: { mode: "none", providerId: null, modelId: null, agentProfileId: null },
         runStatus: { state: "idle", label: "idle" },
         todoList: [],
         messageStats: { total: 0, clearedAt: null },
@@ -1606,7 +1606,7 @@ export function testDoubleCommands(): CommandSet {
     async stewardUpdateSoul(_sessionId, _content) {
       return ok(null);
     },
-    async stewardUpdateBinding(_sessionId, _mode, _providerId, _agentProfileId) {
+    async stewardUpdateBinding(_sessionId, _mode, _providerId, _modelId, _agentProfileId) {
       return ok(null);
     },
     async stewardClearMessages(_sessionId) {

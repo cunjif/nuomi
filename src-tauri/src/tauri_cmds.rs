@@ -1443,10 +1443,18 @@ pub async fn steward_update_binding(
     session_id: String,
     mode: commands::BindingModeDto,
     provider_id: Option<String>,
+    model_id: Option<String>,
     agent_profile_id: Option<String>,
 ) -> Result<(), IpcError> {
-    commands::impl_steward_update_binding(&state, session_id, mode, provider_id, agent_profile_id)
-        .await
+    commands::impl_steward_update_binding(
+        &state,
+        session_id,
+        mode,
+        provider_id,
+        model_id,
+        agent_profile_id,
+    )
+    .await
 }
 
 #[tauri::command]
