@@ -1,7 +1,8 @@
 /**
  * Monaco themes matched to the nuomi design tokens so the editor canvas
- * blends with its container. Four definitions mirror the hand-drawn theme
- * matrix (review §9); `monacoThemeFor` picks the right one by app theme.
+ * blends with its container. Five definitions mirror the hand-drawn theme
+ * matrix (review §9 + eink-theme design); `monacoThemeFor` picks the right
+ * one by app theme.
  * Type-only import keeps the real monaco kernel out of tests and cold start.
  *
  * Syntax rules (P2-E): every theme fills the same 12 token slots from a
@@ -14,6 +15,7 @@ import type * as monaco from "monaco-editor";
 import type { Theme } from "../../lib/store/uiStore";
 
 export const NUOMI_MONACO_PAPER = "nuomi-paper-light";
+export const NUOMI_MONACO_EINK = "nuomi-eink-paper";
 export const NUOMI_MONACO_GRID = "nuomi-grid-notebook";
 export const NUOMI_MONACO_CHALK = "nuomi-chalkboard-dark";
 export const NUOMI_MONACO_HIGH = "nuomi-high-contrast";
@@ -81,6 +83,30 @@ export const NUOMI_THEME_DATA: Record<Theme, monaco.editor.IStandaloneThemeData>
     }),
     // Kraft-paper raised tone from global.css paper-light (review §9.4).
     colors: { "editor.background": "#fffdf5", "editorGutter.background": "#fffdf5", "editor.lineHighlightBackground": "#eee8d9" },
+  },
+  // E-Ink paper: low-saturation ink colours on the neutral grey-white raised
+  // surface — keyword/tag the deep cyan-ink, strings the ink green (= ok),
+  // numbers/literals the ink ochre (= warn), type/function the muted violet/
+  // blue greys, comment a plain neutral grey (eink-paper tokens, design §7).
+  "eink-paper": {
+    base: "vs",
+    inherit: true,
+    rules: rulesFor({
+      comment: "8a8a8a",
+      keyword: "14506e",
+      string: "1e5f41",
+      number: "80600a",
+      constant: "80600a",
+      type: "6d597a",
+      function: "457b9d",
+      variable: "1a1a1a",
+      tag: "14506e",
+      attributeName: "0f6138",
+      attributeValue: "1e5f41",
+      metatag: "80600a",
+    }),
+    // E-Ink raised paper tone from global.css eink-paper (design §3).
+    colors: { "editor.background": "#f6f6f4", "editorGutter.background": "#f6f6f4", "editor.lineHighlightBackground": "#e2e2e0" },
   },
   // Engineer notebook: same ink family as paper-light, but the keyword/tag
   // slots take the notebook's accent blue (grid-notebook tokens).
@@ -159,7 +185,7 @@ export const NUOMI_THEME_DATA: Record<Theme, monaco.editor.IStandaloneThemeData>
   },
 };
 
-/** Register all four palettes once before the editor mounts. */
+/** Register all five palettes once before the editor mounts. */
 export function defineNuomiThemes(m: typeof import("monaco-editor")): void {
   for (const theme of Object.keys(NUOMI_THEME_DATA) as Theme[]) {
     m.editor.defineTheme(monacoThemeFor(theme), NUOMI_THEME_DATA[theme]);
@@ -171,6 +197,8 @@ export function monacoThemeFor(theme: Theme): string {
   switch (theme) {
     case "paper-light":
       return NUOMI_MONACO_PAPER;
+    case "eink-paper":
+      return NUOMI_MONACO_EINK;
     case "grid-notebook":
       return NUOMI_MONACO_GRID;
     case "chalkboard-dark":

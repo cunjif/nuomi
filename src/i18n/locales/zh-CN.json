@@ -87,6 +87,7 @@
   "theme": {
     "toggle": "切换主题",
     "paperLight": "纸质亮",
+    "einkPaper": "墨水屏",
     "gridNotebook": "方格本",
     "chalkboardDark": "黑板暗",
     "highContrast": "高对比"

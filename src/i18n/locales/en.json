@@ -87,6 +87,7 @@
   "theme": {
     "toggle": "Change theme",
     "paperLight": "Paper Light",
+    "einkPaper": "E-Ink Paper",
     "gridNotebook": "Grid Notebook",
     "chalkboardDark": "Chalkboard Dark",
     "highContrast": "High Contrast"

@@ -6,15 +6,17 @@ import { Icon, type IconName } from "../../components/ui/Icon/Icon";
 
 const THEME_META: Record<Theme, { icon: IconName; labelKey: string }> = {
   "paper-light": { icon: "paper", labelKey: "theme.paperLight" },
+  "eink-paper": { icon: "eink", labelKey: "theme.einkPaper" },
   "grid-notebook": { icon: "grid", labelKey: "theme.gridNotebook" },
   "chalkboard-dark": { icon: "chalkboard", labelKey: "theme.chalkboardDark" },
   "high-contrast": { icon: "contrast", labelKey: "theme.highContrast" },
 };
 
 /**
- * Four-theme hand-drawn selector (review §9.3). The current theme shows in the
- * trigger; the panel is a native <details> popover (self-contained, no extra
- * state) listing all four with a hand-drawn thumbnail + check for the active.
+ * Five-theme hand-drawn selector (review §9.3 + eink-theme design). The
+ * current theme shows in the trigger; the panel is a native <details>
+ * popover (self-contained, no extra state) listing all five with a
+ * hand-drawn thumbnail + check for the active.
  */
 export function ThemeToggle(): ReactNode {
   const { t } = useTranslation();

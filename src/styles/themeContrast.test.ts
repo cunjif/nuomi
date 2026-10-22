@@ -295,10 +295,11 @@ const PAIRS: ContrastPair[] = [
 ];
 
 const THEMES: ReadonlyArray<{
-  name: "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
+  name: "paper-light" | "eink-paper" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
   selector: string;
 }> = [
   { name: "paper-light", selector: ":root" },
+  { name: "eink-paper", selector: '[data-theme="eink-paper"]' },
   { name: "grid-notebook", selector: '[data-theme="grid-notebook"]' },
   { name: "chalkboard-dark", selector: ".dark" },
   { name: "high-contrast", selector: '[data-theme="high-contrast"]' },
@@ -337,7 +338,7 @@ describe("theme contrast guard (WCAG via parsed global.css palettes)", () => {
   const resolvedByTheme = new Map<string, ResolvedTheme>();
 
   async function paletteOf(
-    name: "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast",
+    name: "paper-light" | "eink-paper" | "grid-notebook" | "chalkboard-dark" | "high-contrast",
   ): Promise<ResolvedTheme> {
     const cached = resolvedByTheme.get(name);
     if (cached !== undefined) return cached;

@@ -17,16 +17,17 @@ export type View = "chat" | "board" | "trace" | "git" | "sandbox" | "approvals" 
 export type ActiveArea = "chat" | "workbench";
 
 /**
- * The four hand-drawn themes (review §9.2). `paper-light`/`grid-notebook` are
+ * The five hand-drawn themes. `paper-light`/`eink-paper`/`grid-notebook` are
  * the light family (no `.dark` class); `chalkboard-dark`/`high-contrast` are
  * the dark family and toggle `.dark` on <html> so legacy `.dark`-scoped rules
  * still apply.
  */
-export type Theme = "paper-light" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
+export type Theme = "paper-light" | "eink-paper" | "grid-notebook" | "chalkboard-dark" | "high-contrast";
 
-/** Stable display/cycle order for the 4 themes (review §9.2). */
+/** Stable display/cycle order for the 5 themes (eink-paper: design.md §2). */
 export const THEME_ORDER: ReadonlyArray<Theme> = [
   "paper-light",
+  "eink-paper",
   "grid-notebook",
   "chalkboard-dark",
   "high-contrast",
@@ -50,7 +51,7 @@ export const THEME_STORAGE_KEY = "nuomi.theme";
 export function resolveInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "paper-light" || stored === "grid-notebook" || stored === "chalkboard-dark" || stored === "high-contrast") {
+    if (stored === "paper-light" || stored === "eink-paper" || stored === "grid-notebook" || stored === "chalkboard-dark" || stored === "high-contrast") {
       return stored;
     }
     // Backward-compatible migration of the old two-value scheme.

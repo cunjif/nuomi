@@ -303,6 +303,14 @@ const GridIcon: Glyph = (p) => (
     <path d="M9 4.5v15M14.5 4.5v15M4.5 9.5h15M4.5 14.5h15" />
   </svg>
 );
+// Ink drop (eink-paper theme, design D5): stroked drop outline with a solid
+// core — the theme's "black fill + paper-white" inversion idiom in miniature.
+const EinkIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M12 3.5C9 7 5.5 10.8 5.5 14.7a6.5 6.5 0 0 0 13 0C18.5 10.8 15 7 12 3.5z" />
+    <circle cx="12" cy="14.7" r="2.2" fill="currentColor" stroke="none" />
+  </svg>
+);
 const ChalkboardIcon: Glyph = (p) => (
   <svg {...p}>
     <path d="M4.5 4.8h15v10.4H4.5z" />
@@ -375,6 +383,7 @@ export const iconRegistry = {
   history: HistoryIcon,
   diff: DiffIcon,
   paper: PaperIcon,
+  eink: EinkIcon,
   grid: GridIcon,
   chalkboard: ChalkboardIcon,
   contrast: ContrastIcon,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NUOMI_MONACO_CHALK,
+  NUOMI_MONACO_EINK,
   NUOMI_MONACO_GRID,
   NUOMI_MONACO_HIGH,
   NUOMI_MONACO_PAPER,
@@ -8,7 +9,7 @@ import {
   monacoThemeFor,
 } from "./monacoThemes";
 
-const THEMES = ["paper-light", "grid-notebook", "chalkboard-dark", "high-contrast"] as const;
+const THEMES = ["paper-light", "eink-paper", "grid-notebook", "chalkboard-dark", "high-contrast"] as const;
 
 describe("monacoThemes — syntax rules (P2-E)", () => {
   it.each(THEMES)("%s fills every syntax slot with a valid 6-digit hex", (theme) => {
@@ -30,7 +31,13 @@ describe("monacoThemes — syntax rules (P2-E)", () => {
   });
 
   it("maps every app theme to a distinct registered theme name", () => {
-    expect(THEMES.map(monacoThemeFor)).toEqual([NUOMI_MONACO_PAPER, NUOMI_MONACO_GRID, NUOMI_MONACO_CHALK, NUOMI_MONACO_HIGH]);
-    expect(new Set(THEMES.map(monacoThemeFor)).size).toBe(4);
+    expect(THEMES.map(monacoThemeFor)).toEqual([
+      NUOMI_MONACO_PAPER,
+      NUOMI_MONACO_EINK,
+      NUOMI_MONACO_GRID,
+      NUOMI_MONACO_CHALK,
+      NUOMI_MONACO_HIGH,
+    ]);
+    expect(new Set(THEMES.map(monacoThemeFor)).size).toBe(5);
   });
 });

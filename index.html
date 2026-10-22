@@ -15,8 +15,9 @@
             typeof window.matchMedia === "function" &&
             window.matchMedia("(prefers-color-scheme: light)").matches;
           var theme =
-            stored === "paper-light" || stored === "grid-notebook" ||
-            stored === "chalkboard-dark" || stored === "high-contrast"
+            stored === "paper-light" || stored === "eink-paper" ||
+            stored === "grid-notebook" || stored === "chalkboard-dark" ||
+            stored === "high-contrast"
               ? stored
               : stored === "light"
                 ? "paper-light"
