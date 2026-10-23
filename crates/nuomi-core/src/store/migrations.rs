@@ -313,6 +313,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0039_proposals.sql"
         )),
     ),
+    (
+        40,
+        "0040_session_sources_auth",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0040_session_sources_auth.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -1284,5 +1292,193 @@ mod tests {
             (dir_count, att_count, event_count, snapshot_count),
             (2, 1, 3, 1)
         );
+    }
+
+    // ---- migration 0040: session sources + authorization (chat_rich_bind)
+
+    #[test]
+    fn migrations_0040_lossless_upgrade_from_0039() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Build a 0039-state database: workspaces + work directory + sessions
+        // with events and attachment metadata that must survive 0040.
+        run_migrations_to(&conn, 39);
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
+             VALUES ('w1', 'C:\\proj\\alpha', 'paper-yellow', 100, 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_directories (id, workspace_id, abs_path, display_name, mounted, added_at)
+             VALUES ('d1', 'w1', 'C:\\proj\\alpha', 'alpha', 1, 100)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, kind, workspace_id)
+             VALUES ('s1', 'alpha chat', 1, 1, 'chat', 'w1'),
+                    ('s2', 'beta chat', 2, 2, 'chat', 'w1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (aggregate_type, aggregate_id, kind, payload, seq, created_at)
+             VALUES ('session', 's1', 'message', '{\"role\":\"assistant\",\"content\":\"hi\"}', 1, 10)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, session_id, seq, kind, name, mime, rel_path, size_bytes, sha256, created_at)
+             VALUES ('att-1', 's1', NULL, 'image', 'shot.png', 'image/png',
+                     '.nuomi/attachments/s1/abc.png', 1234, 'abc123', 5)",
+            [],
+        )
+        .unwrap();
+
+        // Apply 0040 (run continues from user_version 39).
+        run(&conn).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.last().unwrap().0);
+
+        // Legacy sessions keep work_directory_id NULL (fallback cwd semantics).
+        let null_bindings: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sessions WHERE work_directory_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(null_bindings, 2, "legacy sessions must stay unbound");
+
+        // Existing tables untouched: workspace ownership and events intact.
+        let owner: String = conn
+            .query_row(
+                "SELECT workspace_id FROM sessions WHERE id = 's1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner, "w1");
+        let event_payload: String = conn
+            .query_row(
+                "SELECT payload FROM events WHERE aggregate_id = 's1' AND seq = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_payload, "{\"role\":\"assistant\",\"content\":\"hi\"}");
+
+        // Attachment metadata fully preserved (attachments table zero change).
+        let (kind, mime, sha): (String, String, String) = conn
+            .query_row(
+                "SELECT kind, mime, sha256 FROM attachments WHERE id = 'att-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (kind.as_str(), mime.as_str(), sha.as_str()),
+            ("image", "image/png", "abc123")
+        );
+
+        // Seed present with default 120s.
+        let timeout: String = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'authorization.timeout_seconds'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(timeout, "120");
+
+        // Idempotent: a second run changes nothing (seed guarded by OR IGNORE).
+        run(&conn).unwrap();
+        let seed_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM app_settings WHERE key = 'authorization.timeout_seconds'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(seed_count, 1);
+    }
+
+    #[test]
+    fn migrations_0040_new_tables_constraints_and_cascade() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, kind, workspace_id)
+             VALUES ('s1', 'chat', 1, 1, 'chat', '__migrated__')",
+            [],
+        )
+        .unwrap();
+
+        // file_authorizations round-trips a pending row.
+        conn.execute(
+            "INSERT INTO file_authorizations (id, session_id, role_id, op, target_path, state, requested_at, expires_at)
+             VALUES ('fa1', 's1', 'role_1', 'write', 'C:\\proj\\a.txt', 'pending', 100, 1120)",
+            [],
+        )
+        .unwrap();
+        let (op, state, expires_at): (String, String, i64) = conn
+            .query_row(
+                "SELECT op, state, expires_at FROM file_authorizations WHERE id = 'fa1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (op.as_str(), state.as_str(), expires_at),
+            ("write", "pending", 1120)
+        );
+
+        // CHECK constraints reject unknown op/state values.
+        let bad_op = conn.execute(
+            "INSERT INTO file_authorizations (id, session_id, role_id, op, target_path, state, requested_at, expires_at)
+             VALUES ('fa2', 's1', 'role_1', 'read', 'C:\\x', 'pending', 1, 2)",
+            [],
+        );
+        assert!(bad_op.is_err(), "op CHECK must reject unknown ops");
+        let bad_state = conn.execute(
+            "INSERT INTO file_authorizations (id, session_id, role_id, op, target_path, state, requested_at, expires_at)
+             VALUES ('fa3', 's1', 'role_1', 'write', 'C:\\x', 'waiting_notified', 1, 2)",
+            [],
+        );
+        assert!(bad_state.is_err(), "state CHECK must reject derived states");
+
+        // Sweep index exists.
+        let sweep_idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_file_auth_sweep'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sweep_idx, 1, "idx_file_auth_sweep must exist");
+
+        // agent_auth_policies round-trip + CHECK.
+        conn.execute(
+            "INSERT INTO agent_auth_policies (role_id, policy, updated_at)
+             VALUES ('role_1', 'authorize', 100)",
+            [],
+        )
+        .unwrap();
+        let bad_policy = conn.execute(
+            "INSERT INTO agent_auth_policies (role_id, policy, updated_at)
+             VALUES ('role_2', 'unset', 100)",
+            [],
+        );
+        assert!(bad_policy.is_err(), "policy CHECK must reject 'unset'");
+
+        // ON DELETE CASCADE: deleting the session removes its authorizations.
+        conn.execute("DELETE FROM sessions WHERE id = 's1'", [])
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT count(*) FROM file_authorizations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0, "authorizations cascade with session");
     }
 }

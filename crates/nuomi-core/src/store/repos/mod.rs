@@ -1,10 +1,12 @@
 //! Repositories: all SQL lives here (parameterized only).
 
+pub mod agent_auth_policies;
 pub mod agent_profiles;
 pub mod attachments;
 pub mod change_log;
 pub mod event_rollbacks;
 pub mod events;
+pub mod file_authorizations;
 pub mod integrations;
 pub mod journal;
 pub mod memory;

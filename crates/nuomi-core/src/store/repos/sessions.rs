@@ -391,6 +391,165 @@ pub fn set_workspace_id(
     Ok(())
 }
 
+// ---------------------------------------------------- work directory binding (0040)
+
+/// Bind-validation failure — surfaces as IPC code `session.invalid_directory`
+/// (never silently ignored, spec 6.4-2).
+#[derive(Debug, thiserror::Error)]
+pub enum BindingError {
+    #[error("work directory {directory_id} cannot bind in workspace {workspace_id}")]
+    InvalidDirectory {
+        workspace_id: String,
+        directory_id: String,
+    },
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+impl BindingError {
+    /// Extracts the underlying store error (for cross-service `From` chains
+    /// that only know `StoreError`).
+    pub fn into_store_error(self) -> StoreError {
+        match self {
+            BindingError::Store(err) => err,
+            BindingError::InvalidDirectory {
+                workspace_id,
+                directory_id,
+            } => StoreError::Conflict {
+                entity: "session_directory_binding",
+                id: format!("{workspace_id}/{directory_id}"),
+                expected: "valid mounted directory in workspace".to_string(),
+            },
+        }
+    }
+}
+
+/// A session's work-directory binding with the derived availability. The
+/// binding row is append-only: a directory that was removed or unmounted
+/// reads `available=false` but the binding itself stays (never re-deleted).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionWorkDirectoryBinding {
+    pub work_directory_id: String,
+    /// Directory row details — `None` when the row itself is gone.
+    pub directory: Option<crate::store::repos::work_directories::WorkDirectoryEntry>,
+    /// Directory row exists AND is mounted.
+    pub available: bool,
+}
+
+/// Validates that `work_directory_id` belongs to `workspace_id` and is
+/// mounted. Callers embedding creation in one transaction use this plus their
+/// own INSERT; `set_work_directory` uses it internally too.
+pub fn validate_work_directory(
+    conn: &Connection,
+    workspace_id: &str,
+    work_directory_id: &str,
+) -> Result<(), BindingError> {
+    let invalid = || BindingError::InvalidDirectory {
+        workspace_id: workspace_id.to_string(),
+        directory_id: work_directory_id.to_string(),
+    };
+    let owner: Option<String> = conn
+        .query_row(
+            "SELECT workspace_id FROM work_directories WHERE id = ?1",
+            params![work_directory_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Sqlite)?;
+    let Some(owner_workspace) = owner else {
+        return Err(invalid());
+    };
+    if owner_workspace != workspace_id {
+        return Err(invalid());
+    }
+    let mounted: i64 = conn
+        .query_row(
+            "SELECT mounted FROM work_directories WHERE id = ?1",
+            params![work_directory_id],
+            |r| r.get(0),
+        )
+        .map_err(StoreError::Sqlite)?;
+    if mounted == 0 {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// Binds a session to a work directory. The session must exist and belong to
+/// the same workspace as the directory, which must be mounted — otherwise
+/// [`BindingError::InvalidDirectory`] (repo-layer transactional check,
+/// migration 0040 conventions).
+pub fn set_work_directory(
+    conn: &Connection,
+    session_id: &str,
+    work_directory_id: &str,
+) -> Result<(), BindingError> {
+    let tx = conn.unchecked_transaction().map_err(StoreError::Sqlite)?;
+    let workspace_id: String = tx
+        .query_row(
+            "SELECT workspace_id FROM sessions WHERE id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(StoreError::Sqlite)?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "session",
+            id: session_id.to_string(),
+        })?;
+    validate_work_directory(&tx, &workspace_id, work_directory_id)?;
+    let n = tx
+        .execute(
+            "UPDATE sessions SET work_directory_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![session_id, work_directory_id, crate::domain::now_ms()],
+        )
+        .map_err(StoreError::Sqlite)?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "session",
+            id: session_id.to_string(),
+        }
+        .into());
+    }
+    tx.commit().map_err(StoreError::Sqlite)?;
+    Ok(())
+}
+
+/// Clears a session's work-directory binding (unbind). No-op on missing rows.
+pub fn clear_work_directory(conn: &Connection, session_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE sessions SET work_directory_id = NULL WHERE id = ?1",
+        params![session_id],
+    )?;
+    Ok(())
+}
+
+/// Reads a session's binding with the derived availability (NULL column →
+/// `None`; directory row gone → `available=false`, binding kept).
+pub fn get_work_directory_binding(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<SessionWorkDirectoryBinding>, StoreError> {
+    let bound: Option<String> = conn
+        .query_row(
+            "SELECT work_directory_id FROM sessions WHERE id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(work_directory_id) = bound else {
+        return Ok(None);
+    };
+    let directory = crate::store::repos::work_directories::find_by_id(conn, &work_directory_id)?;
+    let available = directory.as_ref().map(|d| d.mounted).unwrap_or(false);
+    Ok(Some(SessionWorkDirectoryBinding {
+        work_directory_id,
+        directory,
+        available,
+    }))
+}
+
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let kind_str: String = row.get(4)?;
     let kind = ConversationKind::parse(&kind_str).unwrap_or(ConversationKind::Chat);
@@ -691,5 +850,143 @@ mod tests {
         assert!(!ids(&all).contains(&"steward-sess".to_string()));
         assert!(ids(&all).contains(&"other-ws".to_string()));
         assert_eq!(all.len(), 3);
+    }
+
+    // ---------------------------------------------------- work directory binding (0040)
+
+    use crate::store::repos::work_directories as work_dirs;
+    use crate::store::repos::workspaces::{self, WorkspaceEntry};
+
+    fn seed_workspace_with_dir(conn: &Connection, ws: &str, dir: &str, path: &str) {
+        workspaces::insert(
+            conn,
+            &WorkspaceEntry {
+                id: ws.into(),
+                root_path: path.into(),
+                color_tag: "paper-yellow".into(),
+                created_at: 1,
+                is_active: false,
+                is_pinned: false,
+            },
+        )
+        .unwrap();
+        work_dirs::add(conn, ws, path, dir).unwrap();
+    }
+
+    #[test]
+    fn work_directory_binding_roundtrip() {
+        let conn = db();
+        seed_workspace_with_dir(&conn, "w1", "alpha", "C:\\proj\\alpha");
+        insert(&conn, &session("s1")).unwrap();
+        set_workspace_id(&conn, "s1", "w1").unwrap();
+        // 存量会话（未绑定）→ None
+        assert!(get_work_directory_binding(&conn, "s1").unwrap().is_none());
+        set_work_directory(
+            &conn,
+            "s1",
+            &work_dirs::find_by_path(&conn, "C:\\proj\\alpha")
+                .unwrap()
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+        let binding = get_work_directory_binding(&conn, "s1").unwrap().unwrap();
+        assert!(binding.available);
+        assert_eq!(binding.directory.as_ref().unwrap().workspace_id, "w1");
+        assert_eq!(
+            binding.work_directory_id,
+            work_dirs::find_by_path(&conn, "C:\\proj\\alpha")
+                .unwrap()
+                .unwrap()
+                .id
+        );
+        // 解绑 → None
+        clear_work_directory(&conn, "s1").unwrap();
+        assert!(get_work_directory_binding(&conn, "s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn binding_rejects_directory_from_other_workspace() {
+        let conn = db();
+        seed_workspace_with_dir(&conn, "w1", "alpha", "C:\\proj\\alpha");
+        seed_workspace_with_dir(&conn, "w2", "beta", "C:\\proj\\beta");
+        insert(&conn, &session("s1")).unwrap();
+        set_workspace_id(&conn, "s1", "w1").unwrap();
+        let beta_dir = work_dirs::find_by_path(&conn, "C:\\proj\\beta")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            set_work_directory(&conn, "s1", &beta_dir.id),
+            Err(BindingError::InvalidDirectory { .. })
+        ));
+        assert!(get_work_directory_binding(&conn, "s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn binding_rejects_unmounted_directory() {
+        let conn = db();
+        seed_workspace_with_dir(&conn, "w1", "alpha", "C:\\proj\\alpha");
+        insert(&conn, &session("s1")).unwrap();
+        set_workspace_id(&conn, "s1", "w1").unwrap();
+        let dir = work_dirs::find_by_path(&conn, "C:\\proj\\alpha")
+            .unwrap()
+            .unwrap();
+        work_dirs::set_mounted(&conn, &dir.id, false).unwrap();
+        assert!(matches!(
+            set_work_directory(&conn, "s1", &dir.id),
+            Err(BindingError::InvalidDirectory { .. })
+        ));
+    }
+
+    #[test]
+    fn binding_rejects_missing_directory_and_missing_session() {
+        let conn = db();
+        seed_workspace_with_dir(&conn, "w1", "alpha", "C:\\proj\\alpha");
+        insert(&conn, &session("s1")).unwrap();
+        set_workspace_id(&conn, "s1", "w1").unwrap();
+        // 目录 id 不存在 → InvalidDirectory
+        assert!(matches!(
+            set_work_directory(&conn, "s1", "ghost-dir"),
+            Err(BindingError::InvalidDirectory { .. })
+        ));
+        // 会话不存在 → NotFound（Store 变体）
+        let dir = work_dirs::find_by_path(&conn, "C:\\proj\\alpha")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            set_work_directory(&conn, "ghost", &dir.id),
+            Err(BindingError::Store(StoreError::NotFound {
+                entity: "session",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn removed_directory_marks_binding_unavailable_but_keeps_row() {
+        let conn = db();
+        seed_workspace_with_dir(&conn, "w1", "alpha", "C:\\proj\\alpha");
+        insert(&conn, &session("s1")).unwrap();
+        set_workspace_id(&conn, "s1", "w1").unwrap();
+        let dir = work_dirs::find_by_path(&conn, "C:\\proj\\alpha")
+            .unwrap()
+            .unwrap();
+        set_work_directory(&conn, "s1", &dir.id).unwrap();
+        // 目录被移除（行删除）→ 绑定行保留、available=false
+        work_dirs::remove(&conn, &dir.id).unwrap();
+        let binding = get_work_directory_binding(&conn, "s1").unwrap().unwrap();
+        assert!(!binding.available);
+        assert!(binding.directory.is_none());
+        assert_eq!(binding.work_directory_id, dir.id);
+        // 目录卸载（行保留 mounted=0）→ available=false 但 directory 有值
+        work_dirs::add(&conn, "w1", "C:\\proj\\beta", "beta").unwrap();
+        let beta = work_dirs::find_by_path(&conn, "C:\\proj\\beta")
+            .unwrap()
+            .unwrap();
+        set_work_directory(&conn, "s1", &beta.id).unwrap();
+        work_dirs::set_mounted(&conn, &beta.id, false).unwrap();
+        let binding = get_work_directory_binding(&conn, "s1").unwrap().unwrap();
+        assert!(!binding.available);
+        assert!(binding.directory.is_some());
     }
 }
