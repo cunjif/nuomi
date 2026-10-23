@@ -140,6 +140,9 @@ export function StewardComposer({
       try {
         await runOptimize(draft);
       } catch (e) {
+        // steward_unbound already raised its actionable warn + settings
+        // nudge inside usePromptOptimize — no generic toast on top (5.6.1-3a).
+        if ((e as { code?: unknown })?.code === "prompt.steward_unbound") return;
         // Timeout/failure keeps the draft untouched (spec 5.3.3-3c).
         toast.error(describeOptimizeError(e));
       }
@@ -249,6 +252,11 @@ export function StewardComposer({
             >
               <Icon name="file" size={16} />
             </button>
+          </div>
+          <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5">
+            {/* chat_rich_bind 5.6.1-1a/5a: AI optimize moved to the input's
+            bottom-right cluster (shared skeleton with the conversation
+            Composer, D11). */}
             <button
               type="button"
               onClick={() => void handleOptimize(input)}
@@ -268,8 +276,6 @@ export function StewardComposer({
                 className={optimizeRunning ? "animate-spin" : undefined}
               />
             </button>
-          </div>
-          <div className="absolute bottom-1 right-1 z-10">
             <button
               type="submit"
               disabled={disabled || attaching || !input.trim()}

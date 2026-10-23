@@ -35,12 +35,24 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
   const [creating, setCreating] = useState(false);
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
+  /** Optional work-directory binding (chat_rich_bind 6.2): null = unbound. */
+  const [selectedDirectoryId, setSelectedDirectoryId] = useState<string | null>(null);
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],
     queryFn: () => ipc.listRoles(),
     staleTime: 30_000,
   });
+
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => ipc.listWorkspaces(),
+    staleTime: 30_000,
+  });
+  /** Mounted directories of the selected workspace (binding candidates). */
+  const mountedDirectories = (workspacesQuery.data ?? [])
+    .find((ws) => ws.id === selectedWorkspaceId)
+    ?.directories?.filter((d) => d.mounted && d.available) ?? [];
 
   const readyRoles = (rolesQuery.data ?? []).filter(isRoleReady);
 
@@ -64,6 +76,7 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
         agent: firstAgent,
         teamId: null,
         workspaceId: selectedWorkspaceId ?? "__migrated__",
+        workDirectoryId: selectedDirectoryId,
       });
       for (let i = 1; i < roleIds.length; i++) {
         await ipc.addConversationAgent(session.id, { kind: "role", id: roleIds[i]! });
@@ -125,7 +138,61 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
             className="w-full rounded border border-ink-muted/40 bg-surface-raised px-2 py-1 text-sm text-ink focus-visible:ring-2 focus-visible:ring-ink-accent"
           />
         </div>
-        <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
+        <WorkspaceSelector
+          selectedWorkspaceId={selectedWorkspaceId}
+          onSelect={(id) => {
+            setSelectedWorkspaceId(id);
+            // Directory candidates are workspace-scoped: reset the binding
+            // whenever the workspace changes (a stale id would be rejected
+            // by the backend's same-workspace validation anyway).
+            setSelectedDirectoryId(null);
+          }}
+        />
+        <div data-testid="directory-selector">
+          <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogDirectory")}</label>
+          <div className="flex flex-col gap-1 rounded border border-ink-muted/40 bg-surface-raised p-2">
+            <button
+              type="button"
+              onClick={() => setSelectedDirectoryId(null)}
+              className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm text-ink transition-colors ${
+                selectedDirectoryId === null ? "bg-ink-accent/15" : "hover:bg-surface-overlay"
+              }`}
+            >
+              <span className="flex-1 text-left">{t("conversation.newDialogDirectoryNone")}</span>
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  selectedDirectoryId === null ? "border-ink-accent bg-ink-accent text-surface" : "border-ink-muted/50"
+                }`}
+              >
+                {selectedDirectoryId === null ? "✓" : ""}
+              </span>
+            </button>
+            {mountedDirectories.map((dir) => {
+              const checked = selectedDirectoryId === dir.id;
+              return (
+                <button
+                  key={dir.id}
+                  type="button"
+                  title={dir.absPath}
+                  onClick={() => setSelectedDirectoryId(dir.id)}
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm text-ink transition-colors ${
+                    checked ? "bg-ink-accent/15" : "hover:bg-surface-overlay"
+                  }`}
+                >
+                  <span className="flex-1 truncate text-left">{dir.displayName}</span>
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      checked ? "border-ink-accent bg-ink-accent text-surface" : "border-ink-muted/50"
+                    }`}
+                  >
+                    {checked ? "✓" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">{t("conversation.newDialogDirectoryHint")}</p>
+        </div>
         <div>
           <label className="mb-1 block text-xs text-ink-muted">{t("conversation.newDialogSelectAgents")}</label>
           {readyRoles.length === 0 ? (

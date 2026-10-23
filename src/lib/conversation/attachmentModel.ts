@@ -27,12 +27,45 @@ const MIME_EXACT_WHITELIST = [
   "application/x-toml",
   "application/xml",
   "application/csv",
+  // chat_rich_bind 5.7 / D6: archive category — zip/tar/gz/7z (rar NOT
+  // admitted: proprietary format, unstable detection). Whitelist is
+  // append-only (spec 4.5-6).
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/x-tar",
+  "application/gzip",
+  "application/x-gzip",
+  "application/x-7z-compressed",
 ];
+
+/** Archive extensions accepted by the "add archive" entry (D6). */
+export const ARCHIVE_EXTENSIONS = ["zip", "tar", "gz", "7z"] as const;
+
+/** Image extensions accepted by the "add image" entry. */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"] as const;
 
 /** Returns true when the MIME type is allowed. */
 export function isAllowedMime(mime: string): boolean {
   if (MIME_EXACT_WHITELIST.includes(mime)) return true;
   return MIME_PREFIX_WHITELIST.some((p) => mime.startsWith(p));
+}
+
+/** Runtime-derived attachment category (D8: storage keeps kind='file';
+ * the category only drives entry filtering and shelf display). */
+export type AttachmentCategory = "image" | "document" | "archive";
+
+/** Classifies an attachment by MIME type (falling back to the extension). */
+export function attachmentCategory(mime: string, name: string): AttachmentCategory {
+  if (mime.startsWith("image/")) return "image";
+  const ext = fileExt(name);
+  if ((ARCHIVE_EXTENSIONS as readonly string[]).includes(ext)) return "archive";
+  if ((IMAGE_EXTENSIONS as readonly string[]).includes(ext)) return "image";
+  return "document";
+}
+
+/** True when `name`'s extension belongs to the archive whitelist (D6). */
+export function isArchiveName(name: string): boolean {
+  return (ARCHIVE_EXTENSIONS as readonly string[]).includes(fileExt(name));
 }
 
 /** Returns true when the byte size is within limits. */
@@ -90,6 +123,11 @@ export function guessMime(name: string): string {
     toml: "application/x-toml",
     xml: "application/xml",
     csv: "application/csv",
+    // chat_rich_bind 5.7 / D6: archive extensions.
+    zip: "application/zip",
+    tar: "application/x-tar",
+    gz: "application/gzip",
+    "7z": "application/x-7z-compressed",
   };
   return map[ext] ?? "application/octet-stream";
 }

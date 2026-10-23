@@ -16,6 +16,7 @@ import { ipc } from "../../../lib/ipc/client";
 import { describeError } from "../../../i18n";
 import { toast } from "../../../lib/store/toastStore";
 import {
+  attachmentCategory,
   isAllowedMime,
   isWithinSize,
   guessMime,
@@ -26,6 +27,7 @@ import { usePromptOptimize } from "./usePromptOptimize";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { AttachmentShelf } from "./AttachmentShelf";
 import { OptimizeCompareBar } from "./OptimizeCompareBar";
+import { FunctionMenu } from "./FunctionMenu";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { Icon } from "../../../components/ui/Icon/Icon";
 
@@ -69,8 +71,10 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  /** FunctionMenu visibility (chat_rich_bind 5.7: the "+" opens the menu
+   * whose attachment entries feed the shared upload chain). */
+  const [functionMenuOpen, setFunctionMenuOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const executingRef = useRef(false);
   const { optimize, runOptimize, clearOptimize, describeOptimizeError } =
     usePromptOptimize(sessionId);
@@ -102,7 +106,10 @@ export function Composer({
     onError: (e) => toast.error(`${t("composer.attachmentFailed")}: ${describeError(e)}`),
   });
 
-  const onFilesSelected = (files: FileList | null): void => {
+  const onFilesSelected = (
+    files: FileList | null,
+    category?: "image" | "document" | "archive",
+  ): void => {
     if (!sessionId) return;
     for (const file of Array.from(files ?? [])) {
       if (!isWithinSize(file.size)) {
@@ -111,7 +118,18 @@ export function Composer({
       }
       const mime = file.type || guessMime(file.name);
       if (!isAllowedMime(mime)) {
-        toast.error(t("composer.attachmentInvalidMime"));
+        // chat_rich_bind 5.7.3-3: archive misses list the accepted set.
+        if (category === "archive" || attachmentCategory(mime, file.name) === "archive") {
+          toast.error(`${t("composer.archiveNotAllowed")} (${t("composer.archiveFormats")})`);
+        } else {
+          toast.error(t("composer.attachmentInvalidMime"));
+        }
+        continue;
+      }
+      // Entry-vs-file cross-check (accept filters can be bypassed by the
+      // OS picker's "all files" option — the runtime check is the authority).
+      if (category !== undefined && attachmentCategory(mime, file.name) !== category) {
+        toast.error(t("composer.attachmentInvalidCategory"));
         continue;
       }
       const reader = new FileReader();
@@ -132,6 +150,9 @@ export function Composer({
     try {
       await runOptimize(draft);
     } catch (e) {
+      // steward_unbound already raised its actionable warn + settings
+      // nudge inside usePromptOptimize — no generic toast on top (5.6.1-3a).
+      if ((e as { code?: unknown })?.code === "prompt.steward_unbound") return;
       // Timeout/failure keeps the draft untouched.
       toast.error(describeOptimizeError(e));
     }
@@ -375,16 +396,39 @@ export function Composer({
           />
           <div className="absolute bottom-1 left-1 z-10">
             <ComposerToolbar
-              onFunctionMenuClick={() => { /* function menu — task group 5 */ }}
-              onAttachmentClick={() => fileInputRef.current?.click()}
-              onOptimizeClick={() => void handleOptimize(value)}
-              optimizeRunning={optimize.state === "running"}
-              optimizeDisabled={
-                disabled || pending || sessionId === null || value.trim().length === 0
-              }
+              onFunctionMenuClick={() => setFunctionMenuOpen((open) => !open)}
             />
           </div>
+          {functionMenuOpen && sessionId !== null && (
+            <FunctionMenu
+              sessionId={sessionId}
+              onClose={() => setFunctionMenuOpen(false)}
+              onFilesSelected={(files, category) => onFilesSelected(files, category)}
+            />
+          )}
           <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5">
+            {/* chat_rich_bind 5.6.1-1a: AI optimize moved to the input's
+            bottom-right cluster (next to voice/send). */}
+            <button
+              type="button"
+              onClick={() => void handleOptimize(value)}
+              className="flex h-7 w-7 items-center justify-center rounded p-1 text-ink-muted hover:bg-surface-overlay hover:text-ink-accent disabled:opacity-50"
+              aria-label={t("composer.optimize")}
+              title={t(optimize.state === "running" ? "composer.optimizeRunning" : "composer.optimize")}
+              disabled={
+                disabled ||
+                pending ||
+                sessionId === null ||
+                optimize.state === "running" ||
+                value.trim().length === 0
+              }
+            >
+              <Icon
+                name={optimize.state === "running" ? "spinner" : "wand"}
+                size={16}
+                className={optimize.state === "running" ? "animate-spin" : undefined}
+              />
+            </button>
             <button
               type="button"
               onClick={() => setVoiceActive((v) => !v)}
@@ -409,16 +453,6 @@ export function Composer({
       <div className="mt-1 flex justify-end">
         <ContextUsageIndicator sessionId={sessionId} />
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          onFilesSelected(e.target.files);
-          e.target.value = "";
-        }}
-      />
     </form>
   );
 }

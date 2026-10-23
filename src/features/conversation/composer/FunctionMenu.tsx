@@ -1,28 +1,40 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { describeError } from "../../../i18n";
 import { toast } from "../../../lib/store/toastStore";
+import { ARCHIVE_EXTENSIONS, IMAGE_EXTENSIONS } from "../../../lib/conversation/attachmentModel";
 
 export interface FunctionMenuProps {
   sessionId: string;
   onClose: () => void;
+  /** File handoff for the three attachment entries (chat_rich_bind 5.7):
+   * the Composer runs the shared validation + upload chain. */
+  onFilesSelected: (files: FileList | null, category: "image" | "document" | "archive") => void;
 }
 
 type MenuMode = "root" | "session" | "rule" | "prompt";
 
+const IMAGE_ACCEPT = (IMAGE_EXTENSIONS as readonly string[]).map((e) => `.${e}`).join(",");
+const ARCHIVE_ACCEPT = (ARCHIVE_EXTENSIONS as readonly string[]).map((e) => `.${e}`).join(",");
+
 /**
- * Function menu: import session info, apply rule, or inject custom
- * SystemPrompt. 150ms expand animation.
+ * Function menu: the three attachment entries (image / document / archive —
+ * chat_rich_bind 5.7, each bound to an accept-filtered hidden file input),
+ * plus import session info, apply rule, or inject custom SystemPrompt.
+ * 150ms expand animation.
  */
-export function FunctionMenu({ sessionId, onClose }: FunctionMenuProps): ReactNode {
+export function FunctionMenu({ sessionId, onClose, onFilesSelected }: FunctionMenuProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [mode, setMode] = useState<MenuMode>("root");
   const [customPrompt, setCustomPrompt] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const documentInputRef = useRef<HTMLInputElement | null>(null);
+  const archiveInputRef = useRef<HTMLInputElement | null>(null);
 
   const sessionsQuery = useQuery({
     queryKey: ["injectableSessions"],
@@ -66,6 +78,27 @@ export function FunctionMenu({ sessionId, onClose }: FunctionMenuProps): ReactNo
       <div className="max-h-56 overflow-y-auto p-1.5">
         {mode === "root" && (
           <div className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="block w-full rounded px-1.5 py-1 text-left text-sm text-ink hover:bg-surface-overlay"
+            >
+              {t("composer.addImage")}
+            </button>
+            <button
+              type="button"
+              onClick={() => documentInputRef.current?.click()}
+              className="block w-full rounded px-1.5 py-1 text-left text-sm text-ink hover:bg-surface-overlay"
+            >
+              {t("composer.addDocument")}
+            </button>
+            <button
+              type="button"
+              onClick={() => archiveInputRef.current?.click()}
+              className="block w-full rounded px-1.5 py-1 text-left text-sm text-ink hover:bg-surface-overlay"
+            >
+              {t("composer.addArchive")}
+            </button>
             <button
               type="button"
               onClick={() => setMode("session")}
@@ -165,6 +198,41 @@ export function FunctionMenu({ sessionId, onClose }: FunctionMenuProps): ReactNo
           </div>
         )}
       </div>
+      {/* Three category-filtered hidden inputs (chat_rich_bind 5.7.1-2a):
+       * the accept filter is the first gate; the Composer's runtime
+       * validation is the authority. */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept={IMAGE_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          onFilesSelected(e.target.files, "image");
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={documentInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onFilesSelected(e.target.files, "document");
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={archiveInputRef}
+        type="file"
+        multiple
+        accept={ARCHIVE_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          onFilesSelected(e.target.files, "archive");
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }
