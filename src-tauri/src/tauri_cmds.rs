@@ -279,6 +279,58 @@ pub async fn read_file(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn probe_source_path(
+    state: tauri::State<'_, AppState>,
+    target: String,
+) -> Result<commands::SourceProbeResultDto, IpcError> {
+    commands::impl_probe_source_path(&state, target).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn read_external_file(abs_path: String) -> Result<String, IpcError> {
+    commands::impl_read_external_file(abs_path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_authorization(
+    state: tauri::State<'_, AppState>,
+    input: commands::ResolveAuthorizationInputDto,
+) -> Result<(), IpcError> {
+    commands::impl_resolve_authorization(&state, input).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_agent_auth_policy(
+    state: tauri::State<'_, AppState>,
+    role_id: String,
+    policy: String,
+) -> Result<(), IpcError> {
+    commands::impl_set_agent_auth_policy(&state, role_id, policy).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_pending_authorizations(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<commands::PendingAuthorizationDto>, IpcError> {
+    commands::impl_list_pending_authorizations(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_conversation_detail(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::ConversationDetailDto, IpcError> {
+    commands::impl_get_conversation_detail(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn write_file(
     state: tauri::State<'_, AppState>,
     path: String,

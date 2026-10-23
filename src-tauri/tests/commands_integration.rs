@@ -1025,6 +1025,7 @@ async fn workspace_v2_conversation_filter_covers_all_directories() {
         agent: None,
         team_id: None,
         workspace_id: ws.to_string(),
+        work_directory_id: None,
     };
     commands::impl_create_conversation(&state, mk("chat", "alpha-era session", &ws1.id))
         .await

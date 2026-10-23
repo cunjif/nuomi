@@ -62,6 +62,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::set_idle_proposal_settings,
         tauri_cmds::list_dir,
         tauri_cmds::read_file,
+        tauri_cmds::probe_source_path,
+        tauri_cmds::read_external_file,
+        tauri_cmds::resolve_authorization,
+        tauri_cmds::set_agent_auth_policy,
+        tauri_cmds::list_pending_authorizations,
+        tauri_cmds::get_conversation_detail,
         tauri_cmds::write_file,
         tauri_cmds::create_file,
         tauri_cmds::create_dir,
@@ -499,6 +505,8 @@ pub fn run() {
     tauri::Builder::default()
         // OS folder picker for the 切换工作区 dialog (WorkspaceDialog.tsx).
         .plugin(tauri_plugin_dialog::init())
+        // System-browser opening for source links (chat_rich_bind spec 5.2.3).
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -544,10 +552,31 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(boot_and_wire(
                 handle,
-                db_path,
+                db_path.clone(),
                 provider,
                 default_workspace,
             ));
+            // Authorization sweeper (chat_rich_bind spec 5.4.1-7/8, D5): a
+            // 5s scan resolves timed-out pending requests by the RoleAgent's
+            // default policy (or emits the one-shot reminder event when no
+            // policy exists). Frontend timers would die with tab switches —
+            // the sweeper must outlive the UI.
+            tauri::async_runtime::spawn(async move {
+                let hub = nuomi_core::services::authorization::global_hub().clone();
+                let db_path = db_path.to_string_lossy().to_string();
+                let mut ticker = tokio::time::interval(std::time::Duration::from_millis(
+                    nuomi_core::services::authorization::SWEEP_INTERVAL_MS,
+                ));
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    ticker.tick().await;
+                    if let Err(e) =
+                        nuomi_core::services::authorization::sweep_once(&db_path, &hub).await
+                    {
+                        tracing::warn!(error = %e, "authorization sweep failed");
+                    }
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -313,7 +313,7 @@ pub async fn run_conversation_turn(
             // 既有会话走单 Role/Provider 路径 (D3).
             let db_path = state.db_path.clone();
             let secrets = state.secrets.clone();
-            let cwd = Some(state.current_workspace());
+            let cwd = Some(session_cwd(state, session_id).await);
             let bus = state.kernel.context().bus();
             let ws_id = focused_workspace_id(&db_path);
             // SPEC 5.8.1-5: an in-line team chat turn must honor the
@@ -352,6 +352,7 @@ pub async fn run_conversation_turn(
                 truncated: !outcome.converged,
                 transcript: Vec::new(),
                 cli_session_id: None,
+                sources: Vec::new(),
             }
         } else if participants.len() > 1 {
             // ADR 0013: IM group chat — Selector mode. First participant is
@@ -363,7 +364,7 @@ pub async fn run_conversation_turn(
             let resolved = participants.first().cloned();
             let db_path = state.db_path.clone();
             let secrets = state.secrets.clone();
-            let cwd = Some(state.current_workspace());
+            let cwd = Some(session_cwd(state, session_id).await);
             let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref()).await?;
             let external_session_id = cli_handle.as_ref().and_then(|(_, _, sid, _)| sid.clone());
             let max_history_chars = cli_handle.as_ref().and_then(|(_, _, _, m)| *m);
@@ -502,7 +503,7 @@ async fn run_selector_turn(
     // 1. Materialize Selector agent.
     let db_path = state.db_path.clone();
     let secrets = state.secrets.clone();
-    let cwd = Some(state.current_workspace());
+    let cwd = Some(session_cwd(state, session_id).await);
     let selector_ctx = materialize_single_role(db_path, secrets, cwd, Some(selector))
         .await
         .map_err(|e| IpcError::new("selector.materialize_failed", e.to_string()))?;
@@ -553,7 +554,7 @@ async fn run_selector_turn(
     // 5. Materialize and run the selected agent with the original user message.
     let db_path = state.db_path.clone();
     let secrets = state.secrets.clone();
-    let cwd = Some(state.current_workspace());
+    let cwd = Some(session_cwd(state, session_id).await);
     let selected_ctx = materialize_single_role(db_path, secrets, cwd, selected.as_ref())
         .await
         .map_err(|e| IpcError::new("selected.materialize_failed", e.to_string()))?;
@@ -1171,6 +1172,11 @@ pub struct ConversationInput {
     pub agent: Option<AgentRefInput>,
     pub team_id: Option<String>,
     pub workspace_id: String,
+    /// Optional work-directory binding (chat_rich_bind 6.4): the directory
+    /// must belong to `workspace_id` and be mounted; absent = unbound
+    /// (legacy behavior, serde default keeps old callers unchanged).
+    #[serde(default)]
+    pub work_directory_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -5187,6 +5193,32 @@ fn now_ms() -> i64 {
 
 // ---------------------------------------------------------------- conversations
 
+/// chat_rich_bind 6.3 — turn cwd resolution: the session's bound work
+/// directory (when available) wins; legacy/unbound sessions fall back to the
+/// global current workspace. Snapshot semantics: resolved ONCE at turn
+/// start (mid-turn directory changes are not chased — the same stability
+/// rule CLI handles follow, design §2.1.3.6).
+async fn session_cwd(state: &AppState, session_id: &str) -> std::path::PathBuf {
+    let db_path = state.db_path.clone();
+    let sid = session_id.to_string();
+    let bound = tokio::task::spawn_blocking(move || -> Option<std::path::PathBuf> {
+        let db = Db::open(&db_path).ok()?;
+        let binding = nuomi_core::store::repos::sessions::get_work_directory_binding(&db.0, &sid)
+            .ok()
+            .flatten()?;
+        if !binding.available {
+            return None;
+        }
+        binding
+            .directory
+            .map(|d| std::path::PathBuf::from(d.abs_path))
+    })
+    .await
+    .ok()
+    .flatten();
+    bound.unwrap_or_else(|| state.current_workspace())
+}
+
 pub async fn impl_create_conversation(
     state: &AppState,
     input: ConversationInput,
@@ -5204,6 +5236,7 @@ pub async fn impl_create_conversation(
     let title = input.title.clone();
     let team_id = input.team_id.clone();
     let workspace_id = input.workspace_id.clone();
+    let work_directory_id = input.work_directory_id.clone();
     let path = state.db_path.clone();
     let session = tokio::task::spawn_blocking(move || -> Result<Session, IpcError> {
         let db = Db::open(&path)?;
@@ -5221,7 +5254,14 @@ pub async fn impl_create_conversation(
             team_id.as_deref(),
             None,
             &workspace_id,
-        )?;
+            work_directory_id.as_deref(),
+        )
+        .map_err(|e| match e {
+            nuomi_core::store::repos::sessions::BindingError::InvalidDirectory { .. } => {
+                IpcError::new("session.invalid_directory", e.to_string())
+            }
+            nuomi_core::store::repos::sessions::BindingError::Store(err) => IpcError::from(err),
+        })?;
         Ok(session)
     })
     .await
@@ -5495,9 +5535,41 @@ pub async fn impl_delete_conversation(
     })
     .await
     .map_err(join_err)??;
+    // chat_rich_bind 5.4.3-1: void every PENDING authorization of the
+    // deleted session (event + state row first, then wake any waiting
+    // loop) so the in-bubble requests never outlive their conversation.
+    let db_path = state.db_path.to_string();
+    let hub = nuomi_core::services::authorization::global_hub().clone();
+    let void_sid = session_id.clone();
+    let pending = tokio::task::spawn_blocking(move || -> Result<Vec<String>, IpcError> {
+        let db = Db::open(db_path.as_str())?;
+        let rows = nuomi_core::store::repos::file_authorizations::list_by_session(&db.0, &void_sid)
+            .map_err(|e| IpcError::new("authorization.void_failed", e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .filter(|r| {
+                r.state
+                    == nuomi_core::store::repos::file_authorizations::AuthorizationState::Pending
+            })
+            .map(|r| r.id)
+            .collect())
+    })
+    .await
+    .map_err(join_err)??;
+    for authorization_id in pending {
+        let _ = nuomi_core::services::authorization::void_authorization(
+            state.db_path.as_ref(),
+            &hub,
+            &authorization_id,
+            "session deleted",
+        )
+        .await;
+    }
     // P1-2: cancel any in-flight turn for this session so a running
     // reply does not keep writing into a deleted conversation.
     state.session_cancels.cancel(&session_id);
+    // Session-scoped grant/denial caches die with the session.
+    hub.forget_session(&session_id);
     Ok(())
 }
 
@@ -7439,6 +7511,389 @@ pub async fn impl_unpin_workspace(state: &AppState, id: String) -> Result<(), Ip
     Ok(())
 }
 
+// ---- Authorization commands (chat_rich_bind spec 5.4/6.2/6.3) ----
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveAuthorizationInputDto {
+    pub authorization_id: String,
+    /// `grant_once` | `grant_session` | `deny`.
+    pub decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingAuthorizationDto {
+    pub authorization_id: String,
+    pub session_id: String,
+    pub role_id: String,
+    pub role_display_name: String,
+    /// `write` | `delete`.
+    pub op: String,
+    pub target_path: String,
+    /// Row state: `pending` | `granted_once` | `granted_session` | `denied`
+    /// | `timeout_default` | `voided` (the timeout-reminder UI state derives
+    /// from the `authorization.timeout_notified` event, not the row).
+    pub state: String,
+    pub requested_at: i64,
+    pub expires_at: i64,
+}
+
+/// Resolves a pending (or timeout-notified) authorization — the in-bubble
+/// three-option submit entry. State transition + event land in one
+/// transaction before the waiting loop wakes (iron rule).
+pub async fn impl_resolve_authorization(
+    state: &AppState,
+    input: ResolveAuthorizationInputDto,
+) -> Result<(), IpcError> {
+    use nuomi_core::services::authorization as authz;
+    let decision = match input.decision.as_str() {
+        "grant_once" => authz::AuthorizationDecision::GrantOnce,
+        "grant_session" => authz::AuthorizationDecision::GrantSession,
+        "deny" => authz::AuthorizationDecision::Deny,
+        other => {
+            return Err(IpcError::new(
+                "authorization.invalid_decision",
+                format!("unknown decision: {other}"),
+            ));
+        }
+    };
+    let db_path = state.db_path.to_string();
+    let hub = authz::global_hub().clone();
+    authz::resolve_authorization(&db_path, &hub, &input.authorization_id, decision)
+        .await
+        .map_err(|e| match e {
+            authz::ResolveError::NotFound(id) => IpcError::new(
+                "authorization.not_found",
+                format!("authorization {id} not found"),
+            ),
+            authz::ResolveError::AlreadyResolved(id) => IpcError::new(
+                "authorization.already_resolved",
+                format!("authorization {id} already resolved"),
+            ),
+            authz::ResolveError::Store(err) => {
+                IpcError::new("authorization.resolve_failed", err.to_string())
+            }
+        })
+}
+
+/// Sets a RoleAgent's default authorization policy (the sweeper timeout
+/// fallback). `unset` removes the row.
+pub async fn impl_set_agent_auth_policy(
+    state: &AppState,
+    role_id: String,
+    policy: String,
+) -> Result<(), IpcError> {
+    use nuomi_core::services::authorization as authz;
+    use nuomi_core::store::repos::agent_auth_policies::AgentAuthPolicyValue;
+    let value = match policy.as_str() {
+        "authorize" => Some(AgentAuthPolicyValue::Authorize),
+        "deny" => Some(AgentAuthPolicyValue::Deny),
+        "unset" => None,
+        other => {
+            return Err(IpcError::new(
+                "authorization.invalid_policy",
+                format!("unknown policy: {other}"),
+            ));
+        }
+    };
+    // Role existence pre-check surfaces a distinct error code.
+    let db_path = state.db_path.clone();
+    let role_id_for_check = role_id.clone();
+    let role_exists = tokio::task::spawn_blocking(move || -> Result<bool, IpcError> {
+        let db = Db::open(&db_path)?;
+        let exists: bool =
+            db.0.query_row(
+                "SELECT EXISTS(SELECT 1 FROM roles WHERE id = ?1)",
+                [&role_id_for_check],
+                |r| r.get(0),
+            )
+            .map_err(|e| IpcError::new("authorization.policy_save_failed", e.to_string()))?;
+        Ok(exists)
+    })
+    .await
+    .map_err(|e| IpcError::new("authorization.policy_save_failed", e.to_string()))??;
+    if !role_exists {
+        return Err(IpcError::new(
+            "role.not_found",
+            format!("role {role_id} not found"),
+        ));
+    }
+    let db_path = state.db_path.to_string();
+    authz::set_policy(&db_path, &role_id, value)
+        .await
+        .map_err(|e| IpcError::new("authorization.policy_save_failed", e.to_string()))
+}
+
+/// Lists a session's authorizations (pending + terminal) so the conversation
+/// view can rebuild authorization bubbles on open/restore.
+pub async fn impl_list_pending_authorizations(
+    state: &AppState,
+    session_id: String,
+) -> Result<Vec<PendingAuthorizationDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<PendingAuthorizationDto>, IpcError> {
+        let db = Db::open(&db_path)?;
+        let conn = &db.0;
+        let rows =
+            nuomi_core::store::repos::file_authorizations::list_by_session(conn, &session_id)
+                .map_err(|e| IpcError::new("authorization.list_failed", e.to_string()))?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            // Display name: the Role's name, falling back to the raw id.
+            let role_display_name: String = conn
+                .query_row(
+                    "SELECT name FROM roles WHERE id = ?1",
+                    [&row.role_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| row.role_id.clone());
+            out.push(PendingAuthorizationDto {
+                authorization_id: row.id,
+                session_id: row.session_id,
+                role_id: row.role_id,
+                role_display_name,
+                op: row.op.as_str().to_string(),
+                target_path: row.target_path,
+                state: row.state.as_str().to_string(),
+                requested_at: row.requested_at,
+                expires_at: row.expires_at,
+            });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| IpcError::new("authorization.list_failed", e.to_string()))?
+}
+
+// ---- Conversation detail (chat_rich_bind spec 5.5.1-2 / 6.4-3) ----
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetailWorkspaceDto {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetailDirectoryDto {
+    pub id: String,
+    pub display_name: String,
+    pub abs_path: String,
+    /// Derived availability (directory row exists AND is mounted).
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationParticipantDto {
+    /// `role` | `cli`.
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+    /// `authorize` | `deny` | `unset` (row absence).
+    pub auth_policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetailDto {
+    pub session_id: String,
+    pub title: Option<String>,
+    pub kind: String,
+    pub workspace: Option<ConversationDetailWorkspaceDto>,
+    pub work_directory: Option<ConversationDetailDirectoryDto>,
+    pub participants: Vec<ConversationParticipantDto>,
+}
+
+/// One-shot detail payload for the conversation-detail panel: session info +
+/// binding (with derived availability) + participants + each participant's
+/// default authorization policy. Per-agent deep detail (role/provider/CLI
+/// specifics) stays on the existing `getAgentDetail` for on-demand loading.
+pub async fn impl_get_conversation_detail(
+    state: &AppState,
+    session_id: String,
+) -> Result<ConversationDetailDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let detail = tokio::task::spawn_blocking(move || -> Result<ConversationDetailDto, IpcError> {
+        let db = Db::open(&db_path)?;
+        let conn = &db.0;
+        let session = repos::sessions::get(conn, &session_id).map_err(|_| {
+            IpcError::new(
+                "session.not_found",
+                format!("session {session_id} not found"),
+            )
+        })?;
+        let workspace = {
+            let ws_id: Option<String> = conn
+                .query_row(
+                    "SELECT workspace_id FROM sessions WHERE id = ?1",
+                    [&session_id],
+                    |r| r.get(0),
+                )
+                .ok();
+            ws_id.and_then(|id| {
+                let label: Option<String> = conn
+                    .query_row("SELECT label FROM workspaces WHERE id = ?1", [&id], |r| {
+                        r.get(0)
+                    })
+                    .ok();
+                let root: Option<String> = conn
+                    .query_row(
+                        "SELECT root_path FROM workspaces WHERE id = ?1",
+                        [&id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                label
+                    .or(root)
+                    .map(|l| ConversationDetailWorkspaceDto { id, label: l })
+            })
+        };
+        let work_directory = repos::sessions::get_work_directory_binding(conn, &session_id)
+            .map_err(|e| IpcError::new("session.detail_failed", e.to_string()))?
+            .and_then(|binding| {
+                binding.directory.map(|d| ConversationDetailDirectoryDto {
+                    id: binding.work_directory_id,
+                    display_name: d.display_name,
+                    abs_path: d.abs_path,
+                    available: binding.available,
+                })
+            });
+        let participants = {
+            let rows = repos::sessions::list_participants(conn, &session_id)
+                .map_err(|e| IpcError::new("session.detail_failed", e.to_string()))?;
+            let role_ids: Vec<String> = rows
+                .iter()
+                .filter(|(kind, _)| matches!(kind, nuomi_core::domain::AgentRefKind::Role))
+                .map(|(_, id)| id.clone())
+                .collect();
+            let policies =
+                nuomi_core::store::repos::agent_auth_policies::find_by_roles(conn, &role_ids)
+                    .map_err(|e| IpcError::new("session.detail_failed", e.to_string()))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for (kind, id) in rows {
+                let (name, policy) = match kind {
+                    nuomi_core::domain::AgentRefKind::Role => {
+                        let name: String = conn
+                            .query_row("SELECT name FROM roles WHERE id = ?1", [&id], |r| r.get(0))
+                            .unwrap_or_else(|_| id.clone());
+                        let policy = policies
+                            .iter()
+                            .find(|(rid, _)| rid == &id)
+                            .and_then(|(_, p)| p.as_ref().map(|v| v.as_str().to_string()))
+                            .unwrap_or_else(|| "unset".to_string());
+                        (name, policy)
+                    }
+                    nuomi_core::domain::AgentRefKind::Cli => {
+                        let name: String = conn
+                            .query_row(
+                                "SELECT name FROM agent_profiles WHERE id = ?1",
+                                [&id],
+                                |r| r.get(0),
+                            )
+                            .unwrap_or_else(|_| id.clone());
+                        (name, "unset".to_string())
+                    }
+                };
+                out.push(ConversationParticipantDto {
+                    kind: kind.as_str().to_string(),
+                    id,
+                    name,
+                    auth_policy: policy,
+                });
+            }
+            out
+        };
+        Ok(ConversationDetailDto {
+            session_id: session.id,
+            title: Some(session.title).filter(|t| !t.is_empty()),
+            kind: session.kind.as_str().to_string(),
+            workspace,
+            work_directory,
+            participants,
+        })
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(detail)
+}
+
+// ---- Source navigation commands (chat_rich_bind spec 5.2) ----
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceProbeResultDto {
+    /// `workspace_file` | `external_file` | `web_url` | `unavailable`.
+    pub kind: String,
+    pub workspace_id: Option<String>,
+    pub directory_id: Option<String>,
+    pub relative_path: Option<String>,
+    pub normalized_target: Option<String>,
+    pub available: bool,
+}
+
+/// Probes a source-evidence target (path or URL) for the three-branch jump
+/// routing. Probe misses are business results (`kind=unavailable`), not
+/// IPC errors; only DB failures map to `source.probe_failed`.
+pub async fn impl_probe_source_path(
+    state: &AppState,
+    target: String,
+) -> Result<SourceProbeResultDto, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<SourceProbeResultDto, IpcError> {
+        let db =
+            Db::open(&db_path).map_err(|e| IpcError::new("source.probe_failed", e.to_string()))?;
+        let r = nuomi_core::services::source_probe::probe_source_path(&db.0, &target)
+            .map_err(|e| IpcError::new("source.probe_failed", e.to_string()))?;
+        Ok(SourceProbeResultDto {
+            kind: r.kind,
+            workspace_id: r.workspace_id,
+            directory_id: r.directory_id,
+            relative_path: r.relative_path,
+            normalized_target: r.normalized_target,
+            available: r.available,
+        })
+    })
+    .await
+    .map_err(join_err)?
+}
+
+/// Read-only viewer cap for external files (chat_rich_bind temp tab):
+/// absolute paths outside every sandbox are never writable here, and
+/// oversized/binary files degrade to an explicit error instead of hanging
+/// the editor.
+const EXTERNAL_READ_CAP: u64 = 2 * 1024 * 1024;
+
+/// Reads an EXTERNAL file (absolute path outside every workspace sandbox)
+/// for the one-shot temp tab. Read-only, 2MB cap, UTF-8 only — the sandbox
+/// `read_file` command keeps its escape protection; this dedicated channel
+/// serves the source-navigation "external file" branch only.
+pub async fn impl_read_external_file(abs_path: String) -> Result<String, IpcError> {
+    tokio::task::spawn_blocking(move || -> Result<String, IpcError> {
+        let path = std::path::PathBuf::from(&abs_path);
+        let meta = std::fs::metadata(&path)
+            .map_err(|e| IpcError::new("source.external_read_failed", e.to_string()))?;
+        if meta.is_dir() {
+            return Err(IpcError::new(
+                "source.external_read_failed",
+                "target is a directory",
+            ));
+        }
+        if meta.len() > EXTERNAL_READ_CAP {
+            return Err(IpcError::new(
+                "source.external_too_large",
+                format!("{} bytes exceeds the 2MB viewer cap", meta.len()),
+            ));
+        }
+        std::fs::read_to_string(&path)
+            .map_err(|e| IpcError::new("source.external_read_failed", e.to_string()))
+    })
+    .await
+    .map_err(join_err)?
+}
+
 // ---- Layout snapshot commands ----
 
 pub async fn impl_get_layout_snapshot(
@@ -9093,6 +9548,11 @@ pub async fn impl_steward_optimize_prompt(
         nuomi_core::steward::prompt_optimizer::OptimizeError::Failed(msg) => {
             IpcError::new("steward.optimize_failed", msg)
         }
+        // Steward-chat optimize keeps the steward-scoped code family; the
+        // binding nudge surfaces identically to the session-generic path.
+        nuomi_core::steward::prompt_optimizer::OptimizeError::StewardUnbound => {
+            IpcError::new("steward.optimize_unbound", e.to_string())
+        }
     })?;
     Ok(StewardPromptOptimizeResultDto { optimized })
 }
@@ -9195,6 +9655,11 @@ pub async fn impl_optimize_prompt(
         }
         nuomi_core::steward::prompt_optimizer::OptimizeError::Failed(msg) => {
             IpcError::new("prompt.optimize_failed", msg)
+        }
+        // chat_rich_bind 5.6.1-3 (D9): stable code the frontend routes to
+        // the "bind the steward agent first" guidance.
+        nuomi_core::steward::prompt_optimizer::OptimizeError::StewardUnbound => {
+            IpcError::new("prompt.steward_unbound", e.to_string())
         }
     })?;
     Ok(PromptOptimizeResultDto { optimized })

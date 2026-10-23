@@ -171,6 +171,48 @@
         "speaking": "💭 {{name}} is thinking…",
         "next": "⏭️ Waiting for the next speaker…"
       }
+    },
+    "htmlPreview": {
+      "title": "Page preview",
+      "close": "Close",
+      "renderFailed": "Page rendering failed",
+      "viewSource": "View source",
+      "resize": "Resize",
+      "open": "Page preview"
+    },
+    "sources": {
+      "openList": "View sources",
+      "title": "Sources",
+      "open": "Open",
+      "file": "File",
+      "link": "Link",
+      "agent": "CLI Agent",
+      "unavailable": "Unavailable",
+      "openFailed": "Failed to open",
+      "tempFile": "Temp file",
+      "closeTempFile": "Close temp file",
+      "loading": "Loading…",
+      "readFailed": "Failed to read file",
+      "sourceMissing": "Source file does not exist"
+    },
+    "authorization": {
+      "title": "File operation authorization",
+      "requestedBy": "Requested by",
+      "operation": "Operation",
+      "write": "Write",
+      "delete": "Delete",
+      "target": "Target path",
+      "deadline": "Deadline",
+      "grantOnce": "Grant once",
+      "grantSession": "Grant for session",
+      "deny": "Deny",
+      "grantedOnce": "Granted (once)",
+      "grantedSession": "Granted (session)",
+      "denied": "Denied",
+      "timeoutDefault": "Resolved by default policy",
+      "voided": "Voided",
+      "timeoutReminder": "Request timed out, still awaiting action…",
+      "resolveFailed": "Failed to resolve, please retry"
     }
   },
   "commands": {
@@ -299,7 +341,14 @@
       "sessionRef": "Session",
       "rule": "Rule",
       "customPrompt": "Custom Prompt"
-    }
+    },
+    "stewardUnbound": "Bind the steward agent model in Settings first",
+    "addImage": "Add image",
+    "addDocument": "Add document",
+    "addArchive": "Add archive",
+    "archiveFormats": "Accepted: zip / tar / gz / 7z",
+    "attachmentInvalidCategory": "File type does not match the chosen entry",
+    "archiveNotAllowed": "Unsupported archive format"
   },
   "conversation": {
     "filterAll": "All",
@@ -408,6 +457,23 @@
       "wbRouteConcurrent": "Concurrent",
       "titleTooLong": "Title exceeds max length {{max}} chars",
       "goalTooLong": "Goal exceeds max length {{max}} chars"
+    },
+    "newDialogDirectory": "Work directory (optional)",
+    "newDialogDirectoryNone": "No directory",
+    "newDialogDirectoryHint": "Once bound, the RoleAgent reads and searches freely inside it",
+    "conversationDetail": {
+      "title": "Conversation detail",
+      "sessionInfo": "Session info",
+      "workspace": "Workspace",
+      "workDirectory": "Bound work directory",
+      "directoryUnavailable": "Directory unavailable",
+      "noBinding": "Not bound",
+      "participants": "Participants",
+      "defaultAuthPolicy": "Default authorization policy",
+      "policyAuthorize": "Authorize",
+      "policyDeny": "Deny",
+      "policyUnset": "Unset",
+      "policySaveFailed": "Failed to save policy"
     }
   },
   "board": {

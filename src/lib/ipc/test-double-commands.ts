@@ -351,6 +351,125 @@ export function testDoubleCommands(): CommandSet {
       const f = tdState.files.get(path);
       return f && !f.isDir ? ok(f.content ?? "") : err("workspace.invalid_path", `not a file: ${path}`);
     },
+    async probeSourcePath(target) {
+      const seeded = tdState.sourceProbes.get(target);
+      if (seeded !== undefined) return ok({ ...seeded });
+      if (target.startsWith("http://") || target.startsWith("https://")) {
+        return ok({
+          kind: "web_url",
+          workspaceId: null,
+          directoryId: null,
+          relativePath: null,
+          normalizedTarget: target,
+          available: true,
+        });
+      }
+      const f = tdState.files.get(target);
+      if (f !== undefined) {
+        return ok({
+          kind: "external_file",
+          workspaceId: null,
+          directoryId: null,
+          relativePath: null,
+          normalizedTarget: target,
+          available: true,
+        });
+      }
+      return ok({
+        kind: "unavailable",
+        workspaceId: null,
+        directoryId: null,
+        relativePath: null,
+        normalizedTarget: null,
+        available: false,
+      });
+    },
+    async readExternalFile(absPath) {
+      const f = tdState.files.get(absPath);
+      if (f !== undefined && !f.isDir) return ok(f.content ?? "");
+      return err("source.external_read_failed", `cannot read: ${absPath}`);
+    },
+    async resolveAuthorization(input) {
+      const row = tdState.authorizations.find((a) => a.authorizationId === input.authorizationId);
+      if (row === undefined) {
+        return err("authorization.not_found", `authorization ${input.authorizationId} not found`);
+      }
+      if (row.state !== "pending") {
+        return err("authorization.already_resolved", `authorization ${input.authorizationId} already resolved`);
+      }
+      row.state = input.decision === "deny" ? "denied" : input.decision === "grant_session" ? "granted_session" : "granted_once";
+      return ok(null);
+    },
+    async setAgentAuthPolicy(roleId, policy) {
+      if (!tdState.roles.some((r) => r.id === roleId)) {
+        return err("role.not_found", `role ${roleId} not found`);
+      }
+      const existing = tdState.agentAuthPolicies.findIndex((p) => p.roleId === roleId);
+      if (policy === "unset") {
+        if (existing >= 0) tdState.agentAuthPolicies.splice(existing, 1);
+      } else {
+        const typedPolicy: "authorize" | "deny" =
+          policy === "authorize" ? "authorize" : "deny";
+        if (existing >= 0) {
+          tdState.agentAuthPolicies[existing] = { roleId, policy: typedPolicy };
+        } else {
+          tdState.agentAuthPolicies.push({ roleId, policy: typedPolicy });
+        }
+      }
+      return ok(null);
+    },
+    async listPendingAuthorizations(sessionId) {
+      return ok(
+        tdState.authorizations
+          .filter((a) => a.sessionId === sessionId)
+          .map((a) => ({ ...a })),
+      );
+    },
+    async getConversationDetail(sessionId) {
+      const session = tdState.sessions.find((s) => s.id === sessionId);
+      if (session === undefined) {
+        return err("session.not_found", `session ${sessionId} not found`);
+      }
+      const directoryId = tdState.sessionDirectories[sessionId] ?? null;
+      const participants = (tdState.conversationParticipants[sessionId] ?? []).map(
+        (p: { kind: string; id: string; name: string }) => {
+          const policy = tdState.agentAuthPolicies.find((x) => x.roleId === p.id);
+          return {
+            kind: p.kind,
+            id: p.id,
+            name: p.name,
+            authPolicy: policy?.policy ?? "unset",
+          };
+        },
+      );
+      const workspaces = tdState.workspaces;
+      const ws = workspaces.find((w) => w.id === session.workspaceId);
+      const directory =
+        directoryId === null
+          ? null
+          : (() => {
+              const wsd = tdState.workspaceDirectories.find((d) => d.id === directoryId);
+              return wsd === undefined
+                ? null
+                : {
+                    id: wsd.id,
+                    displayName: wsd.displayName,
+                    absPath: wsd.absPath,
+                    available: wsd.mounted,
+                  };
+            })();
+      return ok({
+        sessionId,
+        title: session.title,
+        kind: session.kind ?? "chat",
+        workspace:
+          ws === undefined
+            ? null
+            : { id: ws.id, label: ws.label ?? ws.rootPath },
+        workDirectory: directory,
+        participants,
+      });
+    },
     async writeFile(path, content) {
       const f = tdState.files.get(path);
       if (!f || f.isDir) return err("workspace.invalid_path", `not a file: ${path}`);
@@ -1258,6 +1377,11 @@ export function testDoubleCommands(): CommandSet {
         todoList: [],
         workspaceId: input.workspaceId,
       };
+      // chat_rich_bind 6.1: record the optional work-directory binding for
+      // getConversationDetail round-trips.
+      if (input.workDirectoryId !== null && input.workDirectoryId !== undefined) {
+        tdState.sessionDirectories[s.id] = input.workDirectoryId;
+      }
       tdState.sessions.unshift(s);
       return ok(s);
     },

@@ -171,6 +171,48 @@
         "speaking": "💭 {{name}} 正在思考…",
         "next": "⏭️ 等待下一位 Agent 发言…"
       }
+    },
+    "htmlPreview": {
+      "title": "网页预览",
+      "close": "关闭",
+      "renderFailed": "网页渲染失败",
+      "viewSource": "查看源文本",
+      "resize": "调整大小",
+      "open": "网页预览"
+    },
+    "sources": {
+      "openList": "查看数据来源",
+      "title": "数据来源",
+      "open": "打开",
+      "file": "文件",
+      "link": "链接",
+      "agent": "CLI Agent",
+      "unavailable": "不可用",
+      "openFailed": "打开失败",
+      "tempFile": "临时文件",
+      "closeTempFile": "关闭临时文件",
+      "loading": "读取中…",
+      "readFailed": "文件读取失败",
+      "sourceMissing": "来源文件不存在"
+    },
+    "authorization": {
+      "title": "文件操作授权请求",
+      "requestedBy": "发起 Agent",
+      "operation": "操作",
+      "write": "写入",
+      "delete": "删除",
+      "target": "目标路径",
+      "deadline": "截止时间",
+      "grantOnce": "仅一次授权",
+      "grantSession": "会话内授权",
+      "deny": "拒绝",
+      "grantedOnce": "已授权（仅一次）",
+      "grantedSession": "已授权（会话内）",
+      "denied": "已拒绝",
+      "timeoutDefault": "已超时兜底处理",
+      "voided": "已作废",
+      "timeoutReminder": "请求已超时，等待处理中…",
+      "resolveFailed": "处理失败，请重试"
     }
   },
   "commands": {
@@ -299,7 +341,14 @@
       "sessionRef": "会话引用",
       "rule": "规则",
       "customPrompt": "自定义 Prompt"
-    }
+    },
+    "stewardUnbound": "需先在设置中绑定管家 Agent 模型",
+    "addImage": "添加图片",
+    "addDocument": "添加文档",
+    "addArchive": "添加压缩包",
+    "archiveFormats": "可接受格式：zip / tar / gz / 7z",
+    "attachmentInvalidCategory": "文件类型与所选入口不符",
+    "archiveNotAllowed": "不支持的压缩格式"
   },
   "conversation": {
     "filterAll": "全部",
@@ -408,6 +457,23 @@
       "wbRouteConcurrent": "并发式",
       "titleTooLong": "标题超过最大长度 {{max}} 字符",
       "goalTooLong": "目标超过最大长度 {{max}} 字符"
+    },
+    "newDialogDirectory": "工作目录（可选）",
+    "newDialogDirectoryNone": "不绑定目录",
+    "newDialogDirectoryHint": "绑定后 RoleAgent 在该目录内可自由读取检索",
+    "conversationDetail": {
+      "title": "对话详情",
+      "sessionInfo": "会话信息",
+      "workspace": "所属工作区",
+      "workDirectory": "绑定工作目录",
+      "directoryUnavailable": "目录不可用",
+      "noBinding": "未绑定",
+      "participants": "参与者",
+      "defaultAuthPolicy": "默认授权策略",
+      "policyAuthorize": "授权",
+      "policyDeny": "拒绝",
+      "policyUnset": "未设置",
+      "policySaveFailed": "策略保存失败"
     }
   },
   "board": {

@@ -80,6 +80,26 @@ interface DoubleState {
   sandboxTasks: import("./bindings.gen").SandboxTaskDto[];
   /** Runtimes declared by the sandbox plugin double (tests override). */
   sandboxRuntimes: import("./bindings.gen").SandboxRuntimeDto[];
+  /**
+   * Preseeded probe results for `probeSourcePath` (chat_rich_bind 5.2):
+   * target → result. Unseeded targets fall back to URL detection plus the
+   * flat `files` map (external_file/unavailable only — the double has no
+   * work-directory registry).
+   */
+  sourceProbes: Map<string, import("./bindings.gen").SourceProbeResultDto>;
+  /**
+   * Authorization request rows (chat_rich_bind 5.4): the double's
+   * `file_authorizations` table equivalent, keyed by authorization id.
+   */
+  authorizations: import("./bindings.gen").PendingAuthorizationDto[];
+  /** Per-role default policies (chat_rich_bind 6.3): `agent_auth_policies`. */
+  agentAuthPolicies: { roleId: string; policy: "authorize" | "deny" }[];
+  /** Per-session participants for getConversationDetail (chat_rich_bind 6.4). */
+  conversationParticipants: Record<string, { kind: string; id: string; name: string }[]>;
+  /** Work directories for getConversationDetail (chat_rich_bind 6.4). */
+  workspaceDirectories: { id: string; absPath: string; displayName: string; mounted: boolean }[];
+  /** Session → bound work-directory id (chat_rich_bind 6.4). */
+  sessionDirectories: Record<string, string>;
 }
 
 export const tdState: DoubleState = {
@@ -112,6 +132,12 @@ export const tdState: DoubleState = {
   files: new Map(),
   stewardSessionIds: new Set(),
   sandboxTasks: [],
+  sourceProbes: new Map(),
+  authorizations: [],
+  agentAuthPolicies: [],
+  conversationParticipants: {},
+  workspaceDirectories: [],
+  sessionDirectories: {},
   sandboxRuntimes: [
     { id: "python", name: "Python 3", isolation: "test double (no isolation)" },
     { id: "node", name: "Node.js", isolation: "test double (no isolation)" },
@@ -242,6 +268,12 @@ export function tdReset(): void {
   tdState.files.clear();
   tdState.stewardSessionIds.clear();
   tdState.sandboxTasks.length = 0;
+  tdState.sourceProbes.clear();
+  tdState.authorizations.length = 0;
+  tdState.agentAuthPolicies.length = 0;
+  tdState.conversationParticipants = {};
+  tdState.workspaceDirectories.length = 0;
+  tdState.sessionDirectories = {};
 }
 
 /** Seed workspace entries: value is directory marker or file content. */

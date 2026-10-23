@@ -129,6 +129,18 @@ export const ipc = {
     unwrap(current.listDir(path, workspaceId ?? null)),
   readFile: (path: string, workspaceId?: string | null) =>
     unwrap(current.readFile(path, workspaceId ?? null)),
+  probeSourcePath: (target: string) => unwrap(current.probeSourcePath(target)),
+  readExternalFile: (absPath: string) => unwrap(current.readExternalFile(absPath)),
+  resolveAuthorization: (input: {
+    authorizationId: string;
+    decision: "grant_once" | "grant_session" | "deny";
+  }) => unwrap(current.resolveAuthorization(input)),
+  setAgentAuthPolicy: (roleId: string, policy: "authorize" | "deny" | "unset") =>
+    unwrap(current.setAgentAuthPolicy(roleId, policy)),
+  listPendingAuthorizations: (sessionId: string) =>
+    unwrap(current.listPendingAuthorizations(sessionId)),
+  getConversationDetail: (sessionId: string) =>
+    unwrap(current.getConversationDetail(sessionId)),
   writeFile: (path: string, content: string, workspaceId?: string | null) =>
     unwrap(current.writeFile(path, content, workspaceId ?? null)),
   createFile: (path: string, content: string, workspaceId?: string | null) =>

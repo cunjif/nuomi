@@ -214,6 +214,54 @@ async readFile(path: string, workspaceId: string | null) : Promise<Result<string
     else return { status: "error", error: e  as any };
 }
 },
+async probeSourcePath(target: string) : Promise<Result<SourceProbeResultDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("probe_source_path", { target }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async readExternalFile(absPath: string) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_external_file", { absPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resolveAuthorization(input: ResolveAuthorizationInputDto) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_authorization", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setAgentAuthPolicy(roleId: string, policy: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_agent_auth_policy", { roleId, policy }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listPendingAuthorizations(sessionId: string) : Promise<Result<PendingAuthorizationDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_pending_authorizations", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getConversationDetail(sessionId: string) : Promise<Result<ConversationDetailDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_conversation_detail", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async writeFile(path: string, content: string, workspaceId: string | null) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("write_file", { path, content, workspaceId }) };
@@ -1631,8 +1679,30 @@ export type ContextInjectionDto = { id: string; sessionId: string; type: string;
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }
 export type ContextUsageDto = { sections: ContextUsageSectionDto[]; totalTokens: number; budgetTokens: number; pruneRecords: PruneRecordDto[] }
 export type ContextUsageSectionDto = { name: string; tokens: number }
+export type ConversationDetailDirectoryDto = { id: string; displayName: string; absPath: string; 
+/**
+ * Derived availability (directory row exists AND is mounted).
+ */
+available: boolean }
+export type ConversationDetailDto = { sessionId: string; title: string | null; kind: string; workspace: ConversationDetailWorkspaceDto | null; workDirectory: ConversationDetailDirectoryDto | null; participants: ConversationParticipantDto[] }
+export type ConversationDetailWorkspaceDto = { id: string; label: string }
 export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[]; workspaceId: string }
-export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null; workspaceId: string }
+export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null; workspaceId: string; 
+/**
+ * Optional work-directory binding (chat_rich_bind 6.4): the directory
+ * must belong to `workspace_id` and be mounted; absent = unbound
+ * (legacy behavior, serde default keeps old callers unchanged).
+ */
+workDirectoryId?: string | null }
+export type ConversationParticipantDto = { 
+/**
+ * `role` | `cli`.
+ */
+kind: string; id: string; name: string; 
+/**
+ * `authorize` | `deny` | `unset` (row absence).
+ */
+authPolicy: string }
 export type ConversationUpdateInput = { title: string | null; goal: string | null }
 /**
  * A cross-workspace search result group.
@@ -1770,6 +1840,17 @@ export type OnlineLearningConfigDto = { authorized: boolean; allowlist: string[]
  * A session whose `workspace_id` points to a removed workspace.
  */
 export type OrphanSessionDto = { sessionId: string; workspaceId: string; title: string; updatedAt: number }
+export type PendingAuthorizationDto = { authorizationId: string; sessionId: string; roleId: string; roleDisplayName: string; 
+/**
+ * `write` | `delete`.
+ */
+op: string; targetPath: string; 
+/**
+ * Row state: `pending` | `granted_once` | `granted_session` | `denied`
+ * | `timeout_default` | `voided` (the timeout-reminder UI state derives
+ * from the `authorization.timeout_notified` event, not the row).
+ */
+state: string; requestedAt: number; expiresAt: number }
 export type PluginInfoDto = { id: string; name: string; version: string; apiVersion: number; description: string | null; 
 /**
  * env | config | user | workspace (loader SourceKind label).
@@ -1865,6 +1946,11 @@ export type RemoveDirectoryResultDto = { workspaceClosed: boolean }
  * (None when the registry is now empty).
  */
 export type RemoveWorkspaceResult = { removedId: string; newActiveId: string | null }
+export type ResolveAuthorizationInputDto = { authorizationId: string; 
+/**
+ * `grant_once` | `grant_session` | `deny`.
+ */
+decision: string }
 export type ResolveOutcomeDto = { kind: string; rollbackHandle?: string | null; newTaskId?: string | null; detail?: string | null }
 export type RetrievalStrategyDto = "keyword" | "semantic" | "hybrid"
 /**
@@ -1943,6 +2029,11 @@ export type SessionSummaryDto = { id: string; title: string; kind: string }
 export type SkillCreationConfigDto = { enabled: boolean; format: SkillFormatDto }
 export type SkillFormatDto = "skill_md"
 export type SoulConfigDto = { content: string | null; maxLength: number }
+export type SourceProbeResultDto = { 
+/**
+ * `workspace_file` | `external_file` | `web_url` | `unavailable`.
+ */
+kind: string; workspaceId: string | null; directoryId: string | null; relativePath: string | null; normalizedTarget: string | null; available: boolean }
 export type StewardAttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
 export type StewardContextUsageDto = { sections: StewardContextUsageSectionDto[]; totalTokens: number; budgetTokens: number; pruneRecords: StewardPruneRecordDto[] }
 export type StewardContextUsageSectionDto = { 
