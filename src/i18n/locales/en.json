@@ -125,6 +125,7 @@
     "toolSideEffectsRetained": "⚠️ This segment contains tool calls. Tool side effects (files/shell/git) are retained and will not be undone.",
     "rolledBackN": "Rolled back {{count}} message(s)",
     "rollbackFailed": "Rollback failed",
+    "you": "You",
     "status": {
       "instantiating": {
         "1": "Awakening the slumbering soul of code…",
@@ -157,7 +158,8 @@
         "stop": "Stop",
         "waiting": "Waited {{seconds}}s",
         "current": "Current",
-        "initial": "🤔 Thinking…"
+        "initial": "🤔 Thinking…",
+        "stillWorking": "🛠 Still working…"
       },
       "toolCall": "🔧 Calling tool {{tool}}…",
       "toolCallWithTarget": "🔧 Calling tool {{tool}} ({{target}})…",

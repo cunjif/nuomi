@@ -2,12 +2,17 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ToolCard } from "./ToolCard";
 import { QuoteBlock } from "./QuoteBlock";
+import { SpeakerAside } from "./SpeakerAside";
 import type { ChatEntry } from "./useSessionStream";
 
 interface BubbleProps {
   entry: ChatEntry;
   /** True while tokens are still streaming into this bubble. */
   streaming?: boolean;
+  /** Bound Role Agent display name (conversation participantAgents[0]). */
+  agentName?: string | null;
+  /** Palette seed for the agent avatar (participantAgents[0].id). */
+  agentSeed?: string | null;
   /** Called when the user clicks the reply button on a message. */
   onQuote?: (seq: number) => void;
   /** Called when the user clicks a quote preview inside a message. */
@@ -22,8 +27,10 @@ function seqFromId(id: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** User bubbles right, assistant left; tool traffic renders as folded cards. */
-export function Bubble({ entry, streaming = false, onQuote, onQuoteClick, onRollback }: BubbleProps): ReactNode {
+/** User bubbles right (mirrored aside), assistant left; tool traffic
+ * renders as folded cards (no speaker column — they are traffic, not
+ * utterances). */
+export function Bubble({ entry, streaming = false, agentName = null, agentSeed = null, onQuote, onQuoteClick, onRollback }: BubbleProps): ReactNode {
   const { t } = useTranslation();
   if (entry.kind === "tool_call") {
     return <ToolCard label={t("chat.toolCall")} tool={entry.tool ?? ""} body={entry.argsJson ?? "{}"} />;
@@ -32,12 +39,13 @@ export function Bubble({ entry, streaming = false, onQuote, onQuoteClick, onRoll
     return <ToolCard label={t("chat.toolResult")} tool="" body={entry.content ?? ""} />;
   }
   const isUser = entry.role === "user";
-  const speaker = entry.roleName ?? entry.role ?? "assistant";
+  const speaker = entry.roleName ?? agentName ?? entry.role ?? "assistant";
   const seq = seqFromId(entry.id);
   const canReply = onQuote !== undefined && seq !== null;
   const canRollback = onRollback !== undefined && seq !== null && isUser;
   return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"} px-3 py-1`}>
+    <div className={`group flex gap-2 px-3 py-1 ${isUser ? "flex-row-reverse" : ""}`}>
+      <SpeakerAside name={isUser ? t("chat.you") : speaker} seed={agentSeed} isUser={isUser} />
       <div
         className={`relative max-w-[80%] rounded-lg px-3 py-2 text-sm ${
           isUser ? "bg-ink-accent/20 text-ink" : "bg-surface-raised text-ink"
@@ -73,7 +81,6 @@ export function Bubble({ entry, streaming = false, onQuote, onQuoteClick, onRoll
             onClick={onQuoteClick !== undefined ? () => onQuoteClick!(entry.quotedEventSeq!) : undefined}
           />
         )}
-        {entry.roleName !== undefined && <p className="mb-0.5 text-xs font-semibold text-ink-accent">{speaker}</p>}
         <p className="whitespace-pre-wrap break-words">
           {entry.text || t("chat.emptyResponse")}
           {streaming && (

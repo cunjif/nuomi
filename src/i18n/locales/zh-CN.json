@@ -125,6 +125,7 @@
     "toolSideEffectsRetained": "⚠️ 此回退段含工具调用，工具副作用（文件/shell/git）已保留且不会撤销。",
     "rolledBackN": "已回退 {{count}} 条消息",
     "rollbackFailed": "回退失败",
+    "you": "你",
     "status": {
       "instantiating": {
         "1": "正在唤醒沉睡的代码之魂……",
@@ -157,7 +158,8 @@
         "stop": "停止",
         "waiting": "已等待 {{seconds}} 秒",
         "current": "当前",
-        "initial": "🤔 正在思考…"
+        "initial": "🤔 正在思考…",
+        "stillWorking": "🛠 仍在处理中…"
       },
       "toolCall": "🔧 正在调用工具 {{tool}}…",
       "toolCallWithTarget": "🔧 正在调用工具 {{tool}}（{{target}}）…",

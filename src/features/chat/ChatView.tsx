@@ -13,6 +13,7 @@ import { Composer } from "../conversation/composer/Composer";
 import { QuotePreviewBar } from "../conversation/composer/QuotePreviewBar";
 import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
+import { SpeakerAside } from "./SpeakerAside";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
 import { ChatStatusPill } from "./ChatStatusPill";
 import { TurnNotice, type TurnNoticeKind } from "./TurnNotice";
@@ -148,6 +149,18 @@ export function ChatView(): ReactNode {
     queryFn: () => (sessionId !== null ? ipc.listMessageQueue(sessionId) : Promise.resolve([])),
     enabled: sessionId !== null,
   });
+
+  // Bound Role Agent for the speaker columns (same query key as
+  // ConversationView's convQuery → shared cache, no extra fetch).
+  const convQuery = useQuery({
+    queryKey: ["conversation", sessionId],
+    queryFn: () => (sessionId !== null ? ipc.getConversation(sessionId) : Promise.reject(new Error("no session"))),
+    enabled: sessionId !== null,
+    staleTime: 10_000,
+  });
+  const boundAgent = convQuery.data?.participantAgents[0] ?? null;
+  const agentName = boundAgent?.name || boundAgent?.id || null;
+  const agentSeed = boundAgent?.id ?? null;
   const enqueueMut = useMutation({
     mutationFn: (input: string) => {
       if (sessionId === null) return Promise.reject(new Error("no session"));
@@ -188,9 +201,42 @@ export function ChatView(): ReactNode {
       ? [...stream.entries, { id: "__final__", kind: "message", role: "assistant", text: finalText }]
       : stream.entries;
 
+  // The agent's turn row (SPEC 5.8.1 layout): speaker column on the left,
+  // status pill / terminal notice beside it — an in-flow row at the tail of
+  // the transcript. Living INSIDE the scroll container (MessageList footer)
+  // is what fixes the overlap: the row participates in the scroll layout,
+  // so it can never be pushed under the composer the way the old
+  // h-full-sibling pill was.
+  const turnRowVisible = submitMut.isPending || turnNotice !== null;
+  const turnFooter = turnRowVisible ? (
+    <div className="flex gap-2 px-3 py-1" data-testid="agent-turn-row">
+      <SpeakerAside name={agentName ?? "assistant"} seed={agentSeed} />
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-1 py-1">
+        <ChatStatusPill
+          isPending={submitMut.isPending}
+          hasStreamText={stream.hasStreamText}
+          hasError={submitMut.isError}
+          entries={stream.entries}
+          stopped={turnStopped}
+          onStop={stopTurn}
+          lastDeltaAt={stream.lastDeltaAt}
+        />
+        {turnNotice !== null && (
+          <div className="py-1" data-testid="turn-notice-slot">
+            <TurnNotice
+              kind={turnNotice.kind}
+              summary={turnNotice.summary}
+              onRetry={retryTurn}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="relative min-h-0 flex-1">
+      <div className="min-h-0 flex-1">
         <AsyncBoundary
           isLoading={stream.isLoading}
           error={stream.error}
@@ -204,6 +250,10 @@ export function ChatView(): ReactNode {
           <MessageList
             entries={entries}
             streamingId={submitMut.isPending ? STREAM_ENTRY_ID : null}
+            agentName={agentName}
+            agentSeed={agentSeed}
+            footer={turnFooter}
+            footerKey={turnRowVisible ? (turnNotice?.kind ?? "pending") : null}
             onQuote={(seq) => {
               const entry = entries.find((e) => e.id === `m${seq}`);
               if (entry) {
@@ -217,23 +267,6 @@ export function ChatView(): ReactNode {
             }}
             onRollback={(seq) => setRollbackTargetSeq(seq)}
           />
-          <ChatStatusPill
-            isPending={submitMut.isPending}
-            hasStreamText={stream.hasStreamText}
-            hasError={submitMut.isError}
-            entries={stream.entries}
-            stopped={turnStopped}
-            onStop={stopTurn}
-          />
-          {turnNotice !== null && (
-            <div className="py-1" data-testid="turn-notice-slot">
-              <TurnNotice
-                kind={turnNotice.kind}
-                summary={turnNotice.summary}
-                onRetry={retryTurn}
-              />
-            </div>
-          )}
         </AsyncBoundary>
       </div>
       <Composer

@@ -403,3 +403,102 @@ describe("ChatView — stop & failure notices (SPEC 5.8.1-5, 5.8.3)", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 });
+
+describe("ChatView — speaker-column layout (胶囊不再被输入框覆盖)", () => {
+  const INPUT_PLACEHOLDER = "输入消息，Enter 发送（Shift+Enter 换行）";
+  type SubmitResult = Awaited<ReturnType<typeof ipc.submitTask>>;
+  let resolveSubmit!: (value: SubmitResult) => void;
+
+  function setup(session: string): void {
+    seedConversation({ id: session, title: "t", createdAt: 1, updatedAt: 1 });
+    useUiStore.getState().selectSession(session);
+    vi.spyOn(ipc, "submitTask").mockImplementation(
+      () =>
+        new Promise<SubmitResult>((resolve) => {
+          resolveSubmit = resolve;
+        }) as unknown as ReturnType<typeof ipc.submitTask>,
+    );
+  }
+
+  async function submitViaComposer(text: string): Promise<void> {
+    const input = await screen.findByPlaceholderText(INPUT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useUiStore.setState({ selectedSessionId: null });
+  });
+
+  it("renders the status pill and agent turn row INSIDE the scroll container", async () => {
+    setup("cl1");
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+    await submitViaComposer("你好");
+
+    expect(await screen.findByTestId("agent-turn-row")).toBeTruthy();
+
+    // The overlap regression guard: the pill must live inside the message
+    // scroll container (in-flow), never as a sibling of it — a sibling of
+    // the h-full scroller is what got rendered under the composer.
+    const pill = await screen.findByTestId("status-pill");
+    const scroll = screen.getByTestId("message-scroll");
+    expect(scroll.contains(pill)).toBe(true);
+
+    // The agent turn row also sits in the scroll flow, after the user row.
+    expect(scroll.contains(screen.getByTestId("agent-turn-row"))).toBe(true);
+
+    await act(async () => {
+      resolveSubmit({ finalText: "好", steps: 1, truncated: false, sessionId: "cl1" });
+    });
+  });
+
+  it("renders the user speaker column (你) and agent name on messages", async () => {
+    seedConversation({ id: "cl2", title: "t", createdAt: 1, updatedAt: 1 });
+    tdState.events.set("cl2", [
+      { seq: 1, kind: "message", payload: { role: "user", content: "第一条" }, createdAt: 1 },
+      { seq: 2, kind: "message", payload: { role: "assistant", role_name: "后端专家", content: "回复" }, createdAt: 2 },
+    ]);
+    useUiStore.getState().selectSession("cl2");
+
+    renderWithProviders(<ChatView />);
+    expect(await screen.findByText("第一条")).toBeInTheDocument();
+
+    // User row carries the fixed 你 identity column; the assistant row
+    // carries the speaking agent's name.
+    expect(screen.getAllByText("你").length).toBeGreaterThan(0);
+    expect(screen.getByText("后端专家")).toBeInTheDocument();
+  });
+
+  it("returns the pill when the CLI stream stalls after its first line (idle watchdog)", async () => {
+    setup("cl3");
+    renderWithProviders(<ChatView />);
+    await screen.findByText(/暂无消息/);
+    await submitViaComposer("跑一下构建");
+
+    // CLI agent's first stdout line arrives immediately — inside the
+    // 300ms render window, killing the initial pill appearance.
+    act(() => {
+      emitTestEvent(sessionChannel("cl3"), {
+        type: "session.delta",
+        sessionId: "cl3",
+        payload: { sessionId: "cl3", text: "ok" },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("ok")).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("status-pill")).toBeNull(), { timeout: 1500 });
+
+    // Then the CLI agent falls silent (framework boot / tool run). The
+    // idle watchdog must bring the pill back with the still-working copy.
+    await waitFor(
+      () => expect(screen.getByTestId("status-pill")).toBeTruthy(),
+      { timeout: 6000 },
+    );
+    expect(screen.getByText(/仍在处理中/)).toBeTruthy();
+
+    await act(async () => {
+      resolveSubmit({ finalText: "done", steps: 1, truncated: false, sessionId: "cl3" });
+    });
+  });
+});

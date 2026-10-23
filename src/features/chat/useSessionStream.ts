@@ -79,6 +79,9 @@ export function useSessionStream(sessionId: string | null): {
   hasLiveActivity: () => boolean;
   /** Whether any stream text has arrived (first-token indicator). */
   hasStreamText: boolean;
+  /** Epoch-ms of the most recent session.delta — stream-liveness signal
+   *  for the status pill's idle watchdog (CLI stalls). */
+  lastDeltaAt: number | null;
   clearLive: () => void;
   /** Optimistic user bubble shown before the persisted round-trip lands. */
   addOptimistic: (text: string) => void;
@@ -101,6 +104,8 @@ export function useSessionStream(sessionId: string | null): {
   const [optimisticText, setOptimisticText] = useState<string | null>(null);
   const [groupStream, setGroupStream] = useState<GroupStream | null>(null);
   const [activeSpeaker, setActiveSpeaker] = useState<ActiveSpeaker | null>(null);
+  /** Epoch-ms of the most recent session.delta (single + group streams). */
+  const [lastDeltaAt, setLastDeltaAt] = useState<number | null>(null);
   /** Highest persisted message seq seen live (drives turn-transition UI). */
   const [lastMessageSeq, setLastMessageSeq] = useState(0);
   const liveActivityRef = useRef(false);
@@ -139,6 +144,7 @@ export function useSessionStream(sessionId: string | null): {
         if (p === null) continue;
         if (ev.type === "session.delta") {
           liveActivityRef.current = true;
+          setLastDeltaAt(Date.now());
           const deltaRoleName = asString(p.roleName);
           if (deltaRoleName !== "") {
             // Group-chat delta (SPEC 5.8.1-4): accumulate per agent; a new
@@ -247,6 +253,7 @@ export function useSessionStream(sessionId: string | null): {
     setGroupStream(null);
     setActiveSpeaker(null);
     setLastMessageSeq(0);
+    setLastDeltaAt(null);
   }, [flow, sessionId]);
 
   const entries = useMemo(() => {
@@ -319,6 +326,7 @@ export function useSessionStream(sessionId: string | null): {
     retry: () => void historyQuery.refetch(),
     hasLiveActivity: () => liveActivityRef.current,
     hasStreamText: streamText.length > 0,
+    lastDeltaAt,
     clearLive,
     addOptimistic,
     clearOptimistic,

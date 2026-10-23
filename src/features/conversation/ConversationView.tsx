@@ -1,30 +1,31 @@
 import type { ReactNode } from "react";
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "../../lib/ipc/client";
 import { useUiStore } from "../../lib/store/uiStore";
-import { WorkspacePathBar } from "./WorkspacePathBar";
 import { AgentSidebar } from "./sidebar/AgentSidebar";
 import { ChatView } from "../chat/ChatView";
 import { GroupConversationView } from "./group/GroupConversationView";
 import { BackgroundConversationView } from "./background/BackgroundConversationView";
 import { ScheduledConversationView } from "./scheduled/ScheduledConversationView";
 import { isRoleReady } from "../../lib/conversation/roleReady";
-import { workspaceDisplayPath } from "./workspaceDisplayPath";
-import { WorkspaceListDialog } from "../shell/WorkspaceListDialog";
+import { Icon } from "../../components/ui/Icon/Icon";
 
 /**
  * Top-level conversation surface. Fetches the current conversation and
  * dispatches to a kind-specific view (chat / group / background / scheduled).
+ *
+ * No path band below the tab strip: the workspace identity shows in the
+ * shell chrome (tab bar scope, workspace bar), so the transcript starts
+ * right under the nav tabs. Workspace switching lives in the EditorArea
+ * toolbar / EmptyStateGuide / workspace bar entries.
  */
 export function ConversationView(): ReactNode {
   const { t } = useTranslation();
   const sessionId = useUiStore((s) => s.selectedSessionId);
   const setView = useUiStore((s) => s.setView);
-  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [wsListOpen, setWsListOpen] = useState(false);
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],
@@ -38,19 +39,6 @@ export function ConversationView(): ReactNode {
     enabled: sessionId !== null,
     staleTime: 10_000,
   });
-
-  const workspacesQuery = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: () => ipc.listWorkspaces(),
-    staleTime: 10_000,
-  });
-  const workspaceRootPath = useMemo(() => {
-    if (!activeWorkspaceId) return null;
-    const ws = workspacesQuery.data?.find((w) => w.id === activeWorkspaceId);
-    // ADR-0021 兼容读取：v2 工作区 rootPath 是 uuid 占位，混合策略见
-    // workspaceDisplayPath（单可用目录显示路径，多目录显示 labelFull）。
-    return ws ? workspaceDisplayPath(ws) : null;
-  }, [activeWorkspaceId, workspacesQuery.data]);
 
   // No Role Agent configured → conversation panel is unavailable.
   const roleAgents = (rolesQuery.data ?? []).filter(isRoleReady);
@@ -82,14 +70,21 @@ export function ConversationView(): ReactNode {
 
   return (
     <div className="flex h-full flex-col">
-      <WorkspacePathBar
-        rootPath={workspaceRootPath}
-        conversation={convQuery.data ?? null}
-        onOpenWorkspaceList={() => setWsListOpen(true)}
-        onAgentSidebarOpen={() => setSidebarOpen(true)}
-      />
-      <div className="relative min-h-0 flex-1">
-        {renderKindView(kind)}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {convQuery.data && (
+          <div className="flex shrink-0 justify-end px-3 pt-1 pb-0">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="flex size-6 items-center justify-center rounded text-ink-muted hover:bg-surface-overlay hover:text-ink-accent focus-visible:ring-2 focus-visible:ring-ink-accent"
+              aria-label={t("conversation.agentSidebar.open")}
+              title={t("conversation.agentSidebar.open")}
+            >
+              <Icon name="more" size={14} />
+            </button>
+          </div>
+        )}
+        <div className="min-h-0 flex-1">{renderKindView(kind)}</div>
         {convQuery.data && (
           <AgentSidebar
             conversation={convQuery.data}
@@ -99,7 +94,6 @@ export function ConversationView(): ReactNode {
           />
         )}
       </div>
-      <WorkspaceListDialog open={wsListOpen} onClose={() => setWsListOpen(false)} />
     </div>
   );
 }

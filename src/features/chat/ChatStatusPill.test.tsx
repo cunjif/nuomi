@@ -129,6 +129,66 @@ describe("ChatStatusPill — single-chat signal wiring", () => {
     expect(screen.queryByTestId("status-pill")).toBeNull();
   });
 
+  it("returns while the CLI stream stalls after an early first line (idle watchdog)", () => {
+    // CLI agents emit their first stdout line fast — possibly inside the
+    // 300ms render window — then fall silent for seconds while the agent
+    // framework boots or tools run. The pill must come back during the
+    // stall instead of staying dead for the whole turn.
+    const h = renderPill({
+      isPending: true,
+      hasStreamText: false,
+      hasError: false,
+      entries: [],
+      lastDeltaAt: null,
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    h.rerender({
+      isPending: true,
+      hasStreamText: true,
+      hasError: false,
+      entries: [],
+      lastDeltaAt: START + 200,
+    });
+    // Advance in steps: each act() flushes the liveness-tick effects, the
+    // way real timers would (one big jump defers the effects past the
+    // newly scheduled show timer).
+    for (let t = 0; t < 3_200; t += 400) {
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+    }
+    expect(screen.getByTestId("status-pill")).toBeTruthy();
+    expect(screen.getByText("🛠 仍在处理中…")).toBeTruthy();
+  });
+
+  it("hides again when fresh deltas resume after the idle return", () => {
+    const h = renderPill({
+      isPending: true,
+      hasStreamText: false,
+      hasError: false,
+      entries: [],
+      lastDeltaAt: null,
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByTestId("status-pill")).toBeTruthy();
+    // Delta burst → active stream → the pill fades out within the idle window.
+    h.rerender({
+      isPending: true,
+      hasStreamText: true,
+      hasError: false,
+      entries: [],
+      lastDeltaAt: START + 400,
+    });
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(screen.queryByTestId("status-pill")).toBeNull();
+  });
+
   it("does not reappear in the same turn once the reply started (latch)", () => {
     const h = renderPill({ isPending: true, hasStreamText: false, hasError: false, entries: [] });
     act(() => {
