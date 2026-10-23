@@ -28,6 +28,11 @@ pub enum OptimizeError {
     Timeout,
     /// Provider call failed, steward unbound, or empty reply.
     Failed(String),
+    /// chat_rich_bind 5.6.1-3 (D9): no steward model bound — the frontend
+    /// maps this stable code to the "bind the steward agent first" nudge.
+    /// Distinct from `Failed` so the generic failure toast never masks the
+    /// actionable setup guidance.
+    StewardUnbound,
 }
 
 impl std::fmt::Display for OptimizeError {
@@ -35,6 +40,7 @@ impl std::fmt::Display for OptimizeError {
         match self {
             Self::Timeout => write!(f, "提示词优化超时，请重试"),
             Self::Failed(msg) => write!(f, "提示词优化失败：{msg}"),
+            Self::StewardUnbound => write!(f, "管家未绑定模型服务，请先在设置中绑定"),
         }
     }
 }

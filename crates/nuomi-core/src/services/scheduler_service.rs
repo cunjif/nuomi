@@ -346,7 +346,9 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                             // scheduled session can be traced back later.
                             Some(s.id.as_str()),
                             "__migrated__",
-                        )?;
+                            None,
+                        )
+                        .map_err(|e| SchedulerError::from(e.into_store_error()))?;
                         let new_sid = session.id.clone();
                         let active_ws = repos::workspace_open_state::find_focused(conn)?
                             .map(|r| r.workspace_id)

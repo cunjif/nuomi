@@ -26,6 +26,7 @@ pub struct ResolvedAgent {
 /// `participants` is a slice of `(AgentRefKind, id)` pairs. Each is written
 /// to `conversation_participants`. Pass an empty slice for the default
 /// resolution chain (materialized on first resolve).
+#[allow(clippy::too_many_arguments)]
 pub fn create_conversation(
     conn: &Connection,
     kind: ConversationKind,
@@ -34,7 +35,8 @@ pub fn create_conversation(
     team_id: Option<&str>,
     schedule_id: Option<&str>,
     workspace_id: &str,
-) -> Result<Session, StoreError> {
+    work_directory_id: Option<&str>,
+) -> Result<Session, crate::store::repos::sessions::BindingError> {
     let now = now_ms();
     let session = Session {
         id: crate::domain::new_id(),
@@ -53,6 +55,12 @@ pub fn create_conversation(
     };
     sessions::insert(conn, &session)?;
     sessions::set_workspace_id(conn, &session.id, workspace_id)?;
+    // chat_rich_bind 6.4: optional work-directory binding — validated in
+    // the same flow (directory must belong to this workspace and be
+    // mounted); `session.invalid_directory` surfaces to the caller.
+    if let Some(directory_id) = work_directory_id {
+        sessions::set_work_directory(conn, &session.id, directory_id)?;
+    }
     for (kind, id) in participants {
         sessions::add_participant(conn, &session.id, *kind, id, now)?;
     }
@@ -216,6 +224,89 @@ mod tests {
     }
 
     #[test]
+    fn create_conversation_with_work_directory_binding() {
+        let conn = db();
+        let ws = crate::store::repos::workspaces::WorkspaceEntry {
+            id: "ws-1".into(),
+            root_path: "C:/bind/root".into(),
+            color_tag: "paper-yellow".into(),
+            created_at: 1,
+            is_active: false,
+            is_pinned: false,
+        };
+        crate::store::repos::workspaces::insert(&conn, &ws).unwrap();
+        crate::store::repos::work_directories::add(&conn, "ws-1", "C:/bind/root", "root").unwrap();
+        let dir = crate::store::repos::work_directories::find_by_path(&conn, "C:/bind/root")
+            .unwrap()
+            .unwrap();
+
+        // 携带合法目录：绑定落库。
+        let session = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "bound",
+            &[],
+            None,
+            None,
+            "ws-1",
+            Some(&dir.id),
+        )
+        .unwrap();
+        let binding = sessions::get_work_directory_binding(&conn, &session.id)
+            .unwrap()
+            .unwrap();
+        assert!(binding.available);
+        assert_eq!(binding.directory.unwrap().workspace_id, "ws-1");
+
+        // 异工作区目录：拒绝（session.invalid_directory 的来源）。
+        crate::store::repos::workspaces::insert(
+            &conn,
+            &crate::store::repos::workspaces::WorkspaceEntry {
+                id: "ws-2".into(),
+                root_path: "C:/bind/other".into(),
+                color_tag: "paper-blue".into(),
+                created_at: 2,
+                is_active: false,
+                is_pinned: false,
+            },
+        )
+        .unwrap();
+        let err = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "bad",
+            &[],
+            None,
+            None,
+            "ws-2",
+            Some(&dir.id),
+        );
+        assert!(
+            matches!(
+                err,
+                Err(crate::store::repos::sessions::BindingError::InvalidDirectory { .. })
+            ),
+            "directory from another workspace must be rejected"
+        );
+
+        // 不传目录：行为与现状一致（未绑定）。
+        let legacy = create_conversation(
+            &conn,
+            ConversationKind::Chat,
+            "legacy",
+            &[],
+            None,
+            None,
+            "ws-1",
+            None,
+        )
+        .unwrap();
+        assert!(sessions::get_work_directory_binding(&conn, &legacy.id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn create_chat_conversation_defaults() {
         let conn = db();
         let session = create_conversation(
@@ -226,6 +317,7 @@ mod tests {
             None,
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         assert_eq!(session.kind, ConversationKind::Chat);
@@ -245,6 +337,7 @@ mod tests {
             Some("team-1"),
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         assert_eq!(session.kind, ConversationKind::Group);
@@ -262,6 +355,7 @@ mod tests {
             None,
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         let parts = sessions::list_participants(&conn, &session.id).unwrap();
@@ -280,6 +374,7 @@ mod tests {
             None,
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         let resolved = resolve_participants(&conn, &session.id).unwrap();
@@ -297,6 +392,7 @@ mod tests {
             None,
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         // role-1 doesn't exist in db → resolve_ref returns None → filtered out.

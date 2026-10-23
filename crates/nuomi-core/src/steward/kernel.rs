@@ -93,7 +93,7 @@ const BINDING_GUIDANCE: &str = "管家尚未绑定可用的模型服务，暂时
 pub(crate) const HISTORY_LIMIT: u32 = 100;
 
 /// The steward's bound model service, resolved from the steward main role.
-pub(crate) struct StewardBinding {
+pub struct StewardBinding {
     pub(crate) provider: Arc<dyn LlmProvider>,
     pub(crate) model: String,
     /// SOUL persona — injected as the first paragraph of the system prompt.
@@ -108,7 +108,7 @@ pub(crate) struct StewardBinding {
 ///
 /// `None` (unbound or dangling binding) means the caller should return the
 /// binding guidance instead of running the LLM loop — never a clarify reply.
-pub(crate) async fn resolve_steward_binding(
+pub async fn resolve_steward_binding(
     db_path: &Arc<str>,
     secrets: Arc<dyn SecretStore>,
 ) -> Result<Option<StewardBinding>, StewardError> {

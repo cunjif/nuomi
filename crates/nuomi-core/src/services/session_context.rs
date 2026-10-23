@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tokio::task::spawn_blocking;
 
 use crate::providers::SecretStore;
-use crate::services::{materialize_single_role, resolve_participants, SingleRoleContext};
+use crate::services::resolve_participants;
 use crate::steward::context_usage as steward_usage;
 use crate::steward::llm_loop::CONTEXT_BUDGET_TOKENS;
 use crate::steward::prompt_optimizer::{self, OptimizeError};
@@ -123,7 +123,7 @@ fn classify_session(
 pub async fn optimize_session_prompt(
     db_path: Arc<str>,
     secrets: Arc<dyn SecretStore>,
-    cwd: Option<PathBuf>,
+    _cwd: Option<PathBuf>,
     session_id: &str,
     draft: &str,
 ) -> Result<String, OptimizeError> {
@@ -147,18 +147,20 @@ pub async fn optimize_session_prompt(
         SessionKind::Steward => {
             prompt_optimizer::optimize_prompt(db_path, secrets, session_id, draft).await
         }
-        SessionKind::Ordinary(resolved) => {
-            let ctx = materialize_single_role(db_path, secrets, cwd, resolved.as_ref())
+        SessionKind::Ordinary(_) => {
+            // chat_rich_bind 5.6.1-2 (D9): ordinary sessions no longer
+            // materialize the session's own provider — the steward's bound
+            // model is the single optimization source for BOTH session
+            // kinds. Unbound surfaces the dedicated `StewardUnbound` error
+            // (IPC `prompt.steward_unbound`) so the frontend can route the
+            // user to the steward-binding settings instead of a generic
+            // failure toast.
+            let binding = crate::steward::kernel::resolve_steward_binding(&db_path, secrets)
                 .await
-                .map_err(|e| OptimizeError::Failed(e.to_string()))?;
-            match ctx {
-                SingleRoleContext::Materialized {
-                    provider, model, ..
-                } => prompt_optimizer::optimize_draft_with_provider(provider, &model, draft).await,
-                SingleRoleContext::EnvFallback => {
-                    Err(OptimizeError::Failed("会话未绑定模型服务，无法优化".into()))
-                }
-            }
+                .map_err(|e| OptimizeError::Failed(e.to_string()))?
+                .ok_or(OptimizeError::StewardUnbound)?;
+            prompt_optimizer::optimize_draft_with_provider(binding.provider, &binding.model, draft)
+                .await
         }
     }
 }
@@ -320,6 +322,7 @@ mod tests {
             None,
             None,
             "__migrated__",
+            None,
         )
         .unwrap();
         session.id
@@ -486,10 +489,10 @@ mod tests {
         let err = optimize_session_prompt(dbp, secrets, None, &sid, "帮我看看")
             .await
             .unwrap_err();
-        match err {
-            OptimizeError::Failed(msg) => assert!(msg.contains("未绑定")),
-            other => panic!("expected Failed, got {other:?}"),
-        }
+        // chat_rich_bind 5.6.1-2 (D9): the steward's bound model is the
+        // single optimization source; no binding → the dedicated
+        // StewardUnbound code (IPC `prompt.steward_unbound`).
+        assert!(matches!(err, OptimizeError::StewardUnbound));
     }
 
     #[tokio::test]
