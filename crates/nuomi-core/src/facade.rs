@@ -31,6 +31,7 @@ use crate::store::{migrations, repos, Db};
 use crate::{CoreError, CoreResult};
 
 use crate::services::RoleOverlay;
+use rusqlite::OptionalExtension;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are nuomi, a helpful agent.";
 
@@ -601,6 +602,21 @@ impl NuomiKernel {
             Some(token) => engine.with_cancel(token),
             None => engine,
         };
+        // Authorization gate (chat_rich_bind 5.4, D4): attach for
+        // native-provider Role turns (role-attributed requests). CLI-bound
+        // turns never dispatch HOST file tools, so the gate stays inert
+        // there by construction.
+        let engine = match &overlay_role_id {
+            Some(role_id) => engine.with_authorization(Arc::new(
+                crate::services::authorization::AuthorizationGate::new(
+                    self.db_path.clone(),
+                    crate::services::authorization::global_hub().clone(),
+                    session_id.to_string(),
+                    role_id.clone(),
+                ),
+            )),
+            None => engine,
+        };
 
         // Derive the session title from the user's task text BEFORE running
         // the Loop Engine, so the UI can show the new title immediately
@@ -642,7 +658,13 @@ impl NuomiKernel {
             }
         }
         let appended = self
-            .persist_transcript(session_id, &fresh, &auto_title)
+            .persist_transcript(
+                session_id,
+                &fresh,
+                &auto_title,
+                result.sources.clone(),
+                overlay_role_id.as_deref(),
+            )
             .await?;
 
         // Publish what was just persisted (iron rule: persist first, then
@@ -785,15 +807,78 @@ impl NuomiKernel {
         session_id: &str,
         transcript: &[ChatMessage],
         auto_title: &str,
+        sources: Vec<crate::services::source_collector::SourceEntry>,
+        role_id: Option<&str>,
     ) -> CoreResult<Vec<EventRecord>> {
         let path = self.db_path.clone();
         let sid = session_id.to_string();
         let messages = transcript.to_vec();
         let auto_title = auto_title.to_string();
+        let role_id = role_id.map(str::to_string);
         tokio::task::spawn_blocking(move || -> Result<Vec<EventRecord>, CoreError> {
             let db = Db::open(&path)?;
             let conn = &db.0;
             let now = now_ms();
+            // Complete the agent identity on every collected entry and derive
+            // the CLI-agent identity fallback (spec 5.2.1-4): a turn with no
+            // host-tool evidence on a session whose participants are ALL CLI
+            // agents attributes the answer to those agents' profiles.
+            let mut sources = sources;
+            let sql_err = |e: rusqlite::Error| CoreError::from(crate::store::StoreError::Sqlite(e));
+            if !sources.is_empty() {
+                let (agent_id, agent_name) = match role_id.as_deref() {
+                    Some(rid) => {
+                        let name = conn
+                            .query_row("SELECT name FROM roles WHERE id = ?1", [&rid], |r| {
+                                r.get::<_, String>(0)
+                            })
+                            .optional()
+                            .map_err(sql_err)?
+                            .unwrap_or_else(|| rid.to_string());
+                        (rid.to_string(), name)
+                    }
+                    None => (String::new(), String::new()),
+                };
+                for entry in sources.iter_mut() {
+                    if entry.agent_id.is_empty() {
+                        entry.agent_id = agent_id.clone();
+                        entry.agent_name = agent_name.clone();
+                    }
+                }
+            } else {
+                let cli_names: Vec<(String, String)> = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT p.agent_ref_id, a.name
+                             FROM conversation_participants p
+                             JOIN agent_profiles a ON a.id = p.agent_ref_id
+                             WHERE p.session_id = ?1 AND p.agent_kind = 'cli'",
+                        )
+                        .map_err(sql_err)?;
+                    let rows = stmt
+                        .query_map([&sid], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        })
+                        .map_err(sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>().map_err(sql_err)?
+                };
+                let has_native: bool = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM conversation_participants
+                         WHERE session_id = ?1 AND agent_kind <> 'cli')",
+                        [&sid],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .map_err(sql_err)?;
+                if !cli_names.is_empty() && !has_native {
+                    sources = cli_names
+                        .iter()
+                        .map(|(id, name)| {
+                            crate::services::source_collector::SourceEntry::cli_agent(id, name)
+                        })
+                        .collect();
+                }
+            }
             let mut appended = Vec::new();
             for m in &messages {
                 match m.role {
@@ -820,13 +905,12 @@ impl NuomiKernel {
                                 now,
                             )?);
                         }
+                        let mut payload = json!({ "role": "assistant", "content": m.content });
+                        if !sources.is_empty() {
+                            payload["sources"] = json!(sources);
+                        }
                         appended.push(repos::events::append(
-                            conn,
-                            "session",
-                            &sid,
-                            "message",
-                            &json!({ "role": "assistant", "content": m.content }),
-                            now,
+                            conn, "session", &sid, "message", &payload, now,
                         )?);
                     }
                     MessageRole::Tool => {
@@ -1427,6 +1511,154 @@ mod tests {
         assert_ne!(
             rows[1].seq as u64, 1,
             "persisted seq must not be confused with the live delta ordinal"
+        );
+    }
+
+    // ---- chat_rich_bind: message payload.sources injection (spec 5.2)
+
+    use crate::services::source_collector::SourceEntry;
+
+    fn collected_source() -> Vec<SourceEntry> {
+        vec![SourceEntry {
+            kind: "workspace_file".into(),
+            target: "C:\\proj\\src\\main.rs".into(),
+            label: "main.rs".into(),
+            agent_id: String::new(),
+            agent_name: String::new(),
+        }]
+    }
+
+    #[tokio::test]
+    async fn persist_injects_sources_with_role_identity_on_assistant_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("k.db");
+        let kernel = NuomiKernel::boot(fake_config(db_path.clone()))
+            .await
+            .unwrap();
+        let sid = kernel.ensure_session_id().await.unwrap();
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO roles (id, name, created_at, updated_at) VALUES ('role_1', 'Researcher', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let appended = kernel
+            .persist_transcript(
+                &sid,
+                &[ChatMessage::assistant("answer with evidence")],
+                "",
+                collected_source(),
+                Some("role_1"),
+            )
+            .await
+            .unwrap();
+
+        let events = repos::events::list_by_aggregate(&conn, "session", &sid, None).unwrap();
+        let assistant = events
+            .iter()
+            .find(|e| e.kind == "message" && e.payload["role"] == "assistant")
+            .unwrap();
+        let sources = assistant.payload["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0]["target"], "C:\\proj\\src\\main.rs");
+        assert_eq!(sources[0]["agent_id"], "role_1");
+        assert_eq!(sources[0]["agent_name"], "Researcher");
+        // 与消息同事务落库：live 事件的 body 即 payload（含 sources）。
+        let live_body = appended
+            .last()
+            .map(|r| r.payload.clone())
+            .unwrap_or_default();
+        assert_eq!(live_body["sources"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn persist_attaches_cli_agent_identity_for_pure_cli_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("k.db");
+        let kernel = NuomiKernel::boot(fake_config(db_path.clone()))
+            .await
+            .unwrap();
+        let sid = kernel.ensure_session_id().await.unwrap();
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO agent_profiles (id, name, adapter, flavor, command, enabled, created_at, updated_at)
+             VALUES ('ap-1', 'Codex CLI', 'cli', 'plain', 'codex', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversation_participants (session_id, agent_kind, agent_ref_id, joined_at)
+             VALUES (?1, 'cli', 'ap-1', 1)",
+            [&sid],
+        )
+        .unwrap();
+
+        kernel
+            .persist_transcript(
+                &sid,
+                &[ChatMessage::assistant("cli answer")],
+                "",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let events = repos::events::list_by_aggregate(&conn, "session", &sid, None).unwrap();
+        let assistant = events
+            .iter()
+            .find(|e| e.kind == "message" && e.payload["role"] == "assistant")
+            .unwrap();
+        let sources = assistant.payload["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0]["kind"], "cli_agent");
+        assert_eq!(sources[0]["label"], "Codex CLI");
+        assert_eq!(sources[0]["agent_id"], "ap-1");
+    }
+
+    #[tokio::test]
+    async fn persist_skips_cli_identity_for_native_or_mixed_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("k.db");
+        let kernel = NuomiKernel::boot(fake_config(db_path.clone()))
+            .await
+            .unwrap();
+        let sid = kernel.ensure_session_id().await.unwrap();
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        // Mixed participants (cli + role): no attribution without evidence.
+        conn.execute(
+            "INSERT INTO agent_profiles (id, name, adapter, flavor, command, enabled, created_at, updated_at)
+             VALUES ('ap-1', 'Codex CLI', 'cli', 'plain', 'codex', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversation_participants (session_id, agent_kind, agent_ref_id, joined_at)
+             VALUES (?1, 'cli', 'ap-1', 1), (?1, 'role', 'role_9', 2)",
+            [&sid],
+        )
+        .unwrap();
+
+        kernel
+            .persist_transcript(
+                &sid,
+                &[ChatMessage::assistant("mixed")],
+                "",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let events = repos::events::list_by_aggregate(&conn, "session", &sid, None).unwrap();
+        let assistant = events
+            .iter()
+            .find(|e| e.kind == "message" && e.payload["role"] == "assistant")
+            .unwrap();
+        assert!(
+            assistant.payload.get("sources").is_none(),
+            "mixed session without evidence gets no cli_agent attribution"
         );
     }
 }

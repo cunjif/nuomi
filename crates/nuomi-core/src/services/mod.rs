@@ -3,6 +3,7 @@
 //! Each service owns its own `thiserror` error type.
 
 pub mod ai_commit_service;
+pub mod authorization;
 pub mod capability_router;
 pub mod codebase_memory_migrator;
 pub mod conversation_service;
@@ -17,6 +18,8 @@ pub mod role_director;
 pub mod scheduler_service;
 pub mod session_context;
 pub mod single_role_materializer;
+pub mod source_collector;
+pub mod source_probe;
 pub mod team_former;
 pub mod team_runner;
 pub mod workspace;

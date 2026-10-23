@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::harness::{Context, Event, HarnessError, Plugin};
 use crate::providers::{ChatMessage, ChatRequest, LlmProvider, StreamEvent};
+use crate::services::authorization::{AuthorizationGate, GateOutcome};
+use crate::services::source_collector::{self, SourceEntry};
 use async_trait::async_trait;
 
 use super::hooks::{HookDecision, HookPoint, HookRegistry};
@@ -81,6 +83,10 @@ pub struct LoopRunResult {
     /// CLI Agent 自身会话 id（ADR 0012 D8），从最后一轮 provider 响应提取。
     /// 非 CLI provider 为 None。用于持久化到 session_cli_handles。
     pub cli_session_id: Option<String>,
+    /// 本轮宿主 read/检索类工具的来源证据（chat_rich_bind spec 5.2，D1）。
+    /// agent 身份字段在持久化阶段补齐。CLI 会话（宿主无工具循环）为空，
+    /// 由持久化阶段按 participants 注入 cli_agent 身份条目。
+    pub sources: Vec<SourceEntry>,
 }
 
 /// Streaming delta observer (e.g. CLI stdout printer).
@@ -107,6 +113,22 @@ pub struct LoopEngine {
     /// exposed to the LLM; empty = unrestricted (matches orchestrator
     /// convention).
     tool_allowlist: Vec<String>,
+    /// Source evidence collected from host tool calls this run (spec 5.2).
+    /// Shared so hook/denied paths and the normal path all drain it into
+    /// [`LoopRunResult::sources`] at every return point.
+    sources: Arc<Mutex<Vec<SourceEntry>>>,
+    /// File-operation authorization gate (chat_rich_bind spec 5.4, D4:
+    /// native-provider HOST tools only). `None` = ungated (legacy callers).
+    authorization: Option<Arc<AuthorizationGate>>,
+}
+
+/// Drains the collected source evidence (poison-tolerant, like drain_queue).
+fn drain_sources(sources: &Mutex<Vec<SourceEntry>>) -> Vec<SourceEntry> {
+    std::mem::take(
+        &mut *sources
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
 }
 
 /// Recovers the queue even if a panicking writer poisoned the mutex.
@@ -132,7 +154,16 @@ impl LoopEngine {
             cancel: None,
             system_prompt_override: None,
             tool_allowlist: Vec::new(),
+            sources: Arc::new(Mutex::new(Vec::new())),
+            authorization: None,
         }
+    }
+
+    /// Attaches the file-operation authorization gate (chat_rich_bind
+    /// 5.4): gated tools pause on pending user decisions before executing.
+    pub fn with_authorization(mut self, gate: Arc<AuthorizationGate>) -> Self {
+        self.authorization = Some(gate);
+        self
     }
 
     /// Sets a role-level system prompt override (D4). When `Some`, replaces
@@ -325,6 +356,7 @@ impl LoopEngine {
                     steps,
                     truncated: false,
                     cli_session_id: last_cli_session_id,
+                    sources: drain_sources(&self.sources),
                 });
             }
             steps += 1;
@@ -389,6 +421,7 @@ impl LoopEngine {
                         steps,
                         truncated: false,
                         cli_session_id: last_cli_session_id,
+                        sources: drain_sources(&self.sources),
                     });
                 }
                 continue;
@@ -424,13 +457,46 @@ impl LoopEngine {
                     &call.arguments,
                 ));
 
+                // Authorization gate (chat_rich_bind 5.4, D4): HOST write/
+                // delete tools (and out-of-bound reads, D7) pause on a
+                // pending user decision BEFORE executing.
+                if denied.is_none() {
+                    if let Some(gate) = &self.authorization {
+                        match gate.authorize(&call.name, &call.arguments).await {
+                            Ok(GateOutcome::Allow) | Ok(GateOutcome::Grant) => {}
+                            Ok(GateOutcome::Deny { reason }) => {
+                                denied = Some(reason);
+                            }
+                            Err(authz_error) => {
+                                // Authorization infrastructure failure: deny
+                                // closed (fail-safe — never execute ungated).
+                                denied = Some(format!("[authorization unavailable] {authz_error}"));
+                            }
+                        }
+                    }
+                }
+
                 let result = match denied {
-                    Some(reason) => format!("[denied by hook] {reason}"),
+                    Some(ref reason) => format!("[denied by hook] {reason}"),
                     None => match tools.execute(&call.name, &call.arguments).await {
                         Ok(out) => out,
                         Err(e) => format!("[tool error] {e}"),
                     },
                 };
+                // Source evidence: only calls that actually executed count
+                // (a denied call never touched the file/URL).
+                if denied.is_none() {
+                    let mut collected = self
+                        .sources
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    source_collector::collect_from_tool_call(
+                        &call.name,
+                        &call.arguments,
+                        &result,
+                        &mut collected,
+                    );
+                }
                 if let Some(hook_reg) = hooks {
                     let payload = serde_json::json!({ "tool": call.name, "result": result });
                     let decision = hook_reg.run(HookPoint::PostToolCall, &payload).await;
@@ -460,6 +526,7 @@ impl LoopEngine {
             steps,
             truncated: true,
             cli_session_id: last_cli_session_id,
+            sources: drain_sources(&self.sources),
         })
     }
 }
