@@ -13,6 +13,7 @@ import { ExtensionsPanel } from "../../lib/editor-ext/ExtensionsPanel";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { MonacoTab } from "./MonacoTab";
+import { TempFileTab } from "./TempFileTab";
 import { WorkspaceBottomBar } from "./WorkspaceBottomBar";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
 import { useUiStore } from "../../lib/store/uiStore";
@@ -84,6 +85,10 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
   const { t } = useTranslation();
   const openFiles = useUiStore((s) => s.editorByWorkspace[workspaceId]?.openFiles ?? []);
   const activeFile = useUiStore((s) => s.editorByWorkspace[workspaceId]?.activeFile ?? null);
+  // chat_rich_bind spec 5.2.1-6: the one-shot external-file temp tab takes
+  // over the editor column while it is open (memory-only, destroyed on
+  // workspace switch).
+  const tempFileTab = useUiStore((s) => s.tempFileTab);
 
   return (
     <section aria-label={t("files.treeLabel")} className="flex h-full min-h-0 flex-1 flex-col bg-surface-raised">
@@ -95,7 +100,9 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
         the column itself never scrolls (Monaco owns its own viewport).
         Overlays (extension floating panels) anchor here. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {activeFile !== null && openFiles.includes(activeFile) ? (
+          {tempFileTab !== null ? (
+            <TempFileTab />
+          ) : activeFile !== null && openFiles.includes(activeFile) ? (
             <MonacoTab key={`${workspaceId}:${activeFile}`} path={activeFile} workspaceId={workspaceId} />
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-ink-muted">

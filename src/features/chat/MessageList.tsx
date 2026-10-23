@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { Bubble } from "./Bubble";
+import { AuthorizationBubble } from "./AuthorizationBubble";
+import type { AuthorizationRequest } from "./useAuthorizationStream";
 import type { ChatEntry } from "./useSessionStream";
 
 /** Top padding of the scroll container. The Agent-detail `···` button is
@@ -32,12 +34,19 @@ interface MessageListProps {
   onQuoteClick?: (seq: number) => void;
   /** Called when the user clicks "rollback to here" on a user message. */
   onRollback?: (seq: number) => void;
+  /** Authorization requests rendered in the flow after the messages
+   * (chat_rich_bind 5.4.1-3a — in-bubble authorization). */
+  authorizations?: AuthorizationRequest[];
+  /** Controlled clock for the timeout-reminder derivation (tests). */
+  authorizationNow?: number;
+  /** Refresh hook after a resolution lands (invalidates the stream). */
+  onAuthorizationResolved?: () => void;
 }
 
 /** Plain list below the threshold; virtualized above it (AC11). */
 const VIRTUALIZE_THRESHOLD = 100;
 
-export function MessageList({ entries, streamingId, footer, footerKey, agentName, agentSeed, onQuote, onQuoteClick, onRollback }: MessageListProps): ReactNode {
+export function MessageList({ entries, streamingId, footer, footerKey, agentName, agentSeed, onQuote, onQuoteClick, onRollback, authorizations, authorizationNow, onAuthorizationResolved }: MessageListProps): ReactNode {
   const virtualized = entries.length > VIRTUALIZE_THRESHOLD;
   const { scrollRef, scrollToBottomIfStuck } = useStickToBottom({ rebindKey: virtualized });
 
@@ -63,6 +72,14 @@ export function MessageList({ entries, streamingId, footer, footerKey, agentName
           <div key={entry.id} data-entry-id={entry.id}>
             <Bubble entry={entry} streaming={entry.id === streamingId} agentName={agentName} agentSeed={agentSeed} onQuote={onQuote} onQuoteClick={onQuoteClick} onRollback={onRollback} />
           </div>
+        ))}
+        {(authorizations ?? []).map((request) => (
+          <AuthorizationBubble
+            key={request.authorizationId}
+            request={request}
+            now={authorizationNow}
+            onResolve={onAuthorizationResolved}
+          />
         ))}
         {footer}
       </div>

@@ -72,18 +72,31 @@ export function ChatTabBar(): ReactNode {
     return openSessionIds.filter((id) => convMap.has(id));
   }, [activeWorkspaceId, openSessionIds, conversations, convMap]);
 
-  // Workspace switch re-homes the selection: a stale selection (pointing at
-  // a tab of the previous workspace, or none) activates the first surviving
-  // tab. `activateChatTab` is used instead of `selectSession` because the
-  // latter has an activeArea side effect — switching workspaces must not
-  // yank the user out of the editor. An empty strip keeps the stale
-  // selection so switching back restores it.
+  // Workspace switch re-homes the selection — three-segment restore
+  // (chat_rich_bind spec 5.3.3-1): ① the per-workspace memory
+  // (`lastActiveSessionByWorkspace`) wins when it points at a surviving
+  // tab; ② otherwise (memory missing/stale/session deleted) the first
+  // surviving tab activates; ③ an empty strip keeps the stale selection so
+  // switching back restores it. `activateChatTab` is used instead of
+  // `selectSession` because the latter has an activeArea side effect —
+  // switching workspaces must not yank the user out of the editor.
+  // Guard interception immunity (spec 5.3.3-2): a cancelled switch never
+  // changes activeWorkspaceId, so this effect never fires and both sides
+  // keep their tab state untouched.
+  const lastActiveSessionByWorkspace = useUiStore((s) => s.lastActiveSessionByWorkspace);
   useEffect(() => {
-    const first = scopedIds[0];
-    if (first !== undefined && !scopedIds.includes(selectedSessionId ?? "")) {
-      activateChatTab(first);
-    }
-  }, [scopedIds, selectedSessionId, activateChatTab]);
+    if (scopedIds.length === 0) return;
+    if (scopedIds.includes(selectedSessionId ?? "")) return;
+    const remembered =
+      activeWorkspaceId !== null
+        ? lastActiveSessionByWorkspace[activeWorkspaceId]
+        : undefined;
+    const target =
+      remembered !== undefined && scopedIds.includes(remembered)
+        ? remembered
+        : (scopedIds[0] as string);
+    activateChatTab(target);
+  }, [scopedIds, selectedSessionId, activateChatTab, activeWorkspaceId, lastActiveSessionByWorkspace]);
 
   // Virtualization: when tab count exceeds threshold, window based on scrollLeft.
   const [scrollLeft, setScrollLeft] = useState(0);

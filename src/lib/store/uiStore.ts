@@ -158,6 +158,21 @@ interface UiState {
    */
   activeWorkspaceId: string | null;
   /**
+   * chat_rich_bind spec 5.3.1-1b — per-workspace last-activated chat tab
+   * (memory only, never persisted across restarts). Written on the
+   * `activateChatTab` sync path (activation happens inside its owning
+   * workspace's context, so the bucket is always correct); read by the
+   * ChatTabBar switch effect to restore the remembered tab.
+   */
+  lastActiveSessionByWorkspace: Record<string, string>;
+  /**
+   * chat_rich_bind spec 5.2.1-6 / D10 — one-shot temp file tab for opening
+   * a file OUTSIDE every mounted work directory. Pure memory state: never
+   * written to work_directories or any persistence; destroyed on workspace
+   * switch and app exit.
+   */
+  tempFileTab: { absPath: string; name: string } | null;
+  /**
    * Current layout mode for the main content area (split retired with
    * ADR-0021 single-open; the type no longer admits "split").
    */
@@ -181,6 +196,10 @@ interface UiState {
    * in openSessionIds, so clicking a chip never shuffles the strip.
    */
   activateChatTab: (sessionId: string) => void;
+  /** Opens the one-shot temp file tab (read-only absolute-path viewer). */
+  openTempFile: (absPath: string, name: string) => void;
+  /** Closes the temp file tab (no-op when absent). */
+  closeTempFile: () => void;
   /** Opens a file in the given workspace's editor bucket (ADR 0017). */
   openFile: (path: string, workspaceId: string) => void;
   /** Closes a file in the given workspace's editor bucket. */
@@ -272,6 +291,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   runDrawerTaskId: null,
   pendingWorkspaceAction: null,
   activeWorkspaceId: null,
+  lastActiveSessionByWorkspace: {},
+  tempFileTab: null,
   layoutMode: "single",
   conversationWorkspaceFilter: "all",
   setConversationWorkspaceFilter: (filter) => set({ conversationWorkspaceFilter: filter }),
@@ -318,8 +339,18 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => {
       if (!s.openSessionIds.includes(sessionId)) return s;
       // Activation never reorders: the chip keeps the slot it was opened in.
-      return { selectedSessionId: sessionId };
+      // Per-workspace memory rides the same sync path (spec 5.3.1-1b): the
+      // activation happens inside its workspace's context, so bucketing by
+      // the currently active workspace is naturally correct.
+      const lastActiveSessionByWorkspace =
+        s.activeWorkspaceId !== null
+          ? { ...s.lastActiveSessionByWorkspace, [s.activeWorkspaceId]: sessionId }
+          : s.lastActiveSessionByWorkspace;
+      return { selectedSessionId: sessionId, lastActiveSessionByWorkspace };
     }),
+  openTempFile: (absPath, name) =>
+    set({ tempFileTab: { absPath, name }, activeArea: "workbench" }),
+  closeTempFile: () => set({ tempFileTab: null }),
   openFile: (path, workspaceId) =>
     set((s) => {
       const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
@@ -479,15 +510,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     const bucket = get().editorByWorkspace[workspaceId];
     return bucket?.crossRefs[path] ?? null;
   },
-  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
-  switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId }),
+  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id, tempFileTab: null }),
+  switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId, tempFileTab: null }),
   openDirectory: async (path) => {
     const entry = await measureAsync(
       "workspace.add_directory",
       () => ipc.workspaceAddDirectory(path),
       { path },
     );
-    set({ activeWorkspaceId: entry.id });
+    set({ activeWorkspaceId: entry.id, tempFileTab: null });
   },
   switchToWorkspace: async (id) => {
     await measureAsync(
@@ -495,7 +526,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       () => ipc.workspaceSwitch(id),
       { workspaceId: id },
     );
-    set({ activeWorkspaceId: id });
+    set({ activeWorkspaceId: id, tempFileTab: null });
   },
   // Unsaved-edits guard (workspace-level actions): editor dirty state is a
   // FRONTEND ephemeral fact (uiStore buckets — the backend deliberately

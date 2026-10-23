@@ -15,6 +15,7 @@ import { QueueList } from "../conversation/composer/QueueList";
 import { MessageList } from "./MessageList";
 import { SpeakerAside } from "./SpeakerAside";
 import { STREAM_ENTRY_ID, useSessionStream, type ChatEntry } from "./useSessionStream";
+import { useAuthorizationStream } from "./useAuthorizationStream";
 import { ChatStatusPill } from "./ChatStatusPill";
 import { TurnNotice, type TurnNoticeKind } from "./TurnNotice";
 
@@ -32,6 +33,7 @@ export function ChatView(): ReactNode {
   const selectSession = useUiStore((s) => s.selectSession);
   const { cycleTheme } = useTheme();
   const stream = useSessionStream(sessionId);
+  const authorizations = useAuthorizationStream(sessionId);
   const [finalText, setFinalText] = useState<string | null>(null);
   const [quotedEventSeq, setQuotedEventSeq] = useState<number | null>(null);
   const [quotedExcerpt, setQuotedExcerpt] = useState<string | null>(null);
@@ -254,6 +256,8 @@ export function ChatView(): ReactNode {
             agentSeed={agentSeed}
             footer={turnFooter}
             footerKey={turnRowVisible ? (turnNotice?.kind ?? "pending") : null}
+            authorizations={authorizations.requests}
+            onAuthorizationResolved={authorizations.refresh}
             onQuote={(seq) => {
               const entry = entries.find((e) => e.id === `m${seq}`);
               if (entry) {

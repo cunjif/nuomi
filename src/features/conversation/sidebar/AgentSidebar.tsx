@@ -114,6 +114,7 @@ export function AgentSidebar({
             onClose={() => setSelectedAgent(null)}
             canRemove={canRemove}
             onRemove={handleRemove}
+            sessionId={sessionId}
           />
         )}
       </aside>

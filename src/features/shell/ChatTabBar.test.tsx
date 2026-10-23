@@ -104,6 +104,41 @@ describe("ChatTabBar — workspace-scoped strip (ADR-0021 task 6.9)", () => {
     expect(useUiStore.getState().activeArea).toBe("workbench");
   });
 
+  it("restores the remembered tab after a workspace switch (spec 5.3.1-1)", async () => {
+    useUiStore.setState({
+      openSessionIds: ["w1a", "w1b"],
+      selectedSessionId: null,
+      activeWorkspaceId: "ws1",
+      lastActiveSessionByWorkspace: { ws1: "w1b" },
+    });
+    seedConversation({ id: "w1a", title: "alpha期会话", workspaceId: "ws1" });
+    seedConversation({ id: "w1b", title: "beta期会话", workspaceId: "ws1" });
+    renderWithProviders(<ChatTabBar />);
+
+    expect(await screen.findByText("beta期会话")).toBeTruthy();
+    // Memory wins over the first-tab fallback: the remembered w1b activates.
+    await waitFor(() => {
+      expect(useUiStore.getState().selectedSessionId).toBe("w1b");
+    });
+  });
+
+  it("falls back to the first tab when the remembered session is gone (spec 5.3.3-1)", async () => {
+    useUiStore.setState({
+      openSessionIds: ["w1a", "w1b"],
+      selectedSessionId: null,
+      activeWorkspaceId: "ws1",
+      lastActiveSessionByWorkspace: { ws1: "deleted-session" },
+    });
+    seedConversation({ id: "w1a", title: "alpha期会话", workspaceId: "ws1" });
+    seedConversation({ id: "w1b", title: "beta期会话", workspaceId: "ws1" });
+    renderWithProviders(<ChatTabBar />);
+
+    expect(await screen.findByText("alpha期会话")).toBeTruthy();
+    await waitFor(() => {
+      expect(useUiStore.getState().selectedSessionId).toBe("w1a");
+    });
+  });
+
   it("tags each tab with its workspace color dot and a label-prefixed tooltip", async () => {
     tdState.workspaces.push({
       id: "ws1",
