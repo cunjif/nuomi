@@ -27,3 +27,19 @@ export const DOMAIN_CHANNEL = "event://domain";
 
 /** Per-session high-frequency channel. */
 export const sessionChannel = (sessionId: string): string => `event://session/${sessionId}`;
+
+/**
+ * Source-evidence entry riding the assistant `message` event payload
+ * (`sources` array, chat_rich_bind spec 5.2 / design D1). Mirrors the Rust
+ * `services::source_collector::SourceEntry` serde shape (camelCase keys).
+ */
+export type SourceEntryDto = {
+  kind: "workspace_file" | "external_file" | "web_url" | "cli_agent";
+  /** Absolute path (files) or URL (web) — the jump target. */
+  target: string;
+  /** Display label (file name / host / CLI agent name). */
+  label: string;
+  /** Owning RoleAgent (distinguishes collectors in group chats). */
+  agentId: string;
+  agentName: string;
+};

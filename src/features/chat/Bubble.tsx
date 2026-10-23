@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { ToolCard } from "./ToolCard";
 import { QuoteBlock } from "./QuoteBlock";
 import { SpeakerAside } from "./SpeakerAside";
+import { MarkdownView } from "./MarkdownView";
+import { HtmlPreviewEntry } from "./HtmlPreviewEntry";
+import { SourceEvidence } from "./SourceEvidence";
 import type { ChatEntry } from "./useSessionStream";
 
 interface BubbleProps {
@@ -81,12 +84,9 @@ export function Bubble({ entry, streaming = false, agentName = null, agentSeed =
             onClick={onQuoteClick !== undefined ? () => onQuoteClick!(entry.quotedEventSeq!) : undefined}
           />
         )}
-        <p className="whitespace-pre-wrap break-words">
-          {entry.text || t("chat.emptyResponse")}
-          {streaming && (
-            <span aria-hidden="true" className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-ink-muted align-middle" />
-          )}
-        </p>
+        <MarkdownView text={entry.text || t("chat.emptyResponse")} streaming={streaming} />
+        {!isUser && <HtmlPreviewEntry text={entry.text ?? ""} />}
+        {!isUser && entry.sources !== undefined && <SourceEvidence sources={entry.sources} />}
       </div>
     </div>
   );

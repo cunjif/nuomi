@@ -7,7 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EventDto } from "../../lib/ipc/bindings.gen";
 import { ipc } from "../../lib/ipc/client";
-import { asRecord, asString } from "../../lib/events/payload";
+import { asRecord, asString, asSources } from "../../lib/events/payload";
+import type { SourceEntryDto } from "../../lib/events/types";
 import { sessionChannel, type DomainEvent } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
 
@@ -22,6 +23,8 @@ export interface ChatEntry {
   content?: string;
   quotedEventSeq?: number;
   quotedExcerpt?: string;
+  /** Source evidence riding the assistant message payload (spec 5.2). */
+  sources?: SourceEntryDto[];
 }
 
 /** Live per-agent stream in a group chat (delta carrying `roleName`). */
@@ -55,6 +58,7 @@ export function toEntries(events: EventDto[]): ChatEntry[] {
         text: asString(p.content),
         quotedEventSeq,
         quotedExcerpt: quotedEventSeq !== undefined ? asString(p.quoted_excerpt) || undefined : undefined,
+        sources: asSources(p.sources),
       });
     } else if (e.kind === "tool_call") {
       out.push({
@@ -193,6 +197,7 @@ export function useSessionStream(sessionId: string | null): {
                 text: asString(p.content),
                 quotedEventSeq,
                 quotedExcerpt: quotedEventSeq !== undefined ? asString(p.quoted_excerpt) || undefined : undefined,
+                sources: asSources(p.sources),
               },
             ]);
           }
