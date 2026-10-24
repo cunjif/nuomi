@@ -223,3 +223,85 @@ describe("GroupConversationView — stop & failure notices (SPEC 5.8.1-5, 5.8.3)
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 });
+
+describe("GroupConversationView — WeChat-style bubble toolbar (气泡工具栏)", () => {
+  it("pops the toolbar on a bubble click, quotes into the preview bar and submits with the seq", async () => {
+    renderWithProviders(<GroupConversationView />);
+    act(() => {
+      emit(
+        "session.message",
+        { role_name: "Writer", roleId: "r1", roleName: "Writer", content: "群聊消息内容", seq: 2 },
+        2,
+      );
+    });
+    await waitFor(() => expect(screen.getByText("群聊消息内容")).toBeInTheDocument());
+
+    // Bordered bubble; click pops the toolbar (quote + copy, no rollback).
+    const body = screen.getByTestId("speaker-bubble-body");
+    expect(body.className).toContain("border-ink-muted/40");
+    fireEvent.click(body);
+
+    const toolbar = screen.getByTestId("bubble-toolbar");
+    expect(within(toolbar).getByRole("button", { name: "引用" })).toBeTruthy();
+    expect(within(toolbar).getByRole("button", { name: "复制" })).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: /回退/ })).toBeNull();
+
+    // Quote action stages the preview bar above the composer.
+    fireEvent.click(within(toolbar).getByRole("button", { name: "引用" }));
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+    expect(await screen.findByText("引用")).toBeTruthy();
+
+    // The next submit carries the quoted seq (live ids resolve too).
+    const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "追问" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(ipc.submitMessage).toHaveBeenCalledWith(SESSION, "追问", [], null, null, 2));
+  });
+
+  it("closes the toolbar on a click outside any message row", async () => {
+    renderWithProviders(<GroupConversationView />);
+    act(() => {
+      emit(
+        "session.message",
+        { role_name: "Writer", roleId: "r1", roleName: "Writer", content: "另一条消息", seq: 3 },
+        3,
+      );
+    });
+    await waitFor(() => expect(screen.getByText("另一条消息")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("speaker-bubble-body"));
+    expect(screen.getByTestId("bubble-toolbar")).toBeTruthy();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+  });
+
+  it("opens a gap when the speaker side switches (user → agent, WeChat grouping)", async () => {
+    renderWithProviders(<GroupConversationView />);
+    act(() => {
+      emit("session.message", { role: "user", content: "用户提问", seq: 1 }, 1);
+      emit(
+        "session.message",
+        { role_name: "Writer", roleId: "r1", roleName: "Writer", content: "agent 回答", seq: 2 },
+        2,
+      );
+      emit(
+        "session.message",
+        { role_name: "Reviewer", roleId: "r2", roleName: "Reviewer", content: "agent 补充", seq: 3 },
+        3,
+      );
+    });
+    await waitFor(() => expect(screen.getByText("agent 回答")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("agent 补充")).toBeInTheDocument());
+
+    // Row container = bubble body → flex-1 wrapper → row div.
+    const rowClassNames = screen
+      .getAllByTestId("speaker-bubble-body")
+      .map((el) => el.parentElement?.parentElement?.className ?? "");
+    expect(rowClassNames).toHaveLength(3);
+    expect(rowClassNames[0]).not.toContain("mt-2");
+    expect(rowClassNames[1]).toContain("mt-2");
+    // Agent-to-agent handoff stays compact.
+    expect(rowClassNames[2]).not.toContain("mt-2");
+  });
+});

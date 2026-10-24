@@ -502,3 +502,133 @@ describe("ChatView — speaker-column layout (胶囊不再被输入框覆盖)", 
     });
   });
 });
+
+describe("ChatView — WeChat-style bubble toolbar (气泡工具栏)", () => {
+  const USER_TEXT = "帮我看看这个 bug";
+  const AI_TEXT = "这是分析结果";
+
+  /** Walks up from a text node to the bubble body (the max-w-[80%] div). */
+  function bubbleOf(text: string): HTMLElement {
+    const el = screen.getByText(text);
+    const bubble = el.closest("div.max-w-\\[80\\%\\]");
+    if (bubble === null) throw new Error(`bubble for "${text}" not found`);
+    return bubble as HTMLElement;
+  }
+
+  async function setupHistory(session: string): Promise<void> {
+    seedConversation({ id: session, title: "t", createdAt: 1, updatedAt: 1 });
+    tdState.events.set(session, [
+      { seq: 1, kind: "message", payload: { role: "user", content: USER_TEXT }, createdAt: 1 },
+      { seq: 2, kind: "message", payload: { role: "assistant", content: AI_TEXT }, createdAt: 2 },
+    ]);
+    useUiStore.getState().selectSession(session);
+    renderWithProviders(<ChatView />);
+    await screen.findByText(USER_TEXT);
+    await screen.findByText(AI_TEXT);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    useUiStore.setState({ selectedSessionId: null });
+  });
+
+  it("draws a hairline border on the assistant bubble but not the user bubble", async () => {
+    await setupHistory("bt1");
+    expect(bubbleOf(AI_TEXT).className).toContain("border-ink-muted/40");
+    expect(bubbleOf(USER_TEXT).className).not.toContain("border-ink-muted/40");
+  });
+
+  it("pops the toolbar above the assistant bubble on click (quote + copy, no rollback)", async () => {
+    await setupHistory("bt2");
+    fireEvent.click(bubbleOf(AI_TEXT));
+
+    const toolbar = screen.getByTestId("bubble-toolbar");
+    expect(within(toolbar).getByRole("button", { name: "引用" })).toBeTruthy();
+    expect(within(toolbar).getByRole("button", { name: "复制" })).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: /回退/ })).toBeNull();
+  });
+
+  it("keeps the toolbar on a single line even over a narrow bubble", async () => {
+    // Regression guard: the toolbar used to shrink to the containing
+    // bubble's width (width:auto shrink-to-fit), wrapping 回退到此处
+    // vertically. It must size to its content and never wrap.
+    seedConversation({ id: "bt7", title: "t", createdAt: 1, updatedAt: 1 });
+    tdState.events.set("bt7", [
+      { seq: 1, kind: "message", payload: { role: "user", content: "短" }, createdAt: 1 },
+    ]);
+    useUiStore.getState().selectSession("bt7");
+    renderWithProviders(<ChatView />);
+    await screen.findByText("短");
+
+    fireEvent.click(bubbleOf("短"));
+    const toolbar = screen.getByTestId("bubble-toolbar");
+    expect(toolbar.className).toContain("w-max");
+    expect(toolbar.className).toContain("whitespace-nowrap");
+    const rollbackBtn = within(toolbar).getByRole("button", { name: "回退到此处" });
+    expect(rollbackBtn.className).toContain("whitespace-nowrap");
+    expect(rollbackBtn.querySelector("span")?.textContent).toBe("回退到此处");
+  });
+
+  it("opens a gap between user and assistant message rows (WeChat grouping)", async () => {
+    // Role switches (user ↔ agent) breathe; the first row has no gap.
+    await setupHistory("bt8");
+    const userRow = bubbleOf(USER_TEXT).parentElement as HTMLElement;
+    const aiRow = bubbleOf(AI_TEXT).parentElement as HTMLElement;
+    expect(userRow.className).not.toContain("mt-2");
+    expect(aiRow.className).toContain("mt-2");
+  });
+
+  it("stages a quote preview after picking 引用 from the toolbar", async () => {
+    await setupHistory("bt3");
+    fireEvent.click(bubbleOf(AI_TEXT));
+    fireEvent.click(within(screen.getByTestId("bubble-toolbar")).getByRole("button", { name: "引用" }));
+
+    // Toolbar closes; the composer quote preview bar carries the excerpt.
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+    expect(await screen.findByText("引用")).toBeTruthy();
+    // The excerpt shows in the preview bar next to the original bubble.
+    expect(screen.getAllByText(AI_TEXT).length).toBeGreaterThanOrEqual(2);
+
+    // Submit carries the quoted seq.
+    const submitSpy = vi.spyOn(ipc, "submitTask").mockResolvedValue({
+      finalText: "", steps: 0, truncated: false, sessionId: "bt3",
+    } as unknown as Awaited<ReturnType<typeof ipc.submitTask>>);
+    const input = screen.getByPlaceholderText("输入消息，Enter 发送（Shift+Enter 换行）");
+    fireEvent.change(input, { target: { value: "追问" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledWith("bt3", "追问", 2));
+  });
+
+  it("offers 回退到此处 only on user bubbles and opens the confirm dialog", async () => {
+    await setupHistory("bt4");
+    fireEvent.click(bubbleOf(USER_TEXT));
+
+    const toolbar = screen.getByTestId("bubble-toolbar");
+    fireEvent.click(within(toolbar).getByRole("button", { name: "回退到此处" }));
+
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+    expect(await screen.findByText("确认回退")).toBeTruthy();
+  });
+
+  it("closes the toolbar on a click outside any message row", async () => {
+    await setupHistory("bt5");
+    fireEvent.click(bubbleOf(AI_TEXT));
+    expect(screen.getByTestId("bubble-toolbar")).toBeTruthy();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+  });
+
+  it("copies the message text via the clipboard API", async () => {
+    await setupHistory("bt6");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    fireEvent.click(bubbleOf(AI_TEXT));
+    fireEvent.click(within(screen.getByTestId("bubble-toolbar")).getByRole("button", { name: "复制" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(AI_TEXT));
+    await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.message === "已复制")).toBe(true));
+  });
+});

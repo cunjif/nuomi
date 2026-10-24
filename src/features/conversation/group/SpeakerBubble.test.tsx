@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { SpeakerBubble } from "./SpeakerBubble";
 import type { PaletteColor } from "../avatarPalette";
+import "../../../i18n";
 
 const ROLE_COLOR: PaletteColor = {
   bg: "#7aa2f7",
@@ -68,5 +69,51 @@ describe("SpeakerBubble — RoleAgent bubble wrapping (spec 5.1.1-1)", () => {
       <SpeakerBubble roleName="Researcher" roleColor={ROLE_COLOR} content="answer" sources={[]} />,
     );
     expect(screen.queryByTestId("source-chip-row")).toBeNull();
+  });
+});
+
+describe("SpeakerBubble — WeChat-style toolbar (气泡工具栏)", () => {
+  it("draws a hairline border on the bubble body", () => {
+    render(<SpeakerBubble roleName="Researcher" roleColor={ROLE_COLOR} content="hello group" />);
+    const body = screen.getByTestId("speaker-bubble-body");
+    expect(body.className).toContain("border-ink-muted/40");
+  });
+
+  it("pops the toolbar on click and forwards the quote action with the seq", () => {
+    const onQuote = vi.fn();
+    render(
+      <SpeakerBubble
+        roleName="Researcher"
+        roleColor={ROLE_COLOR}
+        content="hello group"
+        seq={7}
+        onQuote={onQuote}
+        toolbarOpen={true}
+        onToolbarClose={() => {}}
+      />,
+    );
+    const toolbar = screen.getByTestId("bubble-toolbar");
+    expect(within(toolbar).getByRole("button", { name: "引用" })).toBeTruthy();
+    expect(within(toolbar).getByRole("button", { name: "复制" })).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: /回退/ })).toBeNull();
+
+    fireEvent.click(within(toolbar).getByRole("button", { name: "引用" }));
+    expect(onQuote).toHaveBeenCalledWith(7);
+  });
+
+  it("keeps the body inert when quote/seq are not wired", () => {
+    const onToolbarToggle = vi.fn();
+    render(
+      <SpeakerBubble
+        roleName="Researcher"
+        roleColor={ROLE_COLOR}
+        content=""
+        onToolbarToggle={onToolbarToggle}
+      />,
+    );
+    // No text → no copy; no seq/onQuote → no quote: nothing to toggle.
+    expect(screen.queryByTestId("bubble-toolbar")).toBeNull();
+    fireEvent.click(screen.getByTestId("speaker-bubble-body"));
+    expect(onToolbarToggle).not.toHaveBeenCalled();
   });
 });
