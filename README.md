@@ -4,6 +4,8 @@
 
 ### 一颗「白、软、黏」的 Agent Harness 内核
 
+**简体中文** | [English](README.en.md)
+
 **插件化 Agent Harness 内核 + 终端验收入口** · Provider Master-Slave 编排 · Role/Team 多 Agent 协作 · Long-term Memory · Self-Evolution
 
 ```text
