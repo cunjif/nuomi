@@ -42,6 +42,14 @@ export interface ActiveSpeaker {
 
 export const STREAM_ENTRY_ID = "__streaming__";
 
+/** Extract the event seq from a message entry id (`m42` → 42; live-buffer
+ *  ids `live-m42` resolve to the same seq). Shared by the single-chat
+ *  Bubble and the group SpeakerBubble toolbars. */
+export function seqFromId(id: string): number | null {
+  const m = /^(?:live-)?m(\d+)$/.exec(id);
+  return m ? Number(m[1]) : null;
+}
+
 export function toEntries(events: EventDto[]): ChatEntry[] {
   const out: ChatEntry[] = [];
   for (const e of events) {

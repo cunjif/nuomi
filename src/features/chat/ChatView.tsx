@@ -48,11 +48,15 @@ export function ChatView(): ReactNode {
   // `finalText` is the non-streaming fallback bubble for the turn that just
   // completed. It belongs to one session: ChatView stays mounted across
   // session switches, so without this reset the previous conversation's
-  // answer would be appended to the newly selected transcript.
+  // answer would be appended to the newly selected transcript. The quote /
+  // rollback pending state belongs to one session too.
   useEffect(() => {
     setFinalText(null);
     setTurnNotice(null);
     setTurnStopped(false);
+    setQuotedEventSeq(null);
+    setQuotedExcerpt(null);
+    setRollbackTargetSeq(null);
     stoppedRef.current = false;
   }, [sessionId]);
 
@@ -259,14 +263,16 @@ export function ChatView(): ReactNode {
             authorizations={authorizations.requests}
             onAuthorizationResolved={authorizations.refresh}
             onQuote={(seq) => {
-              const entry = entries.find((e) => e.id === `m${seq}`);
+              const entry = entries.find((e) => e.id === `m${seq}` || e.id === `live-m${seq}`);
               if (entry) {
                 setQuotedEventSeq(seq);
                 setQuotedExcerpt((entry.text ?? "").slice(0, 80));
               }
             }}
             onQuoteClick={(seq) => {
-              const el = document.querySelector(`[data-entry-id="m${seq}"]`);
+              const el = document.querySelector(
+                `[data-entry-id="m${seq}"], [data-entry-id="live-m${seq}"]`,
+              );
               el?.scrollIntoView({ behavior: "smooth", block: "center" });
             }}
             onRollback={(seq) => setRollbackTargetSeq(seq)}

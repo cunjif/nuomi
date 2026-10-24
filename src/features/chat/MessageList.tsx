@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { Bubble } from "./Bubble";
@@ -46,9 +46,40 @@ interface MessageListProps {
 /** Plain list below the threshold; virtualized above it (AC11). */
 const VIRTUALIZE_THRESHOLD = 100;
 
+/** User-side classifier for role-gap grouping: tool traffic belongs to
+ *  the agent side, so only user messages flip the speaker. */
+function isUserSide(entry: ChatEntry): boolean {
+  return entry.kind === "message" && entry.role === "user";
+}
+
+/** A message opens a gap when the previous entry spoke as the other side
+ *  (user ↔ agent) — WeChat-style breathing room between the two parties. */
+function opensRoleGap(entries: ChatEntry[], index: number): boolean {
+  const entry = index > 0 ? entries[index] : undefined;
+  const prev = index > 0 ? entries[index - 1] : undefined;
+  if (entry === undefined || prev === undefined || entry.kind !== "message") return false;
+  return isUserSide(prev) !== isUserSide(entry);
+}
+
 export function MessageList({ entries, streamingId, footer, footerKey, agentName, agentSeed, onQuote, onQuoteClick, onRollback, authorizations, authorizationNow, onAuthorizationResolved }: MessageListProps): ReactNode {
   const virtualized = entries.length > VIRTUALIZE_THRESHOLD;
   const { scrollRef, scrollToBottomIfStuck } = useStickToBottom({ rebindKey: virtualized });
+
+  // WeChat-style bubble toolbar: at most one bubble's toolbar is open at a
+  // time; the id tracks which entry owns it.
+  const [toolbarEntryId, setToolbarEntryId] = useState<string | null>(null);
+
+  // Clicking anywhere outside a message row closes the open toolbar.
+  useEffect(() => {
+    if (toolbarEntryId === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("[data-entry-id]") === null) {
+        setToolbarEntryId(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [toolbarEntryId]);
 
   // Snap to the latest message whenever the list grows or the streaming
   // bubble updates — but only while the user is following the tail.
@@ -68,9 +99,21 @@ export function MessageList({ entries, streamingId, footer, footerKey, agentName
   if (!virtualized) {
     return (
       <div ref={scrollRef} data-testid="message-scroll" className={`min-h-0 h-full overflow-y-auto ${SCROLL_PT} pb-2`}>
-        {entries.map((entry) => (
+        {entries.map((entry, index) => (
           <div key={entry.id} data-entry-id={entry.id}>
-            <Bubble entry={entry} streaming={entry.id === streamingId} agentName={agentName} agentSeed={agentSeed} onQuote={onQuote} onQuoteClick={onQuoteClick} onRollback={onRollback} />
+            <Bubble
+              entry={entry}
+              streaming={entry.id === streamingId}
+              agentName={agentName}
+              agentSeed={agentSeed}
+              onQuote={onQuote}
+              onQuoteClick={onQuoteClick}
+              onRollback={onRollback}
+              toolbarOpen={toolbarEntryId === entry.id}
+              onToolbarToggle={() => setToolbarEntryId((prev) => (prev === entry.id ? null : entry.id))}
+              onToolbarClose={() => setToolbarEntryId(null)}
+              roleGap={opensRoleGap(entries, index)}
+            />
           </div>
         ))}
         {(authorizations ?? []).map((request) => (
@@ -100,7 +143,22 @@ export function MessageList({ entries, streamingId, footer, footerKey, agentName
               transform: `translateY(${item.start}px)`,
             }}
           >
-            <Bubble entry={entries[item.index] as ChatEntry} streaming={entries[item.index]?.id === streamingId} agentName={agentName} agentSeed={agentSeed} onQuote={onQuote} onQuoteClick={onQuoteClick} onRollback={onRollback} />
+            <Bubble
+              entry={entries[item.index] as ChatEntry}
+              streaming={entries[item.index]?.id === streamingId}
+              agentName={agentName}
+              agentSeed={agentSeed}
+              onQuote={onQuote}
+              onQuoteClick={onQuoteClick}
+              onRollback={onRollback}
+              toolbarOpen={entries[item.index] !== undefined && toolbarEntryId === entries[item.index]?.id}
+              onToolbarToggle={() => {
+                const id = entries[item.index]?.id;
+                if (id !== undefined) setToolbarEntryId((prev) => (prev === id ? null : id));
+              }}
+              onToolbarClose={() => setToolbarEntryId(null)}
+              roleGap={opensRoleGap(entries, item.index)}
+            />
           </div>
         ))}
       </div>

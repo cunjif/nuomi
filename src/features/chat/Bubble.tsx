@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ToolCard } from "./ToolCard";
 import { QuoteBlock } from "./QuoteBlock";
@@ -6,7 +6,8 @@ import { SpeakerAside } from "./SpeakerAside";
 import { MarkdownView } from "./MarkdownView";
 import { HtmlPreviewEntry } from "./HtmlPreviewEntry";
 import { SourceEvidence } from "./SourceEvidence";
-import type { ChatEntry } from "./useSessionStream";
+import { BubbleToolbar, QUOTE_ICON, ROLLBACK_ICON, makeCopyAction, type BubbleToolbarAction } from "./BubbleToolbar";
+import { seqFromId, type ChatEntry } from "./useSessionStream";
 
 interface BubbleProps {
   entry: ChatEntry;
@@ -22,18 +23,23 @@ interface BubbleProps {
   onQuoteClick?: (seq: number) => void;
   /** Called when the user clicks "rollback to here" on a user message. */
   onRollback?: (seq: number) => void;
-}
-
-/** Extract the event seq from a history entry id (`m42` → 42). */
-function seqFromId(id: string): number | null {
-  const m = /^m(\d+)$/.exec(id);
-  return m ? Number(m[1]) : null;
+  /** Whether the click-to-open action toolbar is open for this bubble. */
+  toolbarOpen?: boolean;
+  /** Clicking the bubble body toggles the toolbar (WeChat-style). */
+  onToolbarToggle?: () => void;
+  /** Closes the toolbar after one of its actions has run. */
+  onToolbarClose?: () => void;
+  /** True when the previous entry spoke as the OTHER side (user ↔ agent):
+   *  adds breathing room at role switches (WeChat-style grouping). */
+  roleGap?: boolean;
 }
 
 /** User bubbles right (mirrored aside), assistant left; tool traffic
- * renders as folded cards (no speaker column — they are traffic, not
- * utterances). */
-export function Bubble({ entry, streaming = false, agentName = null, agentSeed = null, onQuote, onQuoteClick, onRollback }: BubbleProps): ReactNode {
+ *  renders as folded cards (no speaker column — they are traffic, not
+ *  utterances). Assistant bubbles carry a hairline border; clicking a
+ *  bubble body pops a WeChat-style action bar (quote / rollback / copy)
+ *  above it. */
+export function Bubble({ entry, streaming = false, agentName = null, agentSeed = null, onQuote, onQuoteClick, onRollback, toolbarOpen = false, onToolbarToggle, onToolbarClose, roleGap = false }: BubbleProps): ReactNode {
   const { t } = useTranslation();
   if (entry.kind === "tool_call") {
     return <ToolCard label={t("chat.toolCall")} tool={entry.tool ?? ""} body={entry.argsJson ?? "{}"} />;
@@ -46,37 +52,59 @@ export function Bubble({ entry, streaming = false, agentName = null, agentSeed =
   const seq = seqFromId(entry.id);
   const canReply = onQuote !== undefined && seq !== null;
   const canRollback = onRollback !== undefined && seq !== null && isUser;
+  const closeToolbar = onToolbarClose ?? (() => {});
+  const copyAction = makeCopyAction(entry.text, t, closeToolbar);
+
+  const actions: BubbleToolbarAction[] = [];
+  if (canReply) {
+    actions.push({
+      key: "quote",
+      label: t("chat.quote"),
+      icon: QUOTE_ICON,
+      onClick: () => {
+        closeToolbar();
+        onQuote!(seq!);
+      },
+    });
+  }
+  if (canRollback) {
+    actions.push({
+      key: "rollback",
+      label: t("chat.rollbackToHere"),
+      icon: ROLLBACK_ICON,
+      onClick: () => {
+        closeToolbar();
+        onRollback!(seq!);
+      },
+    });
+  }
+  if (copyAction !== null) actions.push(copyAction);
+  const toolbarAvailable = actions.length > 0 && onToolbarToggle !== undefined;
+
+  const handleBubbleClick = (e: MouseEvent<HTMLDivElement>): void => {
+    if (!toolbarAvailable) return;
+    // Clicks on interactive content (links, quote blocks) are theirs, not ours.
+    if ((e.target as HTMLElement).closest("a, button") !== null) return;
+    // A click that ends an in-bubble text selection must not pop the toolbar.
+    if ((window.getSelection()?.toString() ?? "") !== "") return;
+    onToolbarToggle!();
+  };
+
   return (
-    <div className={`group flex gap-2 px-3 py-1 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-2 px-3 py-1 ${roleGap ? "mt-2" : ""} ${isUser ? "flex-row-reverse" : ""}`}>
       <SpeakerAside name={isUser ? t("chat.you") : speaker} seed={agentSeed} isUser={isUser} />
       <div
+        onClick={handleBubbleClick}
         className={`relative max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-          isUser ? "bg-ink-accent/20 text-ink" : "bg-surface-raised text-ink"
+          toolbarAvailable ? "cursor-pointer" : ""
+        } ${
+          isUser
+            ? "bg-ink-accent/20 text-ink"
+            : "border border-ink-muted/40 bg-surface-raised text-ink"
         }`}
       >
-        {canReply && (
-          <button
-            type="button"
-            aria-label={t("chat.reply")}
-            onClick={() => onQuote!(seq!)}
-            className="absolute -top-2 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-surface-raised text-ink-muted opacity-0 shadow-sm transition-opacity hover:text-ink group-hover:opacity-100"
-          >
-            <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current">
-              <path d="M6 2L2 6l4 4V8h3c2.2 0 4 1.8 4 4v2h-2v-2c0-1.1-.9-2-2-2H6V2z" />
-            </svg>
-          </button>
-        )}
-        {canRollback && (
-          <button
-            type="button"
-            aria-label={t("chat.rollbackToHere")}
-            onClick={() => onRollback!(seq!)}
-            className="absolute -top-2 left-0 flex h-5 w-5 items-center justify-center rounded-full bg-surface-raised text-ink-muted opacity-0 shadow-sm transition-opacity hover:text-ink group-hover:opacity-100"
-          >
-            <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current">
-              <path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zm2.5 6.5H6.7l1.4-1.4-1-1L4 8l3.1 3.1 1-1-1.4-1.4H10.5a.5.5 0 0 1 .5.5v.3a.5.5 0 0 1-.5.5z" />
-            </svg>
-          </button>
+        {toolbarOpen && (
+          <BubbleToolbar actions={actions} align={isUser ? "right" : "left"} />
         )}
         {entry.quotedEventSeq !== undefined && entry.quotedExcerpt !== undefined && (
           <QuoteBlock

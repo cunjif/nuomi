@@ -10,13 +10,14 @@ import { useTheme } from "../../../lib/store/useTheme";
 import { useUiStore } from "../../../lib/store/uiStore";
 import { useStickToBottom } from "../../../components/ui/useStickToBottom";
 import { Composer } from "../composer/Composer";
+import { QuotePreviewBar } from "../composer/QuotePreviewBar";
 import { SpeakerBubble } from "./SpeakerBubble";
 import { RoundIndicator } from "./RoundIndicator";
 import { WhiteboardDock } from "./WhiteboardDock";
 import { GroupControls } from "./GroupControls";
 import { StatusPill, type StatusPillEntry } from "../../chat/StatusPill";
 import { TurnNotice, type TurnNoticeKind } from "../../chat/TurnNotice";
-import { useSessionStream } from "../../chat/useSessionStream";
+import { seqFromId, useSessionStream } from "../../chat/useSessionStream";
 import { hashPaletteColor } from "../avatarPalette";
 
 interface TurnNoticeState {
@@ -44,6 +45,10 @@ export function GroupConversationView(): ReactNode {
   const selectSession = useUiStore((s) => s.selectSession);
   const { cycleTheme } = useTheme();
   const [quotedEventSeq, setQuotedEventSeq] = useState<number | null>(null);
+  const [quotedExcerpt, setQuotedExcerpt] = useState<string | null>(null);
+  // WeChat-style bubble toolbar: at most one bubble's toolbar is open at a
+  // time; the id tracks which message owns it.
+  const [toolbarEntryId, setToolbarEntryId] = useState<string | null>(null);
 
   const [pillEntries, setPillEntries] = useState<StatusPillEntry[]>([]);
   const [pillStartedAt, setPillStartedAt] = useState(0);
@@ -91,6 +96,7 @@ export function GroupConversationView(): ReactNode {
       if (sessionId === null) return Promise.reject(new Error("no session"));
       return ipc.submitMessage(sessionId, input, [], null, null, quotedEventSeq).then((result) => {
         setQuotedEventSeq(null);
+        setQuotedExcerpt(null);
         return result;
       });
     },
@@ -187,13 +193,45 @@ export function GroupConversationView(): ReactNode {
     setPillStartedAt(0);
     setPillClosing(false);
     setTurnNotice(null);
+    setQuotedEventSeq(null);
+    setQuotedExcerpt(null);
+    setToolbarEntryId(null);
     pillStartedAtRef.current = 0;
     stoppedRef.current = false;
     sawActivityRef.current = false;
   }, [sessionId]);
 
+  // Clicking anywhere outside a message row closes the open bubble toolbar.
+  useEffect(() => {
+    if (toolbarEntryId === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("[data-entry-id]") === null) {
+        setToolbarEntryId(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [toolbarEntryId]);
+
   const { scrollRef, scrollToBottomIfStuck } = useStickToBottom();
   const messages = entries.filter((e) => e.kind === "message");
+
+  /** Quote toolbar action: stage the referenced message for the next submit. */
+  const handleQuote = (seq: number): void => {
+    const msg = messages.find((m) => m.id === `m${seq}` || m.id === `live-m${seq}`);
+    if (msg === undefined) return;
+    setQuotedEventSeq(seq);
+    setQuotedExcerpt((msg.text ?? "").slice(0, 80));
+  };
+
+  /** Clicking a quote block scrolls the original message into view. */
+  const scrollToQuoted = (seq: number): void => {
+    const el = document.querySelector(
+      `[data-entry-id="m${seq}"], [data-entry-id="live-m${seq}"]`,
+    );
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   const lastEntryId = messages[messages.length - 1]?.id ?? "";
   const streamLen = groupStream?.text.length ?? 0;
   useEffect(() => {
@@ -209,16 +247,31 @@ export function GroupConversationView(): ReactNode {
       <RoundIndicator current={1} max={6} />
       <div className="flex min-h-0 flex-1">
         <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-2">
-          {messages.map((msg) => {
+          {messages.map((msg, index) => {
             const roleName = msg.roleName ?? "assistant";
+            // WeChat-style grouping: a gap opens when the previous message
+            // spoke as the other side (user ↔ agent). Agent-to-agent
+            // handoffs stay compact.
+            const prevMsg = messages[index - 1];
+            const roleGap =
+              prevMsg !== undefined &&
+              (prevMsg.role === "user") !== (msg.role === "user");
             return (
-              <SpeakerBubble
-                key={msg.id}
-                roleName={roleName}
-                roleColor={hashPaletteColor(roleName)}
-                content={msg.text ?? ""}
-                quotedExcerpt={msg.quotedExcerpt}
-              />
+              <div key={msg.id} data-entry-id={msg.id}>
+                <SpeakerBubble
+                  roleName={roleName}
+                  roleColor={hashPaletteColor(roleName)}
+                  content={msg.text ?? ""}
+                  quotedExcerpt={msg.quotedExcerpt}
+                  onQuoteClick={msg.quotedEventSeq !== undefined ? () => scrollToQuoted(msg.quotedEventSeq!) : undefined}
+                  seq={seqFromId(msg.id)}
+                  onQuote={handleQuote}
+                  toolbarOpen={toolbarEntryId === msg.id}
+                  onToolbarToggle={() => setToolbarEntryId((prev) => (prev === msg.id ? null : msg.id))}
+                  onToolbarClose={() => setToolbarEntryId(null)}
+                  roleGap={roleGap}
+                />
+              </div>
             );
           })}
           {groupStream !== null && (
@@ -259,6 +312,17 @@ export function GroupConversationView(): ReactNode {
         pending={submitMut.isPending}
         commandContext={commandContext}
         sessionId={sessionId}
+        topSlot={
+          quotedExcerpt !== null ? (
+            <QuotePreviewBar
+              excerpt={quotedExcerpt}
+              onCancel={() => {
+                setQuotedEventSeq(null);
+                setQuotedExcerpt(null);
+              }}
+            />
+          ) : undefined
+        }
         onSubmit={async (input) => {
           await submitMut.mutateAsync(input);
         }}
