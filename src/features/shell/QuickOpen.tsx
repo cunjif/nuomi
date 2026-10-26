@@ -89,7 +89,7 @@ function registerBuiltinCommands(): void {
   // joins/creates the owning workspace, layout is single/overview only).
   registerPaletteCommand({
     id: "workspace.openDirectory",
-    title: "打开工作区目录…",
+    title: "添加目录到工作区…",
     run: () => {
       void import("@tauri-apps/plugin-dialog").then(({ open }) =>
         open({ directory: true }).then((selected) => {

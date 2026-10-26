@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use nuomi_core::domain::run_state::{ApprovalOutcome, RunEvent};
 use nuomi_core::domain::{
@@ -1093,6 +1093,11 @@ pub struct ConversationDto {
     pub participant_agents: Vec<AgentRefDto>,
     pub todo_list: Vec<TodoItemDto>,
     pub workspace_id: String,
+    /// 会话绑定的工目录 id（spec 5.4/6.4，migration 0040）；未绑定时
+    /// 为 None（遗留会话回退到 cwd 语义）。仅 `get_conversation` 填充
+    /// 真实值，其余从 `Session` 构造的路径默认 None（前端 refetch 会修正）。
+    #[serde(default)]
+    pub work_directory_id: Option<String>,
 }
 
 impl From<Session> for ConversationDto {
@@ -1113,6 +1118,7 @@ impl From<Session> for ConversationDto {
             participant_agents: Vec::new(),
             todo_list: Vec::new(),
             workspace_id: "__migrated__".to_string(),
+            work_directory_id: None,
         }
     }
 }
@@ -1226,26 +1232,42 @@ pub struct ConversationUpdateInput {
     pub goal: Option<String>,
 }
 
-/// Workspace label map for board-style DTOs (ADR-0021): id → derived label
-/// (short form). Empty derivations (no directory rows) fall back to
-/// `root_path` — v1 rows still carry a real path there, v2 placeholders are
-/// only reachable for anomalous workspaces.
+/// Workspace label map for board-style DTOs (ADR-0021 + ADR-0024): id →
+/// display label. Priority: user `name` > derived `label` > `root_path`.
+/// Empty derivations (no directory rows) fall back to `root_path` — v1 rows
+/// still carry a real path there, v2 placeholders are only reachable for
+/// anomalous workspaces.
 fn workspace_label_map(
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::HashMap<String, String>, IpcError> {
     repos::workspaces::list(conn)?
         .into_iter()
         .map(|w| {
-            let dirs = repos::work_directories::list_by_workspace(conn, &w.id)?;
-            let label = nuomi_core::services::derive_label(&dirs);
-            let value = if label.label.is_empty() {
-                w.root_path.clone()
+            let value = if let Some(name) = &w.name {
+                if !name.trim().is_empty() {
+                    name.clone()
+                } else {
+                    derived_or_root(&w, conn)?
+                }
             } else {
-                label.label
+                derived_or_root(&w, conn)?
             };
             Ok((w.id, value))
         })
         .collect()
+}
+
+fn derived_or_root(
+    w: &repos::workspaces::WorkspaceEntry,
+    conn: &rusqlite::Connection,
+) -> Result<String, IpcError> {
+    let dirs = repos::work_directories::list_by_workspace(conn, &w.id)?;
+    let label = nuomi_core::services::derive_label(&dirs);
+    Ok(if label.label.is_empty() {
+        w.root_path.clone()
+    } else {
+        label.label
+    })
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -5321,8 +5343,14 @@ pub async fn impl_get_conversation(
 ) -> Result<ConversationDto, IpcError> {
     let path = state.db_path.clone();
     let sid = session_id.clone();
-    let (session, participant_agents, todos) =
-        tokio::task::spawn_blocking(move || -> Result<(Session, Vec<AgentRefDto>, Vec<nuomi_core::domain::TodoItem>), IpcError> {
+    type ConvRow = (
+        Session,
+        Vec<AgentRefDto>,
+        Vec<nuomi_core::domain::TodoItem>,
+        Option<String>,
+    );
+    let (session, participant_agents, todos, work_directory_id) =
+        tokio::task::spawn_blocking(move || -> Result<ConvRow, IpcError> {
             let db = Db::open(&path)?;
             migrations::run(&db.0)?;
             let session = repos::sessions::get(&db.0, &sid)?;
@@ -5347,12 +5375,17 @@ pub async fn impl_get_conversation(
                 })
                 .collect();
             let todos = repos::sessions::list_todos(&db.0, &sid)?;
-            Ok((session, agent_refs, todos))
+            // 会话绑定的工目录 id（spec 5.4/6.4）；未绑定或目录行已
+            // 删除时 binding 为 None，前端回退到不显示。
+            let work_directory_id = repos::sessions::get_work_directory_binding(&db.0, &sid)?
+                .map(|b| b.work_directory_id);
+            Ok((session, agent_refs, todos, work_directory_id))
         })
         .await
         .map_err(join_err)??;
     let mut dto = ConversationDto::from(session);
     dto.participant_agents = participant_agents;
+    dto.work_directory_id = work_directory_id;
     dto.todo_list = todos
         .into_iter()
         .map(|t| TodoItemDto {
@@ -6702,6 +6735,10 @@ pub struct WorkspaceEntryDto {
     pub created_at: i64,
     pub is_active: bool,
     pub directory_present: bool,
+    /// User-provided name (ADR-0024 Part A). `None` for legacy/unnamed
+    /// workspaces — display falls back to `label` then `id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Pinned flag (always restored on startup).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_pinned: Option<bool>,
@@ -6782,6 +6819,9 @@ pub struct RecentWorkspaceDto {
     pub workspace_id: String,
     pub last_used_at: i64,
     pub is_pinned: bool,
+    /// User-provided name (ADR-0024 Part A). `None` for legacy/unnamed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Derived workspace label (same derivation as `list_workspaces`,
     /// ADR-0021 — display names joined with `-`, truncated at 4).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6933,6 +6973,7 @@ pub async fn impl_list_workspaces(state: &AppState) -> Result<Vec<WorkspaceEntry
                         created_at: wp.entry.created_at,
                         is_active: wp.entry.is_active,
                         directory_present: dirs.iter().any(|d| d.available),
+                        name: wp.entry.name,
                         is_pinned: Some(wp.entry.is_pinned),
                         is_open: Some(os.is_some()),
                         is_focused: Some(os.map(|r| r.is_focused).unwrap_or(false)),
@@ -7030,6 +7071,7 @@ fn workspace_view_to_dto(
         created_at: view.entry.created_at,
         is_active: view.entry.is_active,
         directory_present: view.directories.iter().any(|d| d.available),
+        name: view.entry.name.clone(),
         is_pinned: Some(view.entry.is_pinned),
         is_open: Some(true),
         is_focused: Some(true),
@@ -7089,6 +7131,7 @@ pub async fn impl_add_workspace(
         created_at: entry.created_at,
         is_active: entry.is_active,
         directory_present,
+        name: entry.name,
         is_pinned: Some(entry.is_pinned),
         is_open: Some(entry.is_active),
         is_focused: Some(entry.is_active),
@@ -7170,6 +7213,7 @@ pub async fn impl_activate_workspace(
         created_at: entry.created_at,
         is_active: true,
         directory_present: root.is_dir(),
+        name: entry.name,
         is_pinned: Some(entry.is_pinned),
         is_open: Some(true),
         is_focused: Some(true),
@@ -7199,6 +7243,7 @@ pub async fn impl_get_active_workspace(
             created_at: entry.created_at,
             is_active: entry.is_active,
             directory_present,
+            name: entry.name,
             is_pinned: Some(entry.is_pinned),
             is_open: Some(entry.is_active),
             is_focused: Some(entry.is_active),
@@ -7214,6 +7259,29 @@ pub async fn impl_get_active_workspace(
 }
 
 // ---- Two-level workspace commands (ADR-0021) ----
+
+/// ADR-0024 Part A-c: create a named workspace (optionally with an initial
+/// directory). The workspace is **not** auto-opened — the caller switches to
+/// it explicitly after creation.
+pub async fn impl_workspace_create(
+    state: &AppState,
+    name: String,
+    initial_path: Option<String>,
+) -> Result<WorkspaceEntryDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let view = tokio::task::spawn_blocking(
+        move || -> Result<nuomi_core::services::WorkspaceView, IpcError> {
+            let svc =
+                nuomi_core::services::WorkspaceRegistryV2::new(PathBuf::from(db_path.as_ref()));
+            let initial = initial_path.as_deref().map(std::path::Path::new);
+            Ok(svc.create(&name, initial)?)
+        },
+    )
+    .await
+    .map_err(join_err)??;
+    let active = effective_active_directory_id(state, &view.entry.id, &view.directories);
+    Ok(workspace_view_to_dto(&view, active.as_deref()))
+}
 
 pub async fn impl_workspace_add_directory(
     state: &AppState,
@@ -7672,6 +7740,9 @@ pub async fn impl_list_pending_authorizations(
 #[serde(rename_all = "camelCase")]
 pub struct ConversationDetailWorkspaceDto {
     pub id: String,
+    /// User-provided name (ADR-0024 Part A). `None` for legacy/unnamed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub label: String,
 }
 
@@ -7734,6 +7805,8 @@ pub async fn impl_get_conversation_detail(
                 )
                 .ok();
             ws_id.and_then(|id| {
+                let ws_entry = repos::workspaces::find_by_id(conn, &id).ok().flatten();
+                let name = ws_entry.as_ref().and_then(|w| w.name.clone());
                 let label: Option<String> = conn
                     .query_row("SELECT label FROM workspaces WHERE id = ?1", [&id], |r| {
                         r.get(0)
@@ -7748,7 +7821,7 @@ pub async fn impl_get_conversation_detail(
                     .ok();
                 label
                     .or(root)
-                    .map(|l| ConversationDetailWorkspaceDto { id, label: l })
+                    .map(|l| ConversationDetailWorkspaceDto { id, name, label: l })
             })
         };
         let work_directory = repos::sessions::get_work_directory_binding(conn, &session_id)
@@ -7976,10 +8049,15 @@ pub async fn impl_get_recent_workspaces(
                 let dir_entries: Vec<_> = dirs.iter().map(|d| d.directory.clone()).collect();
                 let label = nuomi_core::services::derive_label(&dir_entries);
                 let anomaly = anomaly_ids.contains(&e.workspace_id);
+                let ws_name = repos::workspaces::find_by_id(&db.0, &e.workspace_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|w| w.name);
                 RecentWorkspaceDto {
                     workspace_id: e.workspace_id,
                     last_used_at: e.last_used_at,
                     is_pinned: e.is_pinned,
+                    name: ws_name,
                     label: optional_label(&label.label),
                     label_full: optional_label(&label.label_full),
                     anomaly,
@@ -10821,6 +10899,76 @@ pub async fn impl_sandbox_list_runtimes(
         .into_iter()
         .map(Into::into)
         .collect())
+}
+
+// ---- Terminal commands (ADR-0024 Part B) ----
+
+/// Tauri-backed emitter: pumps terminal output to the frontend via the
+/// `terminal-output` event. The payload is `{ id, data }` where `data` is
+/// a UTF-8 string (xterm.js writes strings).
+pub struct TauriTerminalEmitter {
+    pub app: tauri::AppHandle,
+}
+
+impl nuomi_core::services::terminal_manager::TerminalEventEmitter for TauriTerminalEmitter {
+    fn emit_output(&self, terminal_id: &str, data: &[u8]) {
+        // xterm.js expects a string; lossy conversion is fine for terminal
+        // output (invalid UTF-8 bytes render as replacement chars).
+        let payload = serde_json::json!({
+            "id": terminal_id,
+            "data": String::from_utf8_lossy(data).to_string(),
+        });
+        if let Err(e) = self.app.emit("terminal-output", payload) {
+            tracing::warn!(error = %e, terminal_id, "terminal output emit failed");
+        }
+    }
+}
+
+/// Spawns a new interactive terminal. Returns the terminal id.
+pub async fn impl_terminal_create(
+    state: &AppState,
+    cwd: Option<String>,
+) -> Result<String, IpcError> {
+    let mgr = state.terminal_manager.read().unwrap();
+    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    let cwd_path = cwd.as_deref().map(std::path::Path::new);
+    Ok(mgr.create(cwd_path)?)
+}
+
+/// Writes data to the terminal's stdin.
+pub async fn impl_terminal_write(
+    state: &AppState,
+    id: String,
+    data: String,
+) -> Result<(), IpcError> {
+    let mgr = state.terminal_manager.read().unwrap();
+    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    mgr.write(&id, data.as_bytes())?;
+    Ok(())
+}
+
+/// Resizes the terminal.
+pub async fn impl_terminal_resize(
+    state: &AppState,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), IpcError> {
+    let mgr = state.terminal_manager.read().unwrap();
+    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    mgr.resize(&id, cols, rows)?;
+    Ok(())
+}
+
+/// Kills the terminal.
+pub async fn impl_terminal_kill(
+    state: &AppState,
+    id: String,
+) -> Result<(), IpcError> {
+    let mgr = state.terminal_manager.read().unwrap();
+    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    mgr.kill(&id)?;
+    Ok(())
 }
 
 #[cfg(test)]

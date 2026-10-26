@@ -588,58 +588,66 @@ export function testDoubleCommands(): CommandSet {
     async reclaimOrphanSessions(_workspaceId: string) {
       return ok(0);
     },
-    async workspaceAddDirectory(path: string) {
-      // Mirror v2 single-open semantics: open workspace → join it (the fresh
-      // directory auto-focuses), empty state → fresh workspace containing
-      // only this directory.
-      const displayName = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+    async workspaceCreate(name: string, initialPath?: string | null) {
+      const trimmed = name.trim();
+      if (!trimmed) return err("workspace.invalid_name", "name must not be empty");
       const existing = tdState.workspaces ?? [];
-      const open = existing.find((w) => w.isActive);
-      if (open) {
-        const dir: WorkDirectoryDto = {
+      const id = nextId("ws");
+      const dirs: WorkDirectoryDto[] = [];
+      if (initialPath) {
+        const displayName = initialPath.split(/[\\/]/).filter(Boolean).pop() ?? initialPath;
+        dirs.push({
           id: nextId("dir"),
-          absPath: path,
+          absPath: initialPath,
           displayName,
           mounted: true,
           addedAt: Date.now(),
           available: true,
           isActive: false,
-        };
-        open.directories = [...(open.directories ?? []), dir];
-        tdState.activeDirectoryId = dir.id;
-        const names = open.directories.map((d) => d.displayName).join("-");
-        open.label = names || null;
-        open.labelFull = names || null;
-        open.directoryPresent = open.directories.some((d) => d.available);
-        return ok(markActiveDirectories(open));
+        });
       }
-      const dirId = nextId("dir");
       const entry: WorkspaceEntryDto = {
-        id: nextId("ws"),
-        rootPath: path,
+        id,
+        rootPath: id,
         colorTag: "paper-yellow",
         createdAt: Date.now(),
-        isActive: true,
-        directoryPresent: true,
-        isOpen: true,
-        isFocused: true,
-        label: displayName,
-        labelFull: displayName,
-        directories: [
-          {
-            id: dirId,
-            absPath: path,
-            displayName,
-            mounted: true,
-            addedAt: Date.now(),
-            available: true,
-            isActive: false,
-          },
-        ],
+        isActive: false,
+        directoryPresent: dirs.length > 0,
+        name: trimmed,
+        isOpen: false,
+        isFocused: false,
+        label: trimmed,
+        labelFull: trimmed,
+        directories: dirs.length > 0 ? dirs : undefined,
       };
-      tdState.activeDirectoryId = dirId;
-      tdState.workspaces = [...existing.map((w) => ({ ...w, isActive: false })), entry];
+      tdState.workspaces = [...existing, entry];
       return ok(markActiveDirectories(entry));
+    },
+    async workspaceAddDirectory(path: string) {
+      // ADR-0024 Part A-d: requires an open workspace. Empty state → error
+      // (frontend prompts the user to create one first).
+      const displayName = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+      const existing = tdState.workspaces ?? [];
+      const open = existing.find((w) => w.isActive);
+      if (!open) {
+        return err("workspace.no_open_workspace", `no open workspace — create one first to add: ${path}`);
+      }
+      const dir: WorkDirectoryDto = {
+        id: nextId("dir"),
+        absPath: path,
+        displayName,
+        mounted: true,
+        addedAt: Date.now(),
+        available: true,
+        isActive: false,
+      };
+      open.directories = [...(open.directories ?? []), dir];
+      tdState.activeDirectoryId = dir.id;
+      const names = open.directories.map((d) => d.displayName).join("-");
+      open.label = names || null;
+      open.labelFull = names || null;
+      open.directoryPresent = open.directories.some((d) => d.available);
+      return ok(markActiveDirectories(open));
     },
     async workspaceRemoveDirectory(workspaceId: string, directoryId: string) {
       const existing = tdState.workspaces ?? [];
@@ -1395,7 +1403,7 @@ export function testDoubleCommands(): CommandSet {
     async getConversation(sessionId) {
       const s = tdState.sessions.find((s) => s.id === sessionId);
       return s
-        ? ok(s)
+        ? ok({ ...s, workDirectoryId: tdState.sessionDirectories[sessionId] ?? null })
         : err("conversation.not_found", `session#${sessionId} not found`);
     },
     async setConversationAgent(sessionId, agent) {
@@ -1973,6 +1981,19 @@ export function testDoubleCommands(): CommandSet {
     },
     async sandboxListRuntimes() {
       return ok(tdState.sandboxRuntimes);
+    },
+    // Terminal commands (ADR-0024 Part B): test-double stubs — no real pty.
+    async terminalCreate(_cwd?: string | null) {
+      return ok(`term-${Date.now()}`);
+    },
+    async terminalWrite(_id: string, _data: string) {
+      return ok(null);
+    },
+    async terminalResize(_id: string, _cols: number, _rows: number) {
+      return ok(null);
+    },
+    async terminalKill(_id: string) {
+      return ok(null);
     },
   };
   return cmds;

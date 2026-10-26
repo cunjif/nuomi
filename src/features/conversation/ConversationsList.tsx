@@ -63,7 +63,7 @@ export function ConversationsList(): ReactNode {
   });
 
   const workspaceLabelMap = new Map(
-    (workspacesQuery.data ?? []).map((ws) => [ws.id, ws.labelFull ?? ws.rootPath]),
+    (workspacesQuery.data ?? []).map((ws) => [ws.id, ws.name ?? ws.labelFull ?? ws.rootPath]),
   );
 
   const resumeMut = useMutation({

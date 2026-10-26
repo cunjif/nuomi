@@ -233,6 +233,7 @@ mod tests {
             created_at: 1,
             is_active: false,
             is_pinned: false,
+            name: None,
         };
         crate::store::repos::workspaces::insert(&conn, &ws).unwrap();
         crate::store::repos::work_directories::add(&conn, "ws-1", "C:/bind/root", "root").unwrap();
@@ -268,6 +269,7 @@ mod tests {
                 created_at: 2,
                 is_active: false,
                 is_pinned: false,
+                name: None,
             },
         )
         .unwrap();

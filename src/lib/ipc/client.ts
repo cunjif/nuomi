@@ -339,6 +339,8 @@ export const ipc = {
   listOrphanSessions: () => unwrap(current.listOrphanSessions()),
   reclaimOrphanSessions: (workspaceId: string) =>
     unwrap(current.reclaimOrphanSessions(workspaceId)),
+  workspaceCreate: (name: string, initialPath?: string) =>
+    unwrap(current.workspaceCreate(name, initialPath ?? null)),
   workspaceAddDirectory: (path: string) => unwrap(current.workspaceAddDirectory(path)),
   workspaceRemoveDirectory: (workspaceId: string, directoryId: string) =>
     unwrap(current.workspaceRemoveDirectory(workspaceId, directoryId)),
@@ -352,6 +354,11 @@ export const ipc = {
     unwrap(current.workspaceClosePreview(workspaceId)),
   workspaceSwitch: (workspaceId: string) => unwrap(current.workspaceSwitch(workspaceId)),
   workspaceGetOpen: () => unwrap(current.workspaceGetOpen()),
+  terminalCreate: (cwd?: string) => unwrap(current.terminalCreate(cwd ?? null)),
+  terminalWrite: (id: string, data: string) => unwrap(current.terminalWrite(id, data)),
+  terminalResize: (id: string, cols: number, rows: number) =>
+    unwrap(current.terminalResize(id, cols, rows)),
+  terminalKill: (id: string) => unwrap(current.terminalKill(id)),
   workspaceFocusDirectory: (workspaceId: string, directoryId: string) =>
     unwrap(current.workspaceFocusDirectory(workspaceId, directoryId)),
   pinWorkspace: (id: string) => unwrap(current.pinWorkspace(id)),

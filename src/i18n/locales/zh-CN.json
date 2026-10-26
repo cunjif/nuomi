@@ -308,6 +308,7 @@
     "optimizeRetry": "重新优化",
     "optimizeDiscard": "放弃",
     "optimizeFailed": "提示词优化失败：{{message}}",
+    "workDirectory": "工作目录",
     "contextUsage": "上下文用量",
     "contextUsageTitle": "上下文用量与压缩记录",
     "contextUsagePopupLabel": "Context 压缩工作浮窗",
@@ -993,7 +994,8 @@
     "areaLabel": "主区域切换",
     "chat": "对话",
     "editor": "文件编辑",
-    "workbench": "工作台"
+    "workbench": "工作台",
+    "terminal": "终端"
   },
   "editor": {
     "languageLabel": "语言",
@@ -1049,6 +1051,8 @@
   "files": {
     "treeLabel": "工作区文件",
     "dirEmpty": "空目录",
+    "noWorkDir": "暂无工作目录",
+    "addWorkDir": "添加工作目录",
     "loadFailedDir": "读取目录失败",
     "saveFailed": "保存文件失败",
     "saved": "文件已保存",
@@ -1113,6 +1117,18 @@
     "pickUnavailable": "目录选择器不可用，请手动输入路径",
     "listTitle": "工作区列表",
     "addNew": "新增工作区",
+    "create": {
+      "title": "创建工作区",
+      "nameLabel": "工作区名称",
+      "namePlaceholder": "输入工作区名称",
+      "nameRequired": "请输入工作区名称",
+      "dirLabel": "初始目录（可选）",
+      "dirPlaceholder": "选择或输入目录路径",
+      "browse": "浏览",
+      "confirm": "创建",
+      "created": "工作区已创建",
+      "failed": "创建工作区失败"
+    },
     "add": "添加工作区",
     "added": "工作区已新增",
     "addFailed": "新增工作区失败",
@@ -1161,6 +1177,12 @@
       "runningBody": "以下任务仍在运行，关闭工作区后它们将转入后台继续：",
       "stillClose": "仍要关闭"
     }
+  },
+  "terminal": {
+    "areaLabel": "终端",
+    "empty": "尚未打开终端",
+    "new": "新建终端",
+    "close": "关闭终端"
   },
   "capability": {
     "reasoning": "推理",

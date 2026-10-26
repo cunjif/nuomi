@@ -16,6 +16,9 @@ pub struct WorkspaceEntry {
     pub created_at: i64,
     pub is_active: bool,
     pub is_pinned: bool,
+    /// User-provided name (ADR-0024 Part A). NULL for legacy workspaces or
+    /// unnamed ones — display falls back to the derived label then id.
+    pub name: Option<String>,
 }
 
 const ENTITY: &str = "workspace";
@@ -24,8 +27,8 @@ const ENTITY: &str = "workspace";
 /// already registered (UNIQUE constraint).
 pub fn insert(conn: &Connection, entry: &WorkspaceEntry) -> Result<(), StoreError> {
     match conn.execute(
-        "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active, is_pinned, name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             entry.id,
             entry.root_path,
@@ -33,6 +36,7 @@ pub fn insert(conn: &Connection, entry: &WorkspaceEntry) -> Result<(), StoreErro
             entry.created_at,
             entry.is_active as i64,
             entry.is_pinned as i64,
+            entry.name,
         ],
     ) {
         Ok(_) => Ok(()),
@@ -51,7 +55,7 @@ pub fn insert(conn: &Connection, entry: &WorkspaceEntry) -> Result<(), StoreErro
 /// Lists all registered workspaces ordered by `created_at ASC`.
 pub fn list(conn: &Connection) -> Result<Vec<WorkspaceEntry>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned, name
          FROM workspaces ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map([], row_to_entry)?;
@@ -64,7 +68,7 @@ pub fn find_by_path(
     root_path: &str,
 ) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned, name
          FROM workspaces WHERE root_path = ?1",
         params![root_path],
         row_to_entry,
@@ -76,7 +80,7 @@ pub fn find_by_path(
 /// Finds a workspace by id.
 pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned, name
          FROM workspaces WHERE id = ?1",
         params![id],
         row_to_entry,
@@ -88,7 +92,7 @@ pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<WorkspaceEntry>,
 /// Returns the currently active workspace, if any.
 pub fn find_active(conn: &Connection) -> Result<Option<WorkspaceEntry>, StoreError> {
     conn.query_row(
-        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned
+        "SELECT id, root_path, color_tag, created_at, is_active, is_pinned, name
          FROM workspaces WHERE is_active = 1",
         [],
         row_to_entry,
@@ -167,6 +171,23 @@ pub fn unpin(conn: &Connection, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Sets the user-provided name of a workspace (ADR-0024 Part A). Pass `None`
+/// to clear the name (display falls back to the derived label). Returns
+/// `NotFound` when the id does not match any row.
+pub fn set_name(conn: &Connection, id: &str, name: Option<&str>) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE workspaces SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: ENTITY,
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceEntry> {
     let is_active: i64 = row.get(4)?;
     let is_pinned: i64 = row.get(5)?;
@@ -177,6 +198,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceEntry> {
         created_at: row.get(3)?,
         is_active: is_active != 0,
         is_pinned: is_pinned != 0,
+        name: row.get(6)?,
     })
 }
 
@@ -199,6 +221,7 @@ mod tests {
             created_at: 1,
             is_active: false,
             is_pinned: false,
+            name: None,
         }
     }
 

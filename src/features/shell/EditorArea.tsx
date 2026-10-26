@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc/client";
+import { useOpenWorkspace } from "../../lib/store/workspaceQueries";
 import {
   activateBuiltinEditorExtensions,
   getOverlays,
@@ -32,8 +33,10 @@ activateBuiltinEditorExtensions();
 export function EditorToolbar(): ReactNode {
   const { t } = useTranslation();
   const workspaceQuery = useQuery({ queryKey: ["workspace"], queryFn: ipc.getWorkspace });
+  const { data: openWorkspace } = useOpenWorkspace();
   const [switchOpen, setSwitchOpen] = useState(false);
   const root = workspaceQuery.data?.root ?? "";
+  const displayName = openWorkspace?.name ?? openWorkspace?.label ?? openWorkspace?.labelFull ?? root;
   // Subscribe so contributed toolbar actions appear/disappear live when an
   // extension is toggled in the manager panel.
   useEditorExtVersion();
@@ -58,8 +61,8 @@ export function EditorToolbar(): ReactNode {
       <WorkspaceListDialog open={switchOpen} onClose={() => setSwitchOpen(false)} />
       <div className="flex items-center gap-1 border-t border-ink-muted/30 px-2 py-1 text-xs">
         <span className="shrink-0 font-semibold uppercase tracking-wide text-ink-muted">{t("workspace.current")}</span>
-        <span className="min-w-0 truncate font-mono text-ink-muted" title={root}>
-          {root}
+        <span className="min-w-0 truncate font-mono text-ink-muted" title={displayName}>
+          {displayName}
         </span>
       </div>
     </div>

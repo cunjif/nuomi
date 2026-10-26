@@ -26,6 +26,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-opener": "^2.7.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "i18next": "^26.4.0",
     "marked": "^18.0.11",
     "monaco-editor": "^0.56.0",

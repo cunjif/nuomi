@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CommandContext } from "../../../lib/commands/registry";
 import { describeError } from "../../../i18n";
 import { ipc } from "../../../lib/ipc/client";
@@ -41,6 +41,17 @@ export function GroupConversationView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const sessionId = useUiStore((s) => s.selectedSessionId);
+  // Bound work-directory id (chat_rich_bind 6.4) — same query key as
+  // ChatView's convQuery → shared cache, no extra fetch.
+  const convQuery = useQuery({
+    queryKey: ["conversation", sessionId],
+    queryFn: () =>
+      sessionId !== null
+        ? ipc.getConversation(sessionId)
+        : Promise.reject(new Error("no session")),
+    enabled: sessionId !== null,
+    staleTime: 10_000,
+  });
   const navigate = useUiStore((s) => s.setView);
   const selectSession = useUiStore((s) => s.selectSession);
   const { cycleTheme } = useTheme();
@@ -312,6 +323,7 @@ export function GroupConversationView(): ReactNode {
         pending={submitMut.isPending}
         commandContext={commandContext}
         sessionId={sessionId}
+        workDirectoryId={convQuery.data?.workDirectoryId ?? null}
         topSlot={
           quotedExcerpt !== null ? (
             <QuotePreviewBar

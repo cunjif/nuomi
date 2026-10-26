@@ -22,6 +22,7 @@ pub mod source_collector;
 pub mod source_probe;
 pub mod team_former;
 pub mod team_runner;
+pub mod terminal_manager;
 pub mod workspace;
 pub mod workspace_guard;
 pub mod workspace_label;

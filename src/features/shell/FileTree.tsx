@@ -8,9 +8,11 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
 import { useUiStore } from "../../lib/store/uiStore";
+import { useOpenWorkspace } from "../../lib/store/workspaceQueries";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/ContextMenu";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import {
@@ -50,7 +52,16 @@ function useNodeCtx(): NodeContext {
 export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const rootQuery = useQuery({ queryKey: ["dir", workspaceId, ""], queryFn: () => ipc.listDir("", workspaceId) });
+  const { data: openWorkspace } = useOpenWorkspace();
+  const hasDirectories = (openWorkspace?.directories ?? []).some((d) => d.mounted);
+  const rootQuery = useQuery({ queryKey: ["dir", workspaceId, ""], queryFn: () => ipc.listDir("", workspaceId), enabled: hasDirectories });
+
+  const handleAddDir = async (): Promise<void> => {
+    const selected = await pickFolder({ directory: true, multiple: false });
+    if (!selected) return;
+    await useUiStore.getState().openDirectory(selected);
+    void qc.invalidateQueries({ queryKey: ["workspace"] });
+  };
 
   const selectedPaths = useUiStore((s) => s.editorByWorkspace[workspaceId]?.selectedPaths ?? []);
   const lastSelectedPath = useUiStore((s) => s.editorByWorkspace[workspaceId]?.lastSelectedPath ?? null);
@@ -280,7 +291,19 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
           }
         }}
       >
-        {error && (
+        {!hasDirectories && (
+          <div className="flex flex-col items-center gap-2 py-4">
+            <p className="text-xs text-ink-muted">{t("files.noWorkDir")}</p>
+            <button
+              type="button"
+              onClick={() => void handleAddDir()}
+              className="flex items-center gap-1 rounded border border-dashed border-ink-muted/40 px-2 py-1 text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink-accent"
+            >
+              {t("files.addWorkDir")}
+            </button>
+          </div>
+        )}
+        {hasDirectories && error && (
           <p className="mb-1 text-xs text-state-danger" onClick={() => setError(null)}>
             {t("files.opFailed")}: {error}
           </p>
@@ -306,7 +329,7 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
             onSubmit={(name) => onCreateSubmit("", name, creating.isDir)}
           />
         )}
-        {!rootQuery.isLoading && (rootQuery.data?.length ?? 0) === 0 && !rootQuery.isError && (
+        {hasDirectories && !rootQuery.isLoading && (rootQuery.data?.length ?? 0) === 0 && !rootQuery.isError && (
           <p className="text-xs text-ink-muted">{t("files.dirEmpty")}</p>
         )}
       </div>

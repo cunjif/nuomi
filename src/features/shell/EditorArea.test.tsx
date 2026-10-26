@@ -154,8 +154,7 @@ describe("EditorArea — workspace sidebar toolbar", () => {
     expect(tdState.workspaces.find((w) => w.id === "ws-current")?.isFocused).toBe(true);
   });
 
-  it("新增工作区 button calls the OS folder picker", async () => {
-    folderPick.mockResolvedValue("D:\\picked\\dir");
+  it("新增工作区 button opens create dialog", async () => {
     tdState.workspaces.push(
       { id: "ws-current", rootPath: "C:\\workspace", colorTag: "ink-blue", createdAt: 1, isActive: false, isFocused: true, directoryPresent: true },
     );
@@ -164,6 +163,7 @@ describe("EditorArea — workspace sidebar toolbar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "切换工作区" }));
     fireEvent.click(await screen.findByText("新增工作区"));
 
-    await waitFor(() => expect(folderPick).toHaveBeenCalled());
+    // WorkspaceCreateDialog opens with a name input.
+    expect(await screen.findByPlaceholderText("输入工作区名称")).toBeTruthy();
   });
 });

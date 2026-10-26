@@ -387,6 +387,7 @@ mod tests {
                 created_at: 1,
                 is_active: true,
                 is_pinned: false,
+                name: None,
             },
         )
         .unwrap();

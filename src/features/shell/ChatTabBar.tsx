@@ -51,7 +51,7 @@ export function ChatTabBar(): ReactNode {
   const workspaceLabelMap = useMemo(
     () =>
       new Map(
-        (workspacesQuery.data ?? []).map((ws) => [ws.id, ws.labelFull ?? ws.rootPath]),
+        (workspacesQuery.data ?? []).map((ws) => [ws.id, ws.name ?? ws.labelFull ?? ws.rootPath]),
       ),
     [workspacesQuery.data],
   );

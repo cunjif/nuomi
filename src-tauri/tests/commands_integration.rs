@@ -1070,3 +1070,54 @@ async fn workspace_v2_conversation_filter_covers_all_directories() {
         .unwrap();
     assert!(all_rows.len() >= 3);
 }
+
+#[tokio::test]
+async fn get_conversation_exposes_bound_work_directory_id() {
+    let (state, dir) = boot(vec![]).await;
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    let ws = commands::impl_workspace_add_directory(&state, alpha.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    let dir_id = ws.directories.as_ref().unwrap()[0].id.clone();
+
+    // Create a session bound to the work directory (chat_rich_bind 6.4).
+    let conv = commands::impl_create_conversation(
+        &state,
+        commands::ConversationInput {
+            kind: "chat".to_string(),
+            title: Some("bound".to_string()),
+            agent: None,
+            team_id: None,
+            workspace_id: ws.id.clone(),
+            work_directory_id: Some(dir_id.clone()),
+        },
+    )
+    .await
+    .unwrap();
+
+    // get_conversation surfaces the binding on the DTO.
+    let dto = commands::impl_get_conversation(&state, conv.id.clone())
+        .await
+        .unwrap();
+    assert_eq!(dto.work_directory_id.as_deref(), Some(dir_id.as_str()));
+
+    // An unbound session (legacy / None) round-trips as None.
+    let unbound = commands::impl_create_conversation(
+        &state,
+        commands::ConversationInput {
+            kind: "chat".to_string(),
+            title: Some("unbound".to_string()),
+            agent: None,
+            team_id: None,
+            workspace_id: ws.id.clone(),
+            work_directory_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let dto2 = commands::impl_get_conversation(&state, unbound.id)
+        .await
+        .unwrap();
+    assert_eq!(dto2.work_directory_id, None);
+}

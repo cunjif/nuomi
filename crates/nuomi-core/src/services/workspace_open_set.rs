@@ -434,6 +434,7 @@ mod tests {
                 created_at: crate::domain::now_ms(),
                 is_active: false,
                 is_pinned: false,
+                name: None,
             },
         )
         .unwrap();

@@ -14,7 +14,7 @@ export type View = "chat" | "board" | "trace" | "git" | "sandbox" | "approvals" 
  * `view` selects) or the workbench (file editor). Mutually exclusive —
  * opening a workspace file flips to "workbench", Alt+H toggles back to "chat".
  */
-export type ActiveArea = "chat" | "workbench";
+export type ActiveArea = "chat" | "workbench" | "terminal";
 
 /**
  * The five hand-drawn themes. `paper-light`/`eink-paper`/`grid-notebook` are
@@ -111,6 +111,13 @@ function emptyEditorState(): WorkspaceEditorState {
 /** Layout mode for the main content area (split retired with ADR-0021). */
 export type LayoutMode = "single" | "overview";
 
+/** A terminal instance in the per-workspace terminal tab strip (ADR-0024). */
+export interface TerminalInstance {
+  id: string;
+  title: string;
+  createdAt: number;
+}
+
 /**
  * A workspace-level action (switch away / close) intercepted by the unsaved
  * edits guard: the action is parked here while the guard dialog asks the
@@ -153,6 +160,12 @@ interface UiState {
    */
   pendingWorkspaceAction: PendingWorkspaceAction | null;
   /**
+   * ADR-0024 Part A-f: when `openDirectory` hits `NoOpenWorkspace`, the path
+   * is parked here so the Shell can show a "create workspace" dialog with the
+   * directory pre-filled. Null = no create dialog pending.
+   */
+  pendingCreateWorkspaceDir: string | null;
+  /**
    * The single open workspace id (ADR-0021 single-open); null = empty state.
    * Also the pointer for the workbench's editor bucket.
    */
@@ -172,6 +185,16 @@ interface UiState {
    * switch and app exit.
    */
   tempFileTab: { absPath: string; name: string } | null;
+  /**
+   * ADR-0024 Part B: per-workspace terminal instances (multi-tab). Each
+   * workspace owns an independent set of terminals. Keyed by workspace id.
+   */
+  terminalByWorkspace: Record<string, { terminals: TerminalInstance[]; activeTerminalId: string | null }>;
+  /**
+   * ADR-0024 Part B: remembers the previous area when toggling to terminal
+   * via Alt+`, so Alt+` again switches back. Null = no previous area recorded.
+   */
+  previousArea: ActiveArea | null;
   /**
    * Current layout mode for the main content area (split retired with
    * ADR-0021 single-open; the type no longer admits "split").
@@ -234,11 +257,27 @@ interface UiState {
    */
   switchWorkspace: (workspaceId: string) => void;
   /**
-   * Opens a directory under the two-level model (ADR-0021): empty state →
-   * opens (or creates) the path's owning workspace; open workspace → the
-   * directory joins it and auto-focuses. Calls IPC workspaceAddDirectory.
+   * Opens a directory under the two-level model (ADR-0021 + ADR-0024):
+   * open workspace → the directory joins it and auto-focuses; **no open
+   * workspace → parks the path in `pendingCreateWorkspaceDir`** so the Shell
+   * shows a "create workspace" dialog (the user names the new workspace,
+   * optionally pre-filling this directory as its initial directory).
    */
   openDirectory: (path: string) => Promise<void>;
+  /**
+   * Creates a named workspace (ADR-0024 Part A). Optionally mounts an initial
+   * directory. The new workspace is **not** auto-opened — call
+   * `switchToWorkspace` afterwards to open it.
+   */
+  createWorkspace: (name: string, initialPath?: string) => Promise<string>;
+  /** Clears the pending-create-workspace prompt (cancel / dismiss). */
+  clearPendingCreateWorkspaceDir: () => void;
+  /** ADR-0024 Part B: add a terminal to a workspace's bucket. */
+  addTerminal: (workspaceId: string, terminal: TerminalInstance) => void;
+  /** ADR-0024 Part B: remove a terminal from a workspace's bucket. */
+  removeTerminal: (workspaceId: string, terminalId: string) => void;
+  /** ADR-0024 Part B: set the active terminal in a workspace's bucket. */
+  setActiveTerminal: (workspaceId: string, terminalId: string) => void;
   /**
    * Switches to another workspace (single-open transition): the backend
    * saves the outgoing snapshot, closes it and opens the target. Editor
@@ -290,9 +329,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   editorByWorkspace: {},
   runDrawerTaskId: null,
   pendingWorkspaceAction: null,
+  pendingCreateWorkspaceDir: null,
   activeWorkspaceId: null,
   lastActiveSessionByWorkspace: {},
   tempFileTab: null,
+  terminalByWorkspace: {},
+  previousArea: null,
   layoutMode: "single",
   conversationWorkspaceFilter: "all",
   setConversationWorkspaceFilter: (filter) => set({ conversationWorkspaceFilter: filter }),
@@ -513,12 +555,68 @@ export const useUiStore = create<UiState>((set, get) => ({
   setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id, tempFileTab: null }),
   switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId, tempFileTab: null }),
   openDirectory: async (path) => {
+    try {
+      const entry = await measureAsync(
+        "workspace.add_directory",
+        () => ipc.workspaceAddDirectory(path),
+        { path },
+      );
+      set({ activeWorkspaceId: entry.id, tempFileTab: null });
+    } catch (e: unknown) {
+      // ADR-0024 Part A-d: no open workspace → park the path so the Shell
+      // shows a "create workspace" dialog with this directory pre-filled.
+      if (e instanceof Error && e.message.includes("no_open_workspace")) {
+        set({ pendingCreateWorkspaceDir: path });
+        return;
+      }
+      throw e;
+    }
+  },
+  createWorkspace: async (name, initialPath) => {
     const entry = await measureAsync(
-      "workspace.add_directory",
-      () => ipc.workspaceAddDirectory(path),
-      { path },
+      "workspace.create",
+      () => ipc.workspaceCreate(name, initialPath),
+      { name },
     );
-    set({ activeWorkspaceId: entry.id, tempFileTab: null });
+    return entry.id;
+  },
+  clearPendingCreateWorkspaceDir: () => set({ pendingCreateWorkspaceDir: null }),
+  addTerminal: (workspaceId, terminal) => {
+    const bucket = get().terminalByWorkspace[workspaceId] ?? { terminals: [], activeTerminalId: null };
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: {
+          terminals: [...bucket.terminals, terminal],
+          activeTerminalId: terminal.id,
+        },
+      },
+    });
+  },
+  removeTerminal: (workspaceId, terminalId) => {
+    const bucket = get().terminalByWorkspace[workspaceId];
+    if (!bucket) return;
+    const remaining = bucket.terminals.filter((t) => t.id !== terminalId);
+    const activeTerminalId =
+      bucket.activeTerminalId === terminalId
+        ? (remaining[remaining.length - 1]?.id ?? null)
+        : bucket.activeTerminalId;
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: { terminals: remaining, activeTerminalId },
+      },
+    });
+  },
+  setActiveTerminal: (workspaceId, terminalId) => {
+    const bucket = get().terminalByWorkspace[workspaceId];
+    if (!bucket) return;
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: { ...bucket, activeTerminalId: terminalId },
+      },
+    });
   },
   switchToWorkspace: async (id) => {
     await measureAsync(

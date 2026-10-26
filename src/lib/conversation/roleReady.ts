@@ -45,3 +45,18 @@ export function readMemoryConfig(params: JsonValue): {
 export function isRoleReady(role: { providerId: string | null; params: JsonValue }): boolean {
   return role.providerId !== null || readAgentProfileId(role.params) !== null;
 }
+
+/**
+ * The steward main role id (seeded by migration 0035, Rust const
+ * `STEWARD_MAIN_ROLE_ID`). The steward main role is the configuration
+ * carrier for the steward chat surface — never a user-selectable chat
+ * participant, so it is filtered out of all "pick a Role Agent" lists
+ * on the conversation page (new-conversation wizard, in-chat agent
+ * picker).
+ */
+export const STEWARD_MAIN_ROLE_ID = "role_steward_main";
+
+/** True for the steward main role — excluded from chat-participant picks. */
+export function isStewardMainRole(role: { id: string }): boolean {
+  return role.id === STEWARD_MAIN_ROLE_ID;
+}

@@ -33,7 +33,7 @@ export function WorkspaceFilter(): ReactNode {
         <option value="all">{t("conversation.workspaceFilterAll")}</option>
         {workspaces.map((ws) => (
           <option key={ws.id} value={ws.id}>
-            {ws.label ?? ws.rootPath}
+            {ws.name ?? ws.label ?? ws.rootPath}
           </option>
         ))}
       </select>

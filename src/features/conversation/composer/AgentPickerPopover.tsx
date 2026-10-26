@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { groupAgentOptions } from "../../../lib/conversation/agentResolve";
-import { isRoleReady } from "../../../lib/conversation/roleReady";
+import { isRoleReady, isStewardMainRole } from "../../../lib/conversation/roleReady";
 
 export interface AgentPickerPopoverProps {
   sessionId: string;
@@ -46,8 +46,10 @@ export function AgentPickerPopover({
     }
     return m;
   }, [roles]);
-  const readyRoles = role.filter((o) => readyMap.get(o.id) === true);
-  const unboundRoles = role.filter((o) => readyMap.get(o.id) !== true);
+  const readyRoles = role.filter((o) => readyMap.get(o.id) === true && !isStewardMainRole(o));
+  const unboundRoles = role.filter(
+    (o) => readyMap.get(o.id) !== true && !isStewardMainRole(o),
+  );
 
   const filterFn = (name: string): boolean =>
     search.length === 0 || name.toLowerCase().includes(search.toLowerCase());

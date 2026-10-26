@@ -72,7 +72,7 @@ export function WorkspaceBar() {
         return (
           <button
             key={ws.id}
-            onClick={() => requestSwitchToWorkspace(ws.id, ws.label ?? ws.id)}
+            onClick={() => requestSwitchToWorkspace(ws.id, ws.name ?? ws.label ?? ws.id)}
             style={{ contain: "layout style" }}
             className={`group flex items-center gap-1.5 px-3 py-1 rounded-t-md text-sm transition-colors ${
               isFocused
@@ -84,7 +84,7 @@ export function WorkspaceBar() {
               className={`w-2 h-2 rounded-full shrink-0 ${workspaceColorClass(ws.colorTag)}`}
             />
             <span className="truncate max-w-32">
-              {ws.label ?? ws.id}
+              {ws.name ?? ws.label ?? ws.id}
             </span>
             {isPinned && <span className="text-xs text-ink-muted">★</span>}
             {unreadCount > 0 && (
@@ -100,7 +100,7 @@ export function WorkspaceBar() {
                   // registry row and directories stay, reopening restores.
                   // Guarded: unsaved edits park the action in the guard
                   // dialog instead of silently discarding them.
-                  requestCloseWorkspace(ws.id, ws.label ?? ws.id);
+                  requestCloseWorkspace(ws.id, ws.name ?? ws.label ?? ws.id);
                 }}
                 className="ml-1 text-xs text-ink-muted opacity-0 group-hover:opacity-100 hover:text-ink"
               >

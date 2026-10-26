@@ -708,7 +708,17 @@ pub async fn get_active_workspace(
     commands::impl_get_active_workspace(&state).await
 }
 
-// ---- Two-level workspace commands (ADR-0021) ----
+// ---- Two-level workspace commands (ADR-0021 + ADR-0024) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_create(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    initial_path: Option<String>,
+) -> Result<commands::WorkspaceEntryDto, IpcError> {
+    commands::impl_workspace_create(&state, name, initial_path).await
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -1880,4 +1890,45 @@ pub async fn sandbox_list_runtimes(
 #[specta::specta]
 pub fn __nuomi_heartbeat(state: tauri::State<'_, crate::shell_resilience::WatchdogState>) {
     state.mark_ready();
+}
+
+// ---- Terminal commands (ADR-0024 Part B) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_create(
+    state: tauri::State<'_, AppState>,
+    cwd: Option<String>,
+) -> Result<String, IpcError> {
+    commands::impl_terminal_create(&state, cwd).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_write(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    data: String,
+) -> Result<(), IpcError> {
+    commands::impl_terminal_write(&state, id, data).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_resize(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), IpcError> {
+    commands::impl_terminal_resize(&state, id, cols, rows).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_kill(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), IpcError> {
+    commands::impl_terminal_kill(&state, id).await
 }

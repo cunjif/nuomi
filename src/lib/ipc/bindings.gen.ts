@@ -566,6 +566,14 @@ async getActiveWorkspace() : Promise<Result<WorkspaceEntryDto | null, IpcError>>
     else return { status: "error", error: e  as any };
 }
 },
+async workspaceCreate(name: string, initialPath: string | null) : Promise<Result<WorkspaceEntryDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_create", { name, initialPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async workspaceAddDirectory(path: string) : Promise<Result<WorkspaceEntryDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("workspace_add_directory", { path }) };
@@ -1598,6 +1606,38 @@ async sandboxListRuntimes() : Promise<Result<SandboxRuntimeDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async terminalCreate(cwd: string | null) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_create", { cwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalWrite(id: string, data: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_write", { id, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalResize(id: string, cols: number, rows: number) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_resize", { id, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalKill(id: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_kill", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Frontend heartbeat: called once after the React root mounts to signal that
  * the webview is alive. If this never arrives within the watchdog grace
@@ -1685,8 +1725,18 @@ export type ConversationDetailDirectoryDto = { id: string; displayName: string; 
  */
 available: boolean }
 export type ConversationDetailDto = { sessionId: string; title: string | null; kind: string; workspace: ConversationDetailWorkspaceDto | null; workDirectory: ConversationDetailDirectoryDto | null; participants: ConversationParticipantDto[] }
-export type ConversationDetailWorkspaceDto = { id: string; label: string }
-export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[]; workspaceId: string }
+export type ConversationDetailWorkspaceDto = { id: string; 
+/**
+ * User-provided name (ADR-0024 Part A). `None` for legacy/unnamed.
+ */
+name?: string | null; label: string }
+export type ConversationDto = { id: string; title: string; kind: string; teamId: string | null; taskId: string | null; scheduleId: string | null; createdAt: number; updatedAt: number; goal: string | null; mainAgentId: string | null; routeMode: string | null; whiteboardRouteMode: string | null; participantAgents: AgentRefDto[]; todoList: TodoItemDto[]; workspaceId: string; 
+/**
+ * 会话绑定的工目录 id（spec 5.4/6.4，migration 0040）；未绑定时
+ * 为 None（遗留会话回退到 cwd 语义）。仅 `get_conversation` 填充
+ * 真实值，其余从 `Session` 构造的路径默认 None（前端 refetch 会修正）。
+ */
+workDirectoryId?: string | null }
 export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null; workspaceId: string; 
 /**
  * Optional work-directory binding (chat_rich_bind 6.4): the directory
@@ -1919,6 +1969,10 @@ export type PruneRecordDto = { occurredAt: number; budgetTokens: number; approxT
  */
 export type RecentWorkspaceDto = { workspaceId: string; lastUsedAt: number; isPinned: boolean; 
 /**
+ * User-provided name (ADR-0024 Part A). `None` for legacy/unnamed.
+ */
+name?: string | null; 
+/**
  * Derived workspace label (same derivation as `list_workspaces`,
  * ADR-0021 — display names joined with `-`, truncated at 4).
  */
@@ -2119,6 +2173,11 @@ isActive: boolean }
  * (two-level model; the legacy root-dir probe folded into it).
  */
 export type WorkspaceEntryDto = { id: string; rootPath: string; colorTag: string; createdAt: number; isActive: boolean; directoryPresent: boolean; 
+/**
+ * User-provided name (ADR-0024 Part A). `None` for legacy/unnamed
+ * workspaces — display falls back to `label` then `id`.
+ */
+name?: string | null; 
 /**
  * Pinned flag (always restored on startup).
  */

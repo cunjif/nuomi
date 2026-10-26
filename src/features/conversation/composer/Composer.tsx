@@ -29,6 +29,7 @@ import { AttachmentShelf } from "./AttachmentShelf";
 import { OptimizeCompareBar } from "./OptimizeCompareBar";
 import { FunctionMenu } from "./FunctionMenu";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
+import { WorkDirectoryIndicator } from "./WorkDirectoryIndicator";
 import { Icon } from "../../../components/ui/Icon/Icon";
 
 export interface ComposerProps {
@@ -44,6 +45,9 @@ export interface ComposerProps {
   topSlot?: ReactNode;
   /** Session ID for attachment persistence; when null, attachment button is disabled. */
   sessionId?: string | null;
+  /** Bound work-directory id (chat_rich_bind 6.4); shown at the composer's
+   * bottom-left on the same row as the context-usage indicator. */
+  workDirectoryId?: string | null;
 }
 
 /**
@@ -63,6 +67,7 @@ export function Composer({
   leftSlot,
   topSlot,
   sessionId = null,
+  workDirectoryId = null,
 }: ComposerProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -450,7 +455,8 @@ export function Composer({
           </div>
         </div>
       </div>
-      <div className="mt-1 flex justify-end">
+      <div className="mt-1 flex items-center justify-end gap-2">
+        <WorkDirectoryIndicator workDirectoryId={workDirectoryId} />
         <ContextUsageIndicator sessionId={sessionId} />
       </div>
     </form>

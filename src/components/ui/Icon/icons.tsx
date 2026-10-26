@@ -210,6 +210,13 @@ const FileIcon: Glyph = (p) => (
     <path d="M13 3.5v5h5" />
   </svg>
 );
+const TerminalIcon: Glyph = (p) => (
+  <svg {...p}>
+    <rect x="2" y="3" width="20" height="18" rx="2" />
+    <path d="M6 8l3 3-3 3" />
+    <path d="M12 14h6" />
+  </svg>
+);
 const UsersIcon: Glyph = (p) => (
   <svg {...p}>
     <circle cx="9" cy="8.5" r="3" />
@@ -369,6 +376,7 @@ export const iconRegistry = {
   stop: StopIcon,
   branch: BranchIcon,
   tool: ToolIcon,
+  terminal: TerminalIcon,
   file: FileIcon,
   users: UsersIcon,
   sparkles: SparklesIcon,

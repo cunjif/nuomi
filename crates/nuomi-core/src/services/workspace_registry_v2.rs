@@ -59,6 +59,15 @@ pub enum RegistryV2Error {
     AlreadyOpen(String),
     #[error("workspace has no directories to open: {0}")]
     NoDirectories(String),
+    /// ADR-0024 Part A-d: `add_directory` no longer auto-creates a workspace
+    /// when none is open — the caller must prompt the user to create one
+    /// (with a name) first. The path is echoed back so the frontend can
+    /// pre-fill the create dialog's initial-directory field.
+    #[error("no open workspace — create one first to add: {0}")]
+    NoOpenWorkspace(String),
+    /// ADR-0024 Part A-c: `create` rejects empty / whitespace-only names.
+    #[error("workspace name must not be empty")]
+    InvalidName,
     /// Close refused without `force`: the workspace has active runs. The
     /// payload carries the run ids so callers (and users) can see what is
     /// still running before confirming. Unsaved editor edits are NOT part of
@@ -126,10 +135,83 @@ impl WorkspaceRegistryV2 {
         Ok(db.0)
     }
 
-    /// "打开目录" new semantics (design B1): no open workspace → open the
-    /// path's owning workspace, creating a fresh one when the path is unowned;
-    /// open workspace → the directory joins the current workspace (mounted,
-    /// globally-unique ownership moves it in). Returns the resulting view.
+    /// Creates a named workspace (ADR-0024 Part A-c). The name is required and
+    /// must be non-empty after trimming. An optional `initial_path` mounts the
+    /// first work directory; without one the workspace is created empty (no
+    /// directories, not opened). The workspace is **not** auto-opened — the
+    /// caller opens/switches to it explicitly after creation.
+    pub fn create(
+        &self,
+        name: &str,
+        initial_path: Option<&Path>,
+    ) -> Result<WorkspaceView, RegistryV2Error> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(RegistryV2Error::InvalidName);
+        }
+        let conn = self.conn()?;
+        let id = Uuid::now_v7().to_string();
+        let entry = WorkspaceEntry {
+            root_path: id.clone(),
+            id,
+            color_tag: workspace_palette::color_for(trimmed).0.to_string(),
+            created_at: crate::domain::now_ms(),
+            is_active: false,
+            is_pinned: false,
+            name: Some(trimmed.to_string()),
+        };
+        if let Some(path) = initial_path {
+            if workspace_guard::is_blacklisted(path) {
+                return Err(RegistryV2Error::Blacklisted(
+                    path.to_string_lossy().to_string(),
+                ));
+            }
+            if !path.is_dir() {
+                return Err(RegistryV2Error::DirectoryMissing(
+                    path.to_string_lossy().to_string(),
+                ));
+            }
+            let canonical = workspace_guard::canonicalize(path).map_err(|e| match e {
+                workspace_guard::PathGuardError::InvalidPath(p) => RegistryV2Error::InvalidPath(p),
+                workspace_guard::PathGuardError::Blacklisted(p) => RegistryV2Error::Blacklisted(p),
+                workspace_guard::PathGuardError::Io(io) => RegistryV2Error::Io(io),
+            })?;
+            if workspace_guard::is_blacklisted(&canonical) {
+                return Err(RegistryV2Error::Blacklisted(
+                    canonical.to_string_lossy().to_string(),
+                ));
+            }
+            let abs_path = canonical.to_string_lossy().to_string();
+            nuomi_dir::ensure_nuomi_dir(&canonical)?;
+            let _ = codebase_memory_migrator::migrate(&canonical)?;
+            repo::insert(&conn, &entry)?;
+            // If the path was already owned by another workspace, the repo
+            // transaction moves it in (globally-unique ownership, ADR-0021 #2).
+            let display = workspace_label::derive_display_name(&abs_path, &[])
+                .ok_or_else(|| RegistryV2Error::InvalidPath(abs_path.clone()))?;
+            work_directories::add(&conn, &entry.id, &abs_path, &display)?;
+            emit_json(
+                &conn,
+                &entry.id,
+                "workspace.created",
+                serde_json::json!({ "name": trimmed, "initial_path": abs_path }),
+            );
+        } else {
+            repo::insert(&conn, &entry)?;
+            emit_json(
+                &conn,
+                &entry.id,
+                "workspace.created",
+                serde_json::json!({ "name": trimmed }),
+            );
+        }
+        self.view_of(&conn, &entry.id)
+    }
+
+    /// "添加目录到当前工作区" (ADR-0024 Part A-d): requires an open workspace.
+    /// When none is open, returns [`RegistryV2Error::NoOpenWorkspace`] so the
+    /// frontend can prompt the user to create one first. The directory joins
+    /// the current workspace (mounted, globally-unique ownership moves it in).
     pub fn add_directory(&self, path: &Path) -> Result<WorkspaceView, RegistryV2Error> {
         if workspace_guard::is_blacklisted(path) {
             return Err(RegistryV2Error::Blacklisted(
@@ -154,55 +236,26 @@ impl WorkspaceRegistryV2 {
         let abs_path = canonical.to_string_lossy().to_string();
         let conn = self.conn()?;
 
-        if let Some(current) = current_open_id(&conn)? {
-            // Open workspace: the directory joins it. A path already owned by
-            // the current workspace is simply (re)mounted; any other path
-            // moves in (repo-layer ownership transaction).
-            if let Some(owned) = work_directories::find_by_path(&conn, &abs_path)?
-                .filter(|d| d.workspace_id == current)
-            {
-                work_directories::set_mounted(&conn, &owned.id, true)?;
-                emit_json(
-                    &conn,
-                    &current,
-                    "workspace.directory_mounted",
-                    serde_json::json!({ "directory_id": owned.id }),
-                );
-            } else {
-                let display = derive_display(&conn, &current, &abs_path)?;
-                work_directories::add(&conn, &current, &abs_path, &display)?;
-            }
-            return self.view_of(&conn, &current);
-        }
-
-        // Empty state: an already-owned path opens its owning workspace (no
-        // silent theft from a closed workspace); an unowned path creates a
-        // fresh workspace containing only this directory.
-        if let Some(owned) = work_directories::find_by_path(&conn, &abs_path)? {
+        let current = current_open_id(&conn)?
+            .ok_or_else(|| RegistryV2Error::NoOpenWorkspace(abs_path.clone()))?;
+        // The directory joins the current workspace. A path already owned by
+        // the current workspace is simply (re)mounted; any other path moves in
+        // (repo-layer ownership transaction).
+        if let Some(owned) = work_directories::find_by_path(&conn, &abs_path)?
+            .filter(|d| d.workspace_id == current)
+        {
             work_directories::set_mounted(&conn, &owned.id, true)?;
-            open_single(&conn, &owned.workspace_id)?;
-            return self.view_of(&conn, &owned.workspace_id);
+            emit_json(
+                &conn,
+                &current,
+                "workspace.directory_mounted",
+                serde_json::json!({ "directory_id": owned.id }),
+            );
+        } else {
+            let display = derive_display(&conn, &current, &abs_path)?;
+            work_directories::add(&conn, &current, &abs_path, &display)?;
         }
-        let display = workspace_label::derive_display_name(&abs_path, &[])
-            .ok_or_else(|| RegistryV2Error::InvalidPath(abs_path.clone()))?;
-        let id = Uuid::now_v7().to_string();
-        let entry = WorkspaceEntry {
-            // root_path is a legacy compatibility column (ADR-0021: new
-            // workspaces stop writing meaningful values) — the workspace id
-            // satisfies NOT NULL UNIQUE without colliding with real paths.
-            root_path: id.clone(),
-            id,
-            color_tag: workspace_palette::color_for(&abs_path).0.to_string(),
-            created_at: crate::domain::now_ms(),
-            is_active: false,
-            is_pinned: false,
-        };
-        nuomi_dir::ensure_nuomi_dir(&canonical)?;
-        let _ = codebase_memory_migrator::migrate(&canonical)?;
-        repo::insert(&conn, &entry)?;
-        work_directories::add(&conn, &entry.id, &abs_path, &display)?;
-        open_single(&conn, &entry.id)?;
-        self.view_of(&conn, &entry.id)
+        self.view_of(&conn, &current)
     }
 
     /// Removes a work directory (design B2). Removing the workspace's last
@@ -286,9 +339,7 @@ impl WorkspaceRegistryV2 {
         let conn = self.conn()?;
         let target = repo::find_by_id(&conn, workspace_id)?
             .ok_or_else(|| RegistryV2Error::NotFound(workspace_id.to_string()))?;
-        if work_directories::list_by_workspace(&conn, workspace_id)?.is_empty() {
-            return Err(RegistryV2Error::NoDirectories(workspace_id.to_string()));
-        }
+        // ADR-0024: empty workspaces are switchable (see open_workspace).
         if let Some(current) = current_open_id(&conn)? {
             if current != target.id {
                 // Save the outgoing workspace's layout snapshot first. A
@@ -325,9 +376,9 @@ impl WorkspaceRegistryV2 {
         let conn = self.conn()?;
         let entry = repo::find_by_id(&conn, workspace_id)?
             .ok_or_else(|| RegistryV2Error::NotFound(workspace_id.to_string()))?;
-        if work_directories::list_by_workspace(&conn, workspace_id)?.is_empty() {
-            return Err(RegistryV2Error::NoDirectories(workspace_id.to_string()));
-        }
+        // ADR-0024: empty workspaces (no directories) are openable — the user
+        // adds directories via the + button after opening. The NoDirectories
+        // guard was an ADR-0021 relic (workspaces were directory-derived).
         open_single(&conn, &entry.id)?;
         self.view_of(&conn, &entry.id)
     }
@@ -584,43 +635,46 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn add_directory_from_empty_creates_and_opens_workspace() {
-        let (reg, dir) = v2();
-        let x = make_dir(dir.path(), "alpha");
-        let view = reg.add_directory(&x).unwrap();
-        assert_eq!(view.directories.len(), 1);
-        assert_eq!(view.directories[0].directory.display_name, "alpha");
-        assert!(view.directories[0].directory.mounted);
-        assert!(view.directories[0].available);
-        // root_path 为兼容占位（ADR-0021：不再写入有意义值）
-        assert_eq!(view.entry.root_path, view.entry.id);
-        // 打开态：单行 + 聚焦 + is_active 同步
-        let open = reg.get_open().unwrap().unwrap();
-        assert_eq!(open.entry.id, view.entry.id);
-        let conn = raw_conn(&reg);
-        let (open_rows, active): (i64, String) = conn
-            .query_row(
-                "SELECT (SELECT count(*) FROM workspace_open_state),
-                        (SELECT id FROM workspaces WHERE is_active = 1)",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(open_rows, 1);
-        assert_eq!(active, view.entry.id);
+    /// Test helper: create a named workspace with an initial directory and
+    /// open it (ADR-0024 Part A — `add_directory` no longer auto-creates).
+    fn create_and_open(reg: &WorkspaceRegistryV2, name: &str, path: &Path) -> WorkspaceView {
+        let view = reg.create(name, Some(path)).unwrap();
+        reg.open_workspace(&view.entry.id).unwrap()
     }
 
     #[test]
-    fn add_directory_owned_by_closed_workspace_opens_it_without_theft() {
+    fn add_directory_from_empty_returns_no_open_workspace() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let first = reg.add_directory(&x).unwrap();
+        // ADR-0024 Part A-d: no open workspace → NoOpenWorkspace error.
+        assert!(matches!(
+            reg.add_directory(&x),
+            Err(RegistryV2Error::NoOpenWorkspace(_))
+        ));
+    }
+
+    #[test]
+    fn create_and_open_roundtrip() {
+        let (reg, dir) = v2();
+        let x = make_dir(dir.path(), "alpha");
+        let view = create_and_open(&reg, "my-ws", &x);
+        assert_eq!(view.directories.len(), 1);
+        assert_eq!(view.directories[0].directory.display_name, "alpha");
+        assert_eq!(view.entry.name.as_deref(), Some("my-ws"));
+        let open = reg.get_open().unwrap().unwrap();
+        assert_eq!(open.entry.id, view.entry.id);
+    }
+
+    #[test]
+    fn switch_reopens_closed_workspace() {
+        let (reg, dir) = v2();
+        let x = make_dir(dir.path(), "alpha");
+        let first = create_and_open(&reg, "ws1", &x);
         reg.close(&first.entry.id, true).unwrap();
         assert!(reg.get_open().unwrap().is_none());
 
-        // Re-opening the same directory reopens ITS workspace — no new one.
-        let second = reg.add_directory(&x).unwrap();
+        // Re-opening the same workspace via switch.
+        let second = reg.switch(&first.entry.id).unwrap();
         assert_eq!(second.entry.id, first.entry.id);
         assert_eq!(dir_ids(&second), dir_ids(&first));
     }
@@ -631,14 +685,14 @@ mod tests {
         let x = make_dir(dir.path(), "alpha");
         let y = make_dir(dir.path(), "beta");
         let z = make_dir(dir.path(), "gamma");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         reg.add_directory(&y).unwrap();
         assert_eq!(w1.directories.len(), 1);
 
         // Close W1, create W2 from z, then re-add x: it must MOVE from the
         // closed W1 into the open W2 (globally-unique ownership).
         reg.close(&w1.entry.id, true).unwrap();
-        let w2 = reg.add_directory(&z).unwrap();
+        let w2 = create_and_open(&reg, "ws2", &z);
         let moved = reg.add_directory(&x).unwrap();
         assert_eq!(moved.entry.id, w2.entry.id);
         assert_eq!(moved.directories.len(), 2);
@@ -657,7 +711,7 @@ mod tests {
     fn add_directory_already_in_current_remounts() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let view = reg.add_directory(&x).unwrap();
+        let view = create_and_open(&reg, "ws", &x);
         let dir_id = view.directories[0].directory.id.clone();
         reg.unmount_directory(&view.entry.id, &dir_id).unwrap();
         let again = reg.add_directory(&x).unwrap();
@@ -688,9 +742,9 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         reg.close(&w1.entry.id, true).unwrap();
-        let w2 = reg.add_directory(&z).unwrap();
+        let w2 = create_and_open(&reg, "ws", &z);
 
         // 单开不变式：W2 打开时打开 W1 被拒
         let err = reg.open_workspace(&w1.entry.id).unwrap_err();
@@ -710,9 +764,9 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         reg.close(&w1.entry.id, true).unwrap();
-        let w2 = reg.add_directory(&z).unwrap();
+        let w2 = create_and_open(&reg, "ws", &z);
 
         let switched = reg.switch(&w1.entry.id).unwrap();
         assert_eq!(switched.entry.id, w1.entry.id);
@@ -749,9 +803,9 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         reg.close(&w1.entry.id, true).unwrap();
-        let w2 = reg.add_directory(&z).unwrap();
+        let w2 = create_and_open(&reg, "ws", &z);
 
         // 强制布局快照保存失败：BEFORE INSERT 触发器 RAISE
         {
@@ -786,7 +840,7 @@ mod tests {
     fn remove_last_directory_auto_closes() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         let dir_id = w1.directories[0].directory.id.clone();
 
         let result = reg.remove_directory(&w1.entry.id, &dir_id).unwrap();
@@ -813,11 +867,9 @@ mod tests {
             .unwrap();
         assert_eq!(ws_rows, 1);
         assert!(x.is_dir());
-        // 空工作区不可再打开
-        assert!(matches!(
-            reg.open_workspace(&w1.entry.id),
-            Err(RegistryV2Error::NoDirectories(_))
-        ));
+        // ADR-0024: empty workspace is now openable (user adds dirs via +).
+        let reopened = reg.open_workspace(&w1.entry.id).unwrap();
+        assert_eq!(reopened.directories.len(), 0);
     }
 
     #[test]
@@ -825,7 +877,7 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let y = make_dir(dir.path(), "beta");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         let after = reg.add_directory(&y).unwrap();
         let x_id = after.directories[0].directory.id.clone();
 
@@ -842,9 +894,9 @@ mod tests {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
         let z = make_dir(dir.path(), "gamma");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         reg.close(&w1.entry.id, true).unwrap();
-        let w2 = reg.add_directory(&z).unwrap();
+        let w2 = create_and_open(&reg, "ws", &z);
         let w1_dir = w1.directories[0].directory.id.clone();
         assert!(matches!(
             reg.remove_directory(&w2.entry.id, &w1_dir),
@@ -856,7 +908,7 @@ mod tests {
     fn mount_unmount_roundtrip() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         let dir_id = w1.directories[0].directory.id.clone();
         reg.unmount_directory(&w1.entry.id, &dir_id).unwrap();
         let view = reg.get_open().unwrap().unwrap();
@@ -905,7 +957,7 @@ mod tests {
     fn close_refuses_with_running_tasks_unless_forced() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         let run_id = seed_active_run(&reg, &w1.entry.id, "deploy");
 
         // Non-forced close refuses and reports the active run.
@@ -931,7 +983,7 @@ mod tests {
     fn close_preview_lists_active_runs_with_task_titles() {
         let (reg, dir) = v2();
         let x = make_dir(dir.path(), "alpha");
-        let w1 = reg.add_directory(&x).unwrap();
+        let w1 = create_and_open(&reg, "ws", &x);
         seed_active_run(&reg, &w1.entry.id, "deploy");
 
         let preview = reg.close_preview(&w1.entry.id).unwrap();
@@ -946,7 +998,7 @@ mod tests {
         // A workspace without active runs previews empty.
         let (reg2, dir2) = v2();
         let y = make_dir(dir2.path(), "beta");
-        let w2 = reg2.add_directory(&y).unwrap();
+        let w2 = create_and_open(&reg2, "ws", &y);
         assert!(reg2.close_preview(&w2.entry.id).unwrap().is_empty());
         // Preview never closes anything — the workspace stays open.
         assert!(reg2.get_open().unwrap().is_some());

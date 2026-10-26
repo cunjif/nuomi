@@ -38,7 +38,7 @@ export function OverviewGrid() {
             onClick={() => {
               // Guarded: leave overview only once the switch actually ran
               // (a parked action must not collapse the grid underneath it).
-              if (requestSwitchToWorkspace(ws.id, ws.label ?? ws.id)) {
+              if (requestSwitchToWorkspace(ws.id, ws.name ?? ws.label ?? ws.id)) {
                 void setLayoutMode("single");
               }
             }}
@@ -48,8 +48,8 @@ export function OverviewGrid() {
               <span
                 className={`w-3 h-3 rounded-full shrink-0 ${workspaceColorClass(ws.colorTag)}`}
               />
-              <span className="font-medium truncate" title={ws.labelFull ?? ws.rootPath}>
-                {ws.label ?? ws.id}
+              <span className="font-medium truncate" title={ws.name ?? ws.labelFull ?? ws.rootPath}>
+                {ws.name ?? ws.label ?? ws.id}
               </span>
             </div>
             <span className="text-xs text-ink-muted truncate">{ws.labelFull ?? ws.rootPath}</span>

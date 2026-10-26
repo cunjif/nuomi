@@ -163,6 +163,7 @@ mod tests {
                 created_at: 1,
                 is_active: false,
                 is_pinned: false,
+                name: None,
             },
         )
         .unwrap();

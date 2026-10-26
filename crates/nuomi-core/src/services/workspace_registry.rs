@@ -121,6 +121,7 @@ impl WorkspaceRegistry {
             created_at: crate::domain::now_ms(),
             is_active: false,
             is_pinned: false,
+            name: None,
         };
         repo::insert(&conn, &entry)?;
         // Two-level model invariant (ADR-0021): every workspace is

@@ -100,6 +100,7 @@ pub fn run_if_needed(conn: &Connection) -> Result<MigrationOutcome, MigrationOrc
                     created_at: crate::domain::now_ms(),
                     is_active: existing.is_empty(),
                     is_pinned: false,
+                    name: None,
                 };
                 repo::insert(conn, &entry)?;
                 // Two-level model invariant (ADR-0021): a fresh entry is
@@ -411,6 +412,7 @@ mod tests {
             created_at: 1,
             is_active: true,
             is_pinned: false,
+            name: None,
         };
         repo::insert(&conn, &entry).unwrap();
         repo::set_active(&conn, &entry.id).unwrap();
@@ -429,6 +431,7 @@ mod tests {
             created_at: 1,
             is_active: true,
             is_pinned: false,
+            name: None,
         };
         repo::insert(&conn, &placeholder).unwrap();
         // Add a session with __migrated__ placeholder.
@@ -463,6 +466,7 @@ mod tests {
             created_at: 1,
             is_active: true,
             is_pinned: false,
+            name: None,
         };
         repo::insert(&conn, &placeholder).unwrap();
         let first = run_if_needed(&conn).unwrap();
@@ -664,6 +668,7 @@ mod tests {
             created_at: 1,
             is_active: true,
             is_pinned: false,
+            name: None,
         };
         repo::insert(&conn, &placeholder).unwrap();
         placeholder_dir(

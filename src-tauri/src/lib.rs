@@ -106,6 +106,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::remove_workspace,
         tauri_cmds::activate_workspace,
         tauri_cmds::get_active_workspace,
+        tauri_cmds::workspace_create,
         tauri_cmds::workspace_add_directory,
         tauri_cmds::workspace_remove_directory,
         tauri_cmds::workspace_mount_directory,
@@ -235,6 +236,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::sandbox_cancel_task,
         tauri_cmds::sandbox_retry_artifact,
         tauri_cmds::sandbox_list_runtimes,
+        tauri_cmds::terminal_create,
+        tauri_cmds::terminal_write,
+        tauri_cmds::terminal_resize,
+        tauri_cmds::terminal_kill,
         tauri_cmds::__nuomi_heartbeat,
     ])
 }
@@ -431,6 +436,13 @@ async fn boot_and_wire(
 
             let seed_db = state.db_path.clone();
             let warm_db = state.db_path.clone();
+
+            // Terminal manager (ADR-0024 Part B): construct with a Tauri
+            // emitter so terminal output flows to the frontend via events.
+            let emitter = std::sync::Arc::new(commands::TauriTerminalEmitter { app: app.clone() });
+            let terminal_mgr = nuomi_core::services::terminal_manager::TerminalManager::new(emitter);
+            *state.terminal_manager.write().unwrap() = Some(terminal_mgr);
+
             app.manage(state);
 
             // First-launch preset seeding: idempotent upsert of the built-in

@@ -144,12 +144,15 @@ describe("WorkspaceListDialog — row identity (spec 5.5.1-2a)", () => {
 });
 
 describe("WorkspaceListDialog — add workspace", () => {
-  it("add button calls folder picker then addWorkspace", async () => {
-    openDialog.mockResolvedValue("C:\\new-project");
+  it("add button opens create dialog then workspaceCreate", async () => {
     renderWithProviders(<WorkspaceListDialog open={true} onClose={() => {}} />);
     fireEvent.click(screen.getByText("新增工作区"));
+    // WorkspaceCreateDialog opens — type a name and confirm.
+    const nameInput = await screen.findByPlaceholderText("输入工作区名称");
+    fireEvent.change(nameInput, { target: { value: "my-project" } });
+    fireEvent.click(screen.getByText("创建"));
     await waitFor(() => {
-      expect(tdState.workspaces.some((w) => w.rootPath === "C:\\new-project")).toBe(true);
+      expect(tdState.workspaces.some((w) => w.name === "my-project")).toBe(true);
     });
   });
 });

@@ -101,7 +101,7 @@ export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRem
             </div>
             <div>
               <div className="text-xs text-ink-muted">{t("conversation.conversationDetail.workspace")}</div>
-              <div className="text-sm text-ink">{conversation.workspace?.label ?? t("conversation.agentDetail.notSet")}</div>
+              <div className="text-sm text-ink">{conversation.workspace?.name ?? conversation.workspace?.label ?? t("conversation.agentDetail.notSet")}</div>
             </div>
             <div>
               <div className="text-xs text-ink-muted">{t("conversation.conversationDetail.workDirectory")}</div>

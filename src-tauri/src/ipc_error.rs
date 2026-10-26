@@ -103,6 +103,8 @@ fn map_registry_v2_error(err: &nuomi_core::services::RegistryV2Error) -> IpcErro
         E::DirectoryNotFound(_) => IpcError::new("workspace.directory_not_found", err.to_string()),
         E::AlreadyOpen(_) => IpcError::new("workspace.already_open", err.to_string()),
         E::NoDirectories(_) => IpcError::new("workspace.no_directories", err.to_string()),
+        E::NoOpenWorkspace(_) => IpcError::new("workspace.no_open_workspace", err.to_string()),
+        E::InvalidName => IpcError::new("workspace.invalid_name", err.to_string()),
         E::NeedConfirm { .. } => IpcError::new("workspace.close_needs_confirm", err.to_string()),
         E::Store(_) => IpcError::new("store.failed", err.to_string()),
         E::Io(_) => IpcError::new("workspace.io", err.to_string()),
@@ -235,6 +237,20 @@ impl From<nuomi_core::steward::StewardError> for IpcError {
 impl From<nuomi_core::sandbox::types::SandboxError> for IpcError {
     fn from(e: nuomi_core::sandbox::types::SandboxError) -> Self {
         Self::new(e.code(), e.message().to_string())
+    }
+}
+
+impl From<nuomi_core::services::terminal_manager::TerminalError> for IpcError {
+    fn from(e: nuomi_core::services::terminal_manager::TerminalError) -> Self {
+        use nuomi_core::services::terminal_manager::TerminalError as E;
+        let code = match &e {
+            E::NotFound(_) => "terminal.not_found",
+            E::Open(_) => "terminal.open_failed",
+            E::Spawn(_) => "terminal.spawn_failed",
+            E::Io(_) => "terminal.io",
+            E::Resize(_) => "terminal.resize_failed",
+        };
+        Self::new(code, e.to_string())
     }
 }
 

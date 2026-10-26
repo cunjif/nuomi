@@ -1,20 +1,23 @@
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useUiStore } from "../../lib/store/uiStore";
 import { useRecentWorkspaces } from "../../lib/store/workspaceQueries";
+import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
 
 /**
- * Empty-state guide: no open workspace. Offers directory opening and a
- * recent-workspace list rendered with the derived label (ADR-0021, spec
- * 5.5.1-2a). Migration-anomalous entries are marked ⚠ and stay
- * non-clickable (spec 5.5.3-2c) — aria-disabled instead of the disabled
+ * Empty-state guide: no open workspace. Offers workspace creation (ADR-0024
+ * Part A) and a recent-workspace list rendered with the derived label
+ * (ADR-0021, spec 5.5.1-2a). Migration-anomalous entries are marked ⚠ and
+ * stay non-clickable (spec 5.5.3-2c) — aria-disabled instead of the disabled
  * attribute so the hover tooltip keeps working.
  */
 export function EmptyStateGuide() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { openDirectory, requestSwitchToWorkspace } = useUiStore();
+  const { requestSwitchToWorkspace } = useUiStore();
   const { data: recentWorkspaces } = useRecentWorkspaces(10);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Same invalidation set as WorkspaceListDialog: switching/opening changes
   // the active root, and listDir queries don't carry the workspace id, so
@@ -25,15 +28,6 @@ export function EmptyStateGuide() {
     void qc.invalidateQueries({ queryKey: ["sessions"] });
     void qc.invalidateQueries({ queryKey: ["dir"] });
     void qc.invalidateQueries({ queryKey: ["file"] });
-  };
-
-  const handleOpenDirectory = async () => {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({ directory: true });
-    if (typeof selected === "string") {
-      await openDirectory(selected);
-      invalidate();
-    }
   };
 
   const handleSwitch = (id: string): void => {
@@ -48,10 +42,10 @@ export function EmptyStateGuide() {
         <p className="text-sm text-ink-muted">{t("workspace.emptyBody")}</p>
       </div>
       <button
-        onClick={handleOpenDirectory}
+        onClick={() => setCreateOpen(true)}
         className="px-4 py-2 rounded-md bg-ink-accent text-surface text-sm hover:opacity-90"
       >
-        {t("workspace.openDirectory")}
+        {t("workspace.addNew")}
       </button>
       {recentWorkspaces && recentWorkspaces.length > 0 && (
         <div className="w-full max-w-md">
@@ -70,7 +64,7 @@ export function EmptyStateGuide() {
                 }`}
               >
                 {ws.isPinned && <span className="text-xs text-ink-accent">★</span>}
-                <span className="flex-1 truncate">{ws.label ?? ws.workspaceId}</span>
+                <span className="flex-1 truncate">{ws.name ?? ws.label ?? ws.workspaceId}</span>
                 {ws.anomaly && <span className="text-xs text-state-warn">⚠</span>}
                 <span className="text-xs text-ink-muted/60">
                   {new Date(ws.lastUsedAt).toLocaleDateString()}
@@ -80,6 +74,7 @@ export function EmptyStateGuide() {
           </div>
         </div>
       )}
+      <WorkspaceCreateDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }

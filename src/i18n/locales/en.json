@@ -308,6 +308,7 @@
     "optimizeRetry": "Retry",
     "optimizeDiscard": "Discard",
     "optimizeFailed": "Prompt optimization failed: {{message}}",
+    "workDirectory": "Work directory",
     "contextUsage": "Context usage",
     "contextUsageTitle": "Context usage and prune history",
     "contextUsagePopupLabel": "Context prune workbench",
@@ -1043,6 +1044,8 @@
   "files": {
     "treeLabel": "Workspace files",
     "dirEmpty": "Empty directory",
+    "noWorkDir": "No working directory",
+    "addWorkDir": "Add working directory",
     "loadFailedDir": "Failed to list directory",
     "saveFailed": "Failed to save file",
     "saved": "File saved",
@@ -1107,6 +1110,18 @@
     "pickUnavailable": "Directory picker unavailable — type the path manually",
     "listTitle": "Workspaces",
     "addNew": "Add workspace",
+    "create": {
+      "title": "Create workspace",
+      "nameLabel": "Workspace name",
+      "namePlaceholder": "Enter workspace name",
+      "nameRequired": "Please enter a workspace name",
+      "dirLabel": "Initial directory (optional)",
+      "dirPlaceholder": "Select or enter a directory path",
+      "browse": "Browse",
+      "confirm": "Create",
+      "created": "Workspace created",
+      "failed": "Failed to create workspace"
+    },
     "add": "Add workspace",
     "added": "Workspace added",
     "addFailed": "Failed to add workspace",
@@ -1205,7 +1220,14 @@
     "areaLabel": "Main area",
     "chat": "Chat",
     "editor": "Files",
-    "workbench": "Workbench"
+    "workbench": "Workbench",
+    "terminal": "Terminal"
+  },
+  "terminal": {
+    "areaLabel": "Terminal",
+    "empty": "No terminal open",
+    "new": "New terminal",
+    "close": "Close terminal"
   },
   "split": {
     "keepLeft": "Keep left",

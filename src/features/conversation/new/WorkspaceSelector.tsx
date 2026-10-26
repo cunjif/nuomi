@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "../../../lib/ipc/client";
 import { useUiStore } from "../../../lib/store/uiStore";
 import { workspaceBadgeColor } from "../workspaceBadgeColor";
+import { WorkspaceCreateDialog } from "../../shell/WorkspaceCreateDialog";
 
 export interface WorkspaceSelectorProps {
   selectedWorkspaceId: string | null;
@@ -13,11 +15,14 @@ export interface WorkspaceSelectorProps {
 /**
  * Workspace picker for the new-conversation wizard. Loads the workspace list
  * asynchronously (skeleton during load), defaults to the focused workspace,
- * and disables selection when no workspaces are registered.
+ * and disables selection when no workspaces are registered. When no workspaces
+ * exist, offers a "create workspace" button (ADR-0024 Part A).
  */
 export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSelectorProps): ReactNode {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const workspacesQuery = useQuery({
     queryKey: ["workspaces"],
@@ -26,6 +31,14 @@ export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSe
   });
 
   const workspaces = workspacesQuery.data ?? [];
+
+  // After workspace creation (activeWorkspaceId changes), auto-select it so
+  // the parent's canCreate condition (selectedWorkspaceId !== null) is met.
+  useEffect(() => {
+    if (selectedWorkspaceId === null && activeWorkspaceId !== null) {
+      onSelect(activeWorkspaceId);
+    }
+  }, [activeWorkspaceId, selectedWorkspaceId, onSelect]);
 
   if (workspacesQuery.isLoading) {
     return (
@@ -38,8 +51,22 @@ export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSe
 
   if (workspaces.length === 0) {
     return (
-      <div className="rounded border border-ink-muted/40 bg-surface-raised px-2 py-1.5 text-sm text-ink-muted">
-        {t("conversation.workspaceSelectorNone")}
+      <div className="flex flex-col gap-2 rounded border border-ink-muted/40 bg-surface-raised px-2 py-1.5">
+        <span className="text-sm text-ink-muted">{t("conversation.workspaceSelectorNone")}</span>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="flex items-center justify-center gap-1 rounded border border-dashed border-ink-muted/40 px-2 py-1 text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink-accent"
+        >
+          {t("workspace.addNew")}
+        </button>
+        <WorkspaceCreateDialog
+          open={createOpen}
+          onClose={() => {
+            setCreateOpen(false);
+            void qc.invalidateQueries({ queryKey: ["workspaces"] });
+          }}
+        />
       </div>
     );
   }
@@ -63,7 +90,7 @@ export function WorkspaceSelector({ selectedWorkspaceId, onSelect }: WorkspaceSe
                 className="h-3 w-3 shrink-0 rounded-full"
                 style={{ backgroundColor: workspaceBadgeColor(ws.id) }}
               />
-              <span className="flex-1 text-left truncate">{ws.label ?? ws.rootPath}</span>
+              <span className="flex-1 text-left truncate">{ws.name ?? ws.label ?? ws.rootPath}</span>
               <span
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-ink-accent bg-ink-accent text-surface" : "border-ink-muted/50"}`}
               >

@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { Icon } from "../../components/ui/Icon/Icon";
@@ -15,6 +14,7 @@ import { useUiStore } from "../../lib/store/uiStore";
 import { RECENT_WORKSPACES_KEY } from "../../lib/store/workspaceQueries";
 import type { WorkspaceEntryDto } from "../../lib/ipc/bindings.gen";
 import { workspaceColorClass } from "./workspaceColors";
+import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
 
 function WorkspaceRow({
   ws,
@@ -58,9 +58,9 @@ function WorkspaceRow({
       )}
       <span
         className="flex-1 truncate"
-        title={anomaly ? t("workspace.anomaly") : (ws.labelFull ?? ws.rootPath)}
+        title={anomaly ? t("workspace.anomaly") : (ws.name ?? ws.labelFull ?? ws.rootPath)}
       >
-        {ws.label ?? ws.id}
+        {ws.name ?? ws.label ?? ws.id}
       </span>
       {lastUsedAt !== undefined && (
         <span className="text-[10px] text-ink-muted/70">
@@ -94,6 +94,7 @@ export function WorkspaceListDialog({
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const { data: workspaces, isPending } = useQuery({
     queryKey: ["workspaces"],
@@ -119,16 +120,8 @@ export function WorkspaceListDialog({
     void qc.invalidateQueries({ queryKey: ["file"] });
   };
 
-  const handleAdd = async (): Promise<void> => {
-    try {
-      const selected = await pickFolder({ directory: true, multiple: false });
-      if (!selected) return;
-      await useUiStore.getState().openDirectory(selected);
-      invalidate();
-      toast.success(t("workspace.added"));
-    } catch (e) {
-      toast.error(`${t("workspace.addFailed")}: ${String(e)}`);
-    }
+  const handleAdd = (): void => {
+    setCreateOpen(true);
   };
 
   const handleActivate = (id: string): void => {
@@ -164,7 +157,7 @@ export function WorkspaceListDialog({
           <h2 className="text-title-hand text-sm font-semibold">{t("workspace.listTitle")}</h2>
           <button
             type="button"
-            onClick={() => void handleAdd()}
+            onClick={() => handleAdd()}
             className="flex items-center gap-1 rounded border border-dashed border-ink-muted/40 px-2 py-1 text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink-accent"
           >
             <Icon name="plus" size={10} />
@@ -203,6 +196,7 @@ export function WorkspaceListDialog({
           <button type="button" onClick={onClose} className="sketch-btn px-3 py-1 text-xs text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent">{t("common.cancel")}</button>
         </div>
       </div>
+      <WorkspaceCreateDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }

@@ -284,6 +284,7 @@ export function ChatView(): ReactNode {
         pending={false}
         commandContext={commandContext}
         sessionId={sessionId}
+        workDirectoryId={convQuery.data?.workDirectoryId ?? null}
         topSlot={
           <>
             {quotedExcerpt !== null && (

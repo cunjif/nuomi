@@ -21,6 +21,7 @@ import { ChatTabBar } from "./ChatTabBar";
 import { isChatPanelActive } from "./isChatPanelActive";
 import { BackgroundTray } from "./BackgroundTray";
 import { WorkbenchArea } from "./WorkbenchArea";
+import { TerminalArea } from "../terminal/TerminalArea";
 import { hydratePluginEditorExtensions } from "../../lib/editor-ext/pluginBridge";
 import { LeftRail } from "./LeftRail";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
@@ -29,6 +30,7 @@ import { OverviewGrid } from "./OverviewGrid";
 import { EmptyStateGuide } from "./EmptyStateGuide";
 import { useIdleProposalTimer } from "./useIdleProposalTimer";
 import { WorkspaceGuardDialog } from "./WorkspaceGuardDialog";
+import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
 
 type WorkspaceInfo = { root: string; configured: boolean };
 
@@ -129,6 +131,21 @@ function useGlobalNavShortcuts(): void {
         e.stopImmediatePropagation();
         useUiStore.getState().setActiveArea("workbench");
       }
+      // ADR-024 Part B8: Alt+` toggles terminal ↔ previous area.
+      if (e.code === "Backquote") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const { activeArea, setActiveArea, previousArea } = useUiStore.getState();
+        if (activeArea === "terminal") {
+          // Toggle back to the previous area (chat or workbench).
+          setActiveArea(previousArea ?? "chat");
+          useUiStore.setState({ previousArea: null });
+        } else {
+          // Switch to terminal, remembering where we came from.
+          useUiStore.setState({ previousArea: activeArea });
+          setActiveArea("terminal");
+        }
+      }
     }
   };
   useEffect(() => {
@@ -144,6 +161,7 @@ export function Shell(): ReactNode {
   const activeArea = useUiStore((s) => s.activeArea);
   const layoutMode = useUiStore((s) => s.layoutMode);
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const pendingCreateWorkspaceDir = useUiStore((s) => s.pendingCreateWorkspaceDir);
   useGlobalNavShortcuts();
   useGlobalPaletteShortcuts();
   // Idle team-proposal liveness probe (ADR 0023): no-op outside Tauri.
@@ -286,6 +304,12 @@ export function Shell(): ReactNode {
       <QuickOpen />
       {/* Unsaved-edits guard for workspace switch/close (parked action). */}
       <WorkspaceGuardDialog />
+      {/* ADR-0024 Part A-f: create-workspace prompt (parked directory). */}
+      <WorkspaceCreateDialog
+        open={pendingCreateWorkspaceDir !== null}
+        initialDir={pendingCreateWorkspaceDir}
+        onClose={() => useUiStore.getState().clearPendingCreateWorkspaceDir()}
+      />
     </div>
   );
 }
@@ -315,6 +339,13 @@ function renderMainContent({
   if (activeArea === "workbench") {
     return activeWorkspaceId !== null ? (
       <WorkbenchArea workspaceId={activeWorkspaceId} />
+    ) : (
+      <EmptyStateGuide />
+    );
+  }
+  if (activeArea === "terminal") {
+    return activeWorkspaceId !== null ? (
+      <TerminalArea workspaceId={activeWorkspaceId} />
     ) : (
       <EmptyStateGuide />
     );

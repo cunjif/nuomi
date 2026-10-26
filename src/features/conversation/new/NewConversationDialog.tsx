@@ -8,7 +8,7 @@ import { toast } from "../../../lib/store/toastStore";
 import { useUiStore } from "../../../lib/store/uiStore";
 import { describeError } from "../../../i18n";
 import type { ConversationKind } from "../../../lib/conversation/kinds";
-import { isRoleReady } from "../../../lib/conversation/roleReady";
+import { isRoleReady, isStewardMainRole } from "../../../lib/conversation/roleReady";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 import { hashPaletteColor } from "../avatarPalette";
 
@@ -54,7 +54,9 @@ export function NewConversationDialog({ kind, onClose }: NewConversationDialogPr
     .find((ws) => ws.id === selectedWorkspaceId)
     ?.directories?.filter((d) => d.mounted && d.available) ?? [];
 
-  const readyRoles = (rolesQuery.data ?? []).filter(isRoleReady);
+  const readyRoles = (rolesQuery.data ?? []).filter(
+    (r) => isRoleReady(r) && !isStewardMainRole(r),
+  );
 
   const toggleRole = (id: string): void => {
     setSelectedRoleIds((prev) => {

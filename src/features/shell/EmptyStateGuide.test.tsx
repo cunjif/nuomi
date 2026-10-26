@@ -46,7 +46,7 @@ describe("EmptyStateGuide — empty state", () => {
     renderWithProviders(<EmptyStateGuide />);
     expect(screen.getByText("没有已开启的工作区")).toBeTruthy();
     expect(screen.getByText("打开一个目录开始工作，或从最近使用列表中恢复")).toBeTruthy();
-    expect(screen.getByText("打开目录")).toBeTruthy();
+    expect(screen.getByText("新增工作区")).toBeTruthy();
     expect(screen.queryByText("最近使用")).toBeNull();
   });
 });
