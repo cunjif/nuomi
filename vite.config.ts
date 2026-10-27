@@ -25,6 +25,19 @@ export default defineConfig({
   worker: {
     format: "es",
   },
+  // monaco-editor must NOT be pre-bundled: its `?worker` imports (language
+  // services) are handled by Vite's worker plugin, not esbuild. When
+  // monaco-editor is pre-bundled, import-analysis rewrites `?worker` imports
+  // to `/node_modules/.vite/deps/..._worker?worker.js` URLs, but esbuild never
+  // generates those artifacts (it ignores the `?worker` query) → 404 →
+  // "Failed to fetch dynamically imported module: .../monacoSetup.ts" when the
+  // editor lazy-loads. Excluding it lets the worker plugin process `?worker`
+  // imports directly against the aliased source files. @monaco-editor/react
+  // only has monaco-editor as a peer dep (via loader), so its pre-bundle is
+  // unaffected.
+  optimizeDeps: {
+    exclude: ["monaco-editor"],
+  },
   server: {
     port: 1420,
     strictPort: true,
