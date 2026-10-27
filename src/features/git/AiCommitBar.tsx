@@ -5,6 +5,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { IpcCommandError, ipc } from "../../lib/ipc/client";
 import { Button } from "../../components/ui/Button";
 import { Icon } from "../../components/ui/Icon/Icon";
+import { useUiStore } from "../../lib/store/uiStore";
+import { AgentBindingGuide } from "./AgentBindingGuide";
 import { useCommitAgentPref } from "./useCommitAgentPref";
 
 interface AiCommitBarProps {
@@ -23,6 +25,8 @@ const AI_COMMIT_ERROR_KEYS: Record<string, string> = {
 export function AiCommitBar({ currentMessage, onMessageChange }: AiCommitBarProps): ReactNode {
   const { t } = useTranslation();
   const pref = useCommitAgentPref();
+  const setView = useUiStore((s) => s.setView);
+  const setSettingsInitialTab = useUiStore((s) => s.setSettingsInitialTab);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [showTruncated, setShowTruncated] = useState(false);
 
@@ -126,8 +130,22 @@ export function AiCommitBar({ currentMessage, onMessageChange }: AiCommitBarProp
         </Button>
       </div>
 
-      {!hasAgents && agentsQuery.isFetched && (
-        <p className="text-xs text-ink-muted">{t("git.aiCommit.noAgents")}</p>
+      {!hasAgents && agentsQuery.isFetched && <AgentBindingGuide />}
+
+      {selectedAgent != null && !selectedExists && hasAgents && (
+        <p role="alert" className="text-xs text-state-warn">
+          {t("git.aiCommit.agentInvalid.warning")}{" "}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              setSettingsInitialTab("roles");
+              setView("settings");
+            }}
+          >
+            {t("git.aiCommit.agentInvalid.goSettings")}
+          </button>
+        </p>
       )}
 
       {errorMessage != null && (

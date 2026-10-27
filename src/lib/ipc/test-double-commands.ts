@@ -742,6 +742,12 @@ export function testDoubleCommands(): CommandSet {
     async unpinWorkspace(_id: string) {
       return ok(null);
     },
+    async removeRecentWorkspace(_workspaceId: string) {
+      return ok(null);
+    },
+    async clearRecentWorkspaces() {
+      return ok(null);
+    },
     async getLayoutSnapshot() {
       return ok(null as LayoutSnapshotDto | null);
     },
@@ -1984,7 +1990,7 @@ export function testDoubleCommands(): CommandSet {
     },
     // Terminal commands (ADR-0024 Part B): test-double stubs — no real pty.
     async terminalCreate(_cwd?: string | null) {
-      return ok(`term-${Date.now()}`);
+      return ok({ id: `term-${Date.now()}`, cwd: _cwd ?? "/home", cwd_source: "explicit" as const });
     },
     async terminalWrite(_id: string, _data: string) {
       return ok(null);
@@ -1994,6 +2000,12 @@ export function testDoubleCommands(): CommandSet {
     },
     async terminalKill(_id: string) {
       return ok(null);
+    },
+    async resolveHomeDir() {
+      return ok("/home");
+    },
+    async getSandboxEndpointInfo() {
+      return ok({ url: "http://127.0.0.1:8819", source: "default" as const });
     },
   };
   return cmds;

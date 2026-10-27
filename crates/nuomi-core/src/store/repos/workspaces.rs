@@ -171,6 +171,29 @@ pub fn unpin(conn: &Connection, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Clears the pin marker on a single workspace (sets `is_pinned = 0`). Unlike
+/// `unpin`, this is idempotent: a missing row silently succeeds. Used when
+/// removing a recent entry to clear the pin trace so the workspace does not
+/// reappear pinned on next open (spec 5.1.1-2).
+pub fn clear_pin(conn: &Connection, id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE workspaces SET is_pinned = 0 WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// Clears pin markers on all workspaces (sets `is_pinned = 0` for every row
+/// where `is_pinned = 1`). Used when clearing the entire recent list so no
+/// workspace reappears pinned on next open (spec 5.2.1-1).
+pub fn clear_all_pins(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE workspaces SET is_pinned = 0 WHERE is_pinned = 1",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Sets the user-provided name of a workspace (ADR-0024 Part A). Pass `None`
 /// to clear the name (display falls back to the derived label). Returns
 /// `NotFound` when the id does not match any row.
@@ -316,5 +339,61 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn clear_pin_clears_pinned_workspace() {
+        let conn = db();
+        let mut e = entry("w1", "C:\\ws");
+        e.is_pinned = true;
+        insert(&conn, &e).unwrap();
+        assert!(find_by_id(&conn, "w1").unwrap().unwrap().is_pinned);
+        clear_pin(&conn, "w1").unwrap();
+        assert!(!find_by_id(&conn, "w1").unwrap().unwrap().is_pinned);
+    }
+
+    #[test]
+    fn clear_pin_is_idempotent_for_missing_row() {
+        let conn = db();
+        // No row exists — must succeed silently.
+        clear_pin(&conn, "never-existed").unwrap();
+    }
+
+    #[test]
+    fn clear_pin_does_not_affect_other_workspaces() {
+        let conn = db();
+        let mut a = entry("w1", "C:\\ws1");
+        a.is_pinned = true;
+        let mut b = entry("w2", "C:\\ws2");
+        b.is_pinned = true;
+        insert(&conn, &a).unwrap();
+        insert(&conn, &b).unwrap();
+        clear_pin(&conn, "w1").unwrap();
+        assert!(!find_by_id(&conn, "w1").unwrap().unwrap().is_pinned);
+        // w2 must remain pinned.
+        assert!(find_by_id(&conn, "w2").unwrap().unwrap().is_pinned);
+    }
+
+    #[test]
+    fn clear_all_pins_clears_every_pinned_workspace() {
+        let conn = db();
+        let mut a = entry("w1", "C:\\ws1");
+        a.is_pinned = true;
+        let mut b = entry("w2", "C:\\ws2");
+        b.is_pinned = true;
+        let c = entry("w3", "C:\\ws3"); // not pinned
+        insert(&conn, &a).unwrap();
+        insert(&conn, &b).unwrap();
+        insert(&conn, &c).unwrap();
+        clear_all_pins(&conn).unwrap();
+        for id in ["w1", "w2", "w3"] {
+            assert!(!find_by_id(&conn, id).unwrap().unwrap().is_pinned);
+        }
+    }
+
+    #[test]
+    fn clear_all_pins_on_empty_table_succeeds() {
+        let conn = db();
+        clear_all_pins(&conn).unwrap();
     }
 }

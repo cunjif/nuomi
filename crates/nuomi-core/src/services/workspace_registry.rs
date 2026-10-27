@@ -262,6 +262,75 @@ impl WorkspaceRegistry {
         emit_workspace_event(&conn, id, "workspace.unpinned");
         Ok(())
     }
+
+    /// Removes a workspace from the recent-use list (idempotent) and clears its
+    /// pin marker in the same transaction. Does not delete the workspace entity.
+    /// Appends a `workspace_recent.removed` event for observability.
+    pub fn remove_recent(&self, workspace_id: &str) -> Result<(), RegistryError> {
+        use crate::store::repos::workspace_recent;
+        let conn = self.conn()?;
+        let tx = conn.unchecked_transaction().map_err(StoreError::Sqlite)?;
+        // Capture whether the recent row was pinned before deletion (for the
+        // event payload). Missing row → was_pinned = false.
+        let was_pinned: bool = tx
+            .query_row(
+                "SELECT is_pinned FROM workspace_recent WHERE workspace_id = ?1",
+                rusqlite::params![workspace_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .ok()
+            .map(|v| v != 0)
+            .unwrap_or(false);
+        workspace_recent::remove_idempotent(&tx, workspace_id)?;
+        repo::clear_pin(&tx, workspace_id)?;
+        let now = crate::domain::now_ms();
+        events::append(
+            &tx,
+            "workspace",
+            workspace_id,
+            "workspace_recent.removed",
+            &serde_json::json!({ "workspaceId": workspace_id, "wasPinned": was_pinned }),
+            now,
+        )?;
+        tx.commit().map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Clears the entire recent-use list and all pin markers in the same
+    /// transaction. Does not delete any workspace entities. Appends a single
+    /// `workspace_recent.cleared` event with counts for observability.
+    pub fn clear_recent(&self) -> Result<(), RegistryError> {
+        use crate::store::repos::workspace_recent;
+        let conn = self.conn()?;
+        let tx = conn.unchecked_transaction().map_err(StoreError::Sqlite)?;
+        // Capture counts before mutation for the event payload.
+        let cleared_count: i64 = tx
+            .query_row("SELECT count(*) FROM workspace_recent", [], |r| r.get(0))
+            .map_err(StoreError::Sqlite)?;
+        let cleared_pinned_count: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM workspace_recent WHERE is_pinned = 1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(StoreError::Sqlite)?;
+        workspace_recent::clear_all(&tx)?;
+        repo::clear_all_pins(&tx)?;
+        let now = crate::domain::now_ms();
+        events::append(
+            &tx,
+            "domain",
+            "global",
+            "workspace_recent.cleared",
+            &serde_json::json!({
+                "clearedCount": cleared_count,
+                "clearedPinnedCount": cleared_pinned_count,
+            }),
+            now,
+        )?;
+        tx.commit().map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
 }
 
 fn emit_workspace_event(conn: &Connection, workspace_id: &str, kind: &str) {
@@ -441,5 +510,161 @@ mod tests {
         let (reg, _dir) = registry();
         let err = reg.activate("nope").unwrap_err();
         assert!(matches!(err, RegistryError::NotFound(_)));
+    }
+
+    // ---- remove_recent / clear_recent tests (spec: recent_ws_cleanup) ----
+
+    fn touch_recent(reg: &WorkspaceRegistry, id: &str, pinned: bool) {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspace_recent::touch(&conn, id, crate::domain::now_ms(), pinned)
+            .unwrap();
+    }
+
+    fn recent_ids(reg: &WorkspaceRegistry) -> Vec<String> {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspace_recent::list_all(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.workspace_id)
+            .collect()
+    }
+
+    fn is_pinned(reg: &WorkspaceRegistry, id: &str) -> bool {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspaces::find_by_id(&conn, id)
+            .unwrap()
+            .unwrap()
+            .is_pinned
+    }
+
+    fn count_events(reg: &WorkspaceRegistry, kind: &str) -> i64 {
+        let conn = reg.conn().unwrap();
+        conn.query_row(
+            "SELECT count(*) FROM events WHERE kind = ?1",
+            rusqlite::params![kind],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn remove_recent_deletes_row_and_clears_pin() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        // Register only touches recent for the first workspace; manually touch
+        // both so the test exercises the remove path for a non-first entry.
+        touch_recent(&reg, &ea.id, false);
+        reg.pin(&eb.id).unwrap();
+        touch_recent(&reg, &eb.id, true);
+        assert!(is_pinned(&reg, &eb.id));
+        assert_eq!(recent_ids(&reg).len(), 2);
+
+        reg.remove_recent(&eb.id).unwrap();
+
+        // recent row removed
+        let ids = recent_ids(&reg);
+        assert!(!ids.contains(&eb.id));
+        assert!(ids.contains(&ea.id));
+        // pin marker cleared
+        assert!(!is_pinned(&reg, &eb.id));
+        // event appended
+        assert_eq!(count_events(&reg, "workspace_recent.removed"), 1);
+    }
+
+    #[test]
+    fn remove_recent_is_idempotent_for_missing_row() {
+        let (reg, _dir) = registry();
+        // No workspace exists — must succeed silently.
+        reg.remove_recent("never-existed").unwrap();
+        assert_eq!(count_events(&reg, "workspace_recent.removed"), 1);
+        // Second call still succeeds.
+        reg.remove_recent("never-existed").unwrap();
+        assert_eq!(count_events(&reg, "workspace_recent.removed"), 2);
+    }
+
+    #[test]
+    fn remove_recent_preserves_workspace_entity() {
+        let (reg, dir) = registry();
+        let ws = make_ws_dir(dir.path(), "ws");
+        let entry = reg.register(&ws).unwrap();
+        reg.remove_recent(&entry.id).unwrap();
+        // Workspace still exists in registry.
+        assert!(reg.find_by_id(&entry.id).unwrap().is_some());
+        // recent list is empty.
+        assert!(recent_ids(&reg).is_empty());
+    }
+
+    #[test]
+    fn clear_recent_empties_list_and_clears_all_pins() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let c = make_ws_dir(dir.path(), "c");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        let ec = reg.register(&c).unwrap();
+        reg.pin(&ea.id).unwrap();
+        reg.pin(&ec.id).unwrap();
+        touch_recent(&reg, &ea.id, true);
+        touch_recent(&reg, &eb.id, false);
+        touch_recent(&reg, &ec.id, true);
+        assert_eq!(recent_ids(&reg).len(), 3);
+
+        reg.clear_recent().unwrap();
+
+        // recent list empty
+        assert!(recent_ids(&reg).is_empty());
+        // all pins cleared
+        assert!(!is_pinned(&reg, &ea.id));
+        assert!(!is_pinned(&reg, &eb.id));
+        assert!(!is_pinned(&reg, &ec.id));
+        // event appended
+        assert_eq!(count_events(&reg, "workspace_recent.cleared"), 1);
+        // workspace entities preserved
+        assert!(reg.find_by_id(&ea.id).unwrap().is_some());
+        assert!(reg.find_by_id(&eb.id).unwrap().is_some());
+        assert!(reg.find_by_id(&ec.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn clear_recent_on_empty_list_succeeds() {
+        let (reg, _dir) = registry();
+        reg.clear_recent().unwrap();
+        assert!(recent_ids(&reg).is_empty());
+        assert_eq!(count_events(&reg, "workspace_recent.cleared"), 1);
+    }
+
+    #[test]
+    fn clear_recent_event_payload_counts_correct() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let c = make_ws_dir(dir.path(), "c");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        let ec = reg.register(&c).unwrap();
+        reg.pin(&ea.id).unwrap();
+        reg.pin(&eb.id).unwrap();
+        touch_recent(&reg, &ea.id, true);
+        touch_recent(&reg, &eb.id, true);
+        touch_recent(&reg, &ec.id, false);
+
+        reg.clear_recent().unwrap();
+
+        // Verify the event payload contains correct counts.
+        let conn = reg.conn().unwrap();
+        let payload: String = conn
+            .query_row(
+                "SELECT payload FROM events WHERE kind = 'workspace_recent.cleared'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(json["clearedCount"], 3);
+        assert_eq!(json["clearedPinnedCount"], 2);
     }
 }

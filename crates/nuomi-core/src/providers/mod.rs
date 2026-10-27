@@ -100,7 +100,11 @@ pub(crate) fn join_api_path(base_url: &str, suffix: &str) -> String {
 
 /// Normalizes a SenseNova base URL: bare origins get `/api/v1` prepended
 /// (instead of the canonical `/v1` used by standard OpenAI-compatible
-/// endpoints). Origins already carrying a path prefix are left untouched.
+/// endpoints). Origins already carrying a path prefix are left untouched —
+/// except a bare `/v1` suffix (the canonical OpenAI version segment), which
+/// is a common misconfiguration for SenseNova: the gateway expects `/api/v1`,
+/// not `/v1`. Rewriting `/v1` → `/api/v1` here lets requests reach the correct
+/// endpoint instead of 404 "model is not found".
 pub(crate) fn sensenova_base_url(base_url: &str) -> String {
     let base = base_url.trim().trim_end_matches('/');
     if base.is_empty() {
@@ -111,6 +115,18 @@ pub(crate) fn sensenova_base_url(base_url: &str) -> String {
         None => base,
     };
     if after_authority.contains('/') {
+        // A bare `/v1` path right after the authority (e.g.
+        // `https://token.sensenova.cn/v1`) is the canonical OpenAI version
+        // segment — SenseNova uses `/api/v1` instead. Rewrite it so a
+        // misconfigured base URL still resolves correctly rather than 404-ing
+        // on `/v1/chat/completions`. Deeper custom paths (e.g.
+        // `/sensenova/v1` behind a gateway) are left untouched.
+        let path_start = after_authority.find('/').expect("checked contains('/')");
+        let path = &after_authority[path_start..];
+        if path == "/v1" {
+            let scheme_and_authority = &base[..base.len() - path.len()];
+            return format!("{scheme_and_authority}/api/v1");
+        }
         base.to_string()
     } else {
         format!("{base}/api/v1")
@@ -236,6 +252,25 @@ mod tests {
         assert_eq!(
             sensenova_base_url("https://gw.example.com/sensenova/v1"),
             "https://gw.example.com/sensenova/v1"
+        );
+    }
+
+    #[test]
+    fn sensenova_v1_suffix_is_rewritten_to_api_v1() {
+        // Common misconfiguration: user fills the OpenAI-canonical `/v1`
+        // suffix instead of SenseNova's `/api/v1`. The rewrite prevents a
+        // 404 "model is not found" on `/v1/chat/completions`.
+        assert_eq!(
+            sensenova_base_url("https://token.sensenova.cn/v1"),
+            "https://token.sensenova.cn/api/v1"
+        );
+    }
+
+    #[test]
+    fn sensenova_v1_suffix_with_trailing_slash_is_rewritten() {
+        assert_eq!(
+            sensenova_base_url("https://token.sensenova.cn/v1/"),
+            "https://token.sensenova.cn/api/v1"
         );
     }
 }

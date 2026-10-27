@@ -359,10 +359,15 @@ export const ipc = {
   terminalResize: (id: string, cols: number, rows: number) =>
     unwrap(current.terminalResize(id, cols, rows)),
   terminalKill: (id: string) => unwrap(current.terminalKill(id)),
+  resolveHomeDir: () => unwrap(current.resolveHomeDir()),
+  getSandboxEndpointInfo: () => unwrap(current.getSandboxEndpointInfo()),
   workspaceFocusDirectory: (workspaceId: string, directoryId: string) =>
     unwrap(current.workspaceFocusDirectory(workspaceId, directoryId)),
   pinWorkspace: (id: string) => unwrap(current.pinWorkspace(id)),
   unpinWorkspace: (id: string) => unwrap(current.unpinWorkspace(id)),
+  removeRecentWorkspace: (workspaceId: string) =>
+    unwrap(current.removeRecentWorkspace(workspaceId)),
+  clearRecentWorkspaces: () => unwrap(current.clearRecentWorkspaces()),
   getLayoutSnapshot: () => unwrap(current.getLayoutSnapshot()),
   setLayoutSnapshot: (mode: string, splitWorkspaceIds: [string, string] | null) =>
     unwrap(current.setLayoutSnapshot(mode, splitWorkspaceIds)),

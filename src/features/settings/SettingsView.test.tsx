@@ -35,7 +35,7 @@ describe("SettingsView — top tab navigation", () => {
     renderWithProviders(<SettingsView />);
 
     const tabs = await screen.findAllByRole("tab");
-    expect(tabs.length).toBe(6);
+    expect(tabs.length).toBe(7);
     expect(screen.queryByRole("tab", { name: /workspace/i })).toBeNull();
   });
 });

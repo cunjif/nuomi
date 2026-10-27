@@ -47,7 +47,7 @@ export function TerminalView({
     // Create the backend terminal and wire stdin/stdout.
     void (async () => {
       try {
-        backendId = await ipc.terminalCreate(cwd);
+        backendId = (await ipc.terminalCreate(cwd)).id;
         if (disposed) {
           void ipc.terminalKill(backendId);
           return;

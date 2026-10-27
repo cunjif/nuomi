@@ -662,6 +662,22 @@ async unpinWorkspace(id: string) : Promise<Result<null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async removeRecentWorkspace(workspaceId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_recent_workspace", { workspaceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearRecentWorkspaces() : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_recent_workspaces") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getLayoutSnapshot() : Promise<Result<LayoutSnapshotDto | null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_layout_snapshot") };
@@ -1606,7 +1622,23 @@ async sandboxListRuntimes() : Promise<Result<SandboxRuntimeDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async terminalCreate(cwd: string | null) : Promise<Result<string, IpcError>> {
+async getSandboxEndpointInfo() : Promise<Result<SandboxEndpointInfo, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_sandbox_endpoint_info") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resolveHomeDir() : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_home_dir") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalCreate(cwd: string | null) : Promise<Result<TerminalCreateResult, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("terminal_create", { cwd }) };
 } catch (e) {
@@ -2062,6 +2094,11 @@ export type SandboxBuildAppRequest = { runtime: string;
  * Build script executed inside the sandbox.
  */
 source: string; limits: SandboxLimitsDto | null }
+export type SandboxEndpointInfo = { url: string; source: SandboxEndpointSource }
+/**
+ * How the sandbox endpoint was resolved: env var > persisted > default.
+ */
+export type SandboxEndpointSource = "envvar" | "persisted" | "default"
 export type SandboxLimitsDto = { timeoutSecs: number; cpuPercent: number | null; memoryMb: number | null; networkEnabled: boolean }
 export type SandboxResourceUsageDto = { cpuTimeMs: number | null; peakMemoryMb: number | null }
 export type SandboxRunCodeRequest = { runtime: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto | null }
@@ -2134,6 +2171,16 @@ export type TeamPlanMemberDto = { kind: string; refId: string; name: string; wil
 export type TeamRunResultDto = { finalOutput: string; converged: boolean; rounds: number }
 export type TeamSummaryDto = { id: string; name: string; topology: string }
 export type TeamTopologyDto = "pipeline" | "router" | "group_chat"
+/**
+ * Result of creating a terminal: the id, the resolved cwd actually used
+ * by the PTY, and how it was chosen.
+ */
+export type TerminalCreateResult = { id: string; cwd: string; cwd_source: TerminalCwdSource }
+/**
+ * How the terminal's working directory was chosen. Mirrored to the
+ * frontend via tauri-specta bindings.
+ */
+export type TerminalCwdSource = "workspace" | "home" | "explicit"
 export type TestIntegrationDto = { ok: boolean; error: string | null }
 export type TestProviderConnectionDto = { ok: boolean; latencyMs: number | null; error: string | null }
 export type TestProviderConnectionInput = { 

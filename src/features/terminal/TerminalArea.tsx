@@ -17,6 +17,7 @@ import { WorkspaceBottomBar } from "../shell/WorkspaceBottomBar";
 import { EditorToolbar } from "../shell/EditorArea";
 import { TerminalTabs } from "./TerminalTabs";
 import { TerminalView } from "./TerminalView";
+import { resolveTerminalCwd } from "./resolveTerminalCwd";
 import { useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
 
 export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNode {
@@ -28,12 +29,15 @@ export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNod
   const activeId = bucket?.activeTerminalId ?? null;
   const activeTerminal = terminals.find((t) => t.id === activeId) ?? null;
 
-  const handleNew = (): void => {
+  const handleNew = async (): Promise<void> => {
+    const { cwd, source } = await resolveTerminalCwd();
     const id = `term-${Date.now()}`;
     const instance: TerminalInstance = {
       id,
       title: `Terminal ${terminals.length + 1}`,
       createdAt: Date.now(),
+      cwd,
+      cwdSource: source,
     };
     addTerminal(workspaceId, instance);
   };
@@ -45,7 +49,7 @@ export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNod
         {/* Terminal column: xterm.js owns its own viewport. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
           {activeTerminal !== null ? (
-            <TerminalView key={activeTerminal.id} terminalId={activeTerminal.id} />
+            <TerminalView key={activeTerminal.id} terminalId={activeTerminal.id} cwd={activeTerminal.cwd} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-sm text-ink-muted">
               <p>{t("terminal.empty")}</p>

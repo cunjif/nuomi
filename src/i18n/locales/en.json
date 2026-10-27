@@ -37,7 +37,15 @@
       "generationFailed": "AI generation failed. Please retry or type manually.",
       "emptyResult": "AI returned no content. Please retry or type manually.",
       "timeout": "Generation timed out. Please retry or type manually.",
-      "defaultAgent": "Default"
+      "defaultAgent": "Default",
+      "bindingGuide": {
+        "hint": "No steward agent bound. Create or enable one in Settings first.",
+        "bind": "Bind"
+      },
+      "agentInvalid": {
+        "warning": "The selected agent is unavailable. Please reselect.",
+        "goSettings": "Settings"
+      }
     }
   },
   "common": {
@@ -807,8 +815,9 @@
       "empty": "No integrations yet — fill in the form above to add one."
     },
     "tab.providers": "Providers",
-    "tab.access": "Tools & Access",
+    "tab.access": "Access",
     "tab.evolution": "Evolution",
+    "tab.sandbox": "Sandbox",
     "navLabel": "Settings sections",
     "evolution": {
       "heading": "Evolution",
@@ -1156,6 +1165,14 @@
     "emptyBody": "Open a directory to start working, or resume from the recent list",
     "openDirectory": "Open directory",
     "recentTitle": "Recently used",
+    "recentRemove": "Remove from recent",
+    "recentClear": "Clear all",
+    "recentClearConfirmTitle": "Clear recent workspaces",
+    "recentClearConfirmBody": "This removes all workspaces from the recent list and clears pin markers. The workspaces themselves are not deleted.",
+    "recentRemoved": "Removed from recent",
+    "recentCleared": "Recent list cleared",
+    "recentRemoveFailed": "Remove failed, please retry",
+    "recentClearFailed": "Clear failed, please retry",
     "overviewHint": "Overview mode · monitoring and navigation only; click a card to enter a workspace and launch agents",
     "dirAccessible": "accessible",
     "anomaly": "Workspace migration issue — manual attention required",
@@ -1291,6 +1308,27 @@
       "failed": "Failed",
       "timed_out": "Timed out",
       "cancelled": "Cancelled"
+    },
+    "setupGuide": {
+      "title": "Sandbox service unavailable",
+      "hint": "Check the sandbox endpoint configuration or start the sandbox service",
+      "configure": "Configure",
+      "unreachable": "Service unreachable, check endpoint configuration"
+    },
+    "section": {
+      "title": "Sandbox endpoint",
+      "description": "Configure the HTTP/HTTPS endpoint of the sandbox runtime service",
+      "save": "Save",
+      "saved": "Configuration saved",
+      "invalidUrl": "Please enter a valid HTTP/HTTPS URL",
+      "saveFailed": "Failed to save configuration, please retry",
+      "envOverridden": "Environment variable NUOMI_SANDBOX_CUBE_URL overrides this setting",
+      "loading": "Loading...",
+      "source": {
+        "envvar": "Source: environment variable",
+        "persisted": "Source: persisted setting",
+        "default": "Source: default value"
+      }
     }
   },
   "steward": {

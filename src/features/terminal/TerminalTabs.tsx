@@ -8,6 +8,8 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "../../lib/ipc/client";
 import { useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
 import { Icon } from "../../components/ui/Icon/Icon";
+import { TerminalCwdBadge } from "./TerminalCwdBadge";
+import { resolveTerminalCwd } from "./resolveTerminalCwd";
 
 export function TerminalTabs({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
@@ -19,12 +21,15 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }): ReactNod
   const terminals = bucket?.terminals ?? [];
   const activeId = bucket?.activeTerminalId ?? null;
 
-  const handleNew = (): void => {
+  const handleNew = async (): Promise<void> => {
+    const { cwd, source } = await resolveTerminalCwd();
     const id = `term-${Date.now()}`;
     const instance: TerminalInstance = {
       id,
       title: `Terminal ${terminals.length + 1}`,
       createdAt: Date.now(),
+      cwd,
+      cwdSource: source,
     };
     addTerminal(workspaceId, instance);
   };
@@ -51,6 +56,7 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }): ReactNod
           }`}
         >
           <span className="truncate">{term.title}</span>
+          <TerminalCwdBadge cwd={term.cwd} cwdSource={term.cwdSource} />
           <button
             type="button"
             aria-label={t("terminal.close")}

@@ -136,12 +136,15 @@ impl TerminalManager {
 
         let master = pair.master;
         let mut terminals = self.terminals.lock().expect("terminal mutex poisoned");
-        terminals.insert(id.clone(), TerminalHandle {
-            master,
-            writer,
-            child,
-            reader_thread: Some(reader_thread),
-        });
+        terminals.insert(
+            id.clone(),
+            TerminalHandle {
+                master,
+                writer,
+                child,
+                reader_thread: Some(reader_thread),
+            },
+        );
         Ok(id)
     }
 

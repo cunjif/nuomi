@@ -822,6 +822,21 @@ pub async fn unpin_workspace(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn remove_recent_workspace(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_remove_recent_workspace(&state, workspace_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_recent_workspaces(state: tauri::State<'_, AppState>) -> Result<(), IpcError> {
+    commands::impl_clear_recent_workspaces(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn get_layout_snapshot(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<commands::LayoutSnapshotDto>, IpcError> {
@@ -1883,6 +1898,14 @@ pub async fn sandbox_list_runtimes(
     commands::impl_sandbox_list_runtimes(&state).await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn get_sandbox_endpoint_info(
+    state: tauri::State<'_, AppState>,
+) -> Result<commands::SandboxEndpointInfo, IpcError> {
+    commands::impl_get_sandbox_endpoint_info(&state).await
+}
+
 /// Frontend heartbeat: called once after the React root mounts to signal that
 /// the webview is alive. If this never arrives within the watchdog grace
 /// period, the shell auto-reloads the webview (see `shell_resilience`).
@@ -1896,10 +1919,16 @@ pub fn __nuomi_heartbeat(state: tauri::State<'_, crate::shell_resilience::Watchd
 
 #[tauri::command]
 #[specta::specta]
+pub async fn resolve_home_dir() -> Result<String, IpcError> {
+    commands::impl_resolve_home_dir().await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn terminal_create(
     state: tauri::State<'_, AppState>,
     cwd: Option<String>,
-) -> Result<String, IpcError> {
+) -> Result<commands::TerminalCreateResult, IpcError> {
     commands::impl_terminal_create(&state, cwd).await
 }
 
@@ -1926,9 +1955,6 @@ pub async fn terminal_resize(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn terminal_kill(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn terminal_kill(state: tauri::State<'_, AppState>, id: String) -> Result<(), IpcError> {
     commands::impl_terminal_kill(&state, id).await
 }

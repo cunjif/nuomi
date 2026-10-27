@@ -119,7 +119,7 @@ describe("SandboxView — task list + detail (task 7.7)", () => {
 
     renderWithProviders(<SandboxView />);
 
-    expect(await screen.findByText("沙箱不可用：请检查沙箱插件配置")).toBeInTheDocument();
+    expect(await screen.findByText("沙箱服务不可用")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建运行" })).toBeDisabled();
   });
 });

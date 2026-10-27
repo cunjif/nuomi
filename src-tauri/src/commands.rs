@@ -5359,14 +5359,11 @@ pub async fn impl_get_conversation(
             let agent_refs: Vec<AgentRefDto> = participants
                 .into_iter()
                 .map(|(k, id)| {
-                    let name = nuomi_core::services::name_agent_ref(
-                        &db.0,
-                        Some(&(k, id.clone())),
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|r| r.name)
-                    .unwrap_or_default();
+                    let name = nuomi_core::services::name_agent_ref(&db.0, Some(&(k, id.clone())))
+                        .ok()
+                        .flatten()
+                        .map(|r| r.name)
+                        .unwrap_or_default();
                     AgentRefDto {
                         kind: k.as_str().to_string(),
                         id,
@@ -7574,6 +7571,27 @@ pub async fn impl_pin_workspace(state: &AppState, id: String) -> Result<(), IpcE
 pub async fn impl_unpin_workspace(state: &AppState, id: String) -> Result<(), IpcError> {
     let reg = state.workspace_registry.clone();
     tokio::task::spawn_blocking(move || reg.unpin(&id))
+        .await
+        .map_err(join_err)??;
+    Ok(())
+}
+
+// ---- Recent workspace list cleanup commands (spec: recent_ws_cleanup) ----
+
+pub async fn impl_remove_recent_workspace(
+    state: &AppState,
+    workspace_id: String,
+) -> Result<(), IpcError> {
+    let reg = state.workspace_registry.clone();
+    tokio::task::spawn_blocking(move || reg.remove_recent(&workspace_id))
+        .await
+        .map_err(join_err)??;
+    Ok(())
+}
+
+pub async fn impl_clear_recent_workspaces(state: &AppState) -> Result<(), IpcError> {
+    let reg = state.workspace_registry.clone();
+    tokio::task::spawn_blocking(move || reg.clear_recent())
         .await
         .map_err(join_err)??;
     Ok(())
@@ -10887,6 +10905,59 @@ pub async fn impl_sandbox_retry_artifact(
     Ok(record.into())
 }
 
+/// How the sandbox endpoint was resolved: env var > persisted > default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxEndpointSource {
+    EnvVar,
+    Persisted,
+    Default,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct SandboxEndpointInfo {
+    pub url: String,
+    pub source: SandboxEndpointSource,
+}
+
+const DEFAULT_SANDBOX_CUBE_URL: &str = "http://127.0.0.1:8819";
+const SANDBOX_CUBE_URL_SETTING: &str = "sandbox_cube_url";
+
+/// Returns the effective sandbox endpoint and where it came from, so the
+/// settings UI can show "env var override" and disable editing.
+pub async fn impl_get_sandbox_endpoint_info(
+    state: &AppState,
+) -> Result<SandboxEndpointInfo, IpcError> {
+    if let Ok(url) = std::env::var("NUOMI_SANDBOX_CUBE_URL") {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return Ok(SandboxEndpointInfo {
+                url,
+                source: SandboxEndpointSource::EnvVar,
+            });
+        }
+    }
+    let db_path = state.db_path.clone();
+    let persisted = tokio::task::spawn_blocking(move || {
+        let db = Db::open(&db_path)?;
+        repos::settings::get(&db.0, SANDBOX_CUBE_URL_SETTING)
+    })
+    .await;
+    if let Ok(Ok(Some(raw))) = persisted {
+        let raw = raw.trim().to_string();
+        if !raw.is_empty() {
+            return Ok(SandboxEndpointInfo {
+                url: raw,
+                source: SandboxEndpointSource::Persisted,
+            });
+        }
+    }
+    Ok(SandboxEndpointInfo {
+        url: DEFAULT_SANDBOX_CUBE_URL.to_string(),
+        source: SandboxEndpointSource::Default,
+    })
+}
+
 /// `sandbox_list_runtimes`: the plugin's declared runtime list with the
 /// isolation description.
 pub async fn impl_sandbox_list_runtimes(
@@ -10902,6 +10973,54 @@ pub async fn impl_sandbox_list_runtimes(
 }
 
 // ---- Terminal commands (ADR-0024 Part B) ----
+
+/// Resolves the current user's home directory: `$HOME` on Unix,
+/// `%USERPROFILE%` on Windows. Used by the frontend terminal cwd
+/// fallback when no workspace is open.
+pub async fn impl_resolve_home_dir() -> Result<String, IpcError> {
+    resolve_home_dir()
+}
+
+fn resolve_home_dir() -> Result<String, IpcError> {
+    let var_name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var(var_name)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            IpcError::new(
+                "terminal.home_unresolved",
+                "cannot determine user home directory",
+            )
+        })
+}
+
+/// Returns true when `path` is an OS root directory: `/` on Unix or a
+/// drive root like `C:\` on Windows. Terminals must not start in these.
+pub fn is_sensitive_dir(path: &std::path::Path) -> bool {
+    match path.parent() {
+        None => true,
+        Some(parent) => parent.as_os_str().is_empty(),
+    }
+}
+
+/// How the terminal's working directory was chosen. Mirrored to the
+/// frontend via tauri-specta bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalCwdSource {
+    Workspace,
+    Home,
+    Explicit,
+}
+
+/// Result of creating a terminal: the id, the resolved cwd actually used
+/// by the PTY, and how it was chosen.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct TerminalCreateResult {
+    pub id: String,
+    pub cwd: String,
+    pub cwd_source: TerminalCwdSource,
+}
 
 /// Tauri-backed emitter: pumps terminal output to the frontend via the
 /// `terminal-output` event. The payload is `{ id, data }` where `data` is
@@ -10924,15 +11043,47 @@ impl nuomi_core::services::terminal_manager::TerminalEventEmitter for TauriTermi
     }
 }
 
-/// Spawns a new interactive terminal. Returns the terminal id.
+/// Spawns a new interactive terminal. When `cwd` is `None` or points to a
+/// non-existent / sensitive directory, falls back to the user home dir and
+/// records a warning. Returns the terminal id alongside the resolved cwd
+/// and its source so the frontend can display it.
 pub async fn impl_terminal_create(
     state: &AppState,
     cwd: Option<String>,
-) -> Result<String, IpcError> {
+) -> Result<TerminalCreateResult, IpcError> {
     let mgr = state.terminal_manager.read().unwrap();
-    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
-    let cwd_path = cwd.as_deref().map(std::path::Path::new);
-    Ok(mgr.create(cwd_path)?)
+    let mgr = mgr
+        .as_ref()
+        .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+
+    let (resolved_path, cwd_source) = match cwd.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => {
+            let path = std::path::Path::new(raw);
+            if path.is_dir() && !is_sensitive_dir(path) {
+                (path.to_path_buf(), TerminalCwdSource::Explicit)
+            } else {
+                let home = resolve_home_dir()?;
+                if is_sensitive_dir(path) {
+                    tracing::warn!(requested = raw, home = %home, "terminal cwd is a sensitive dir, falling back to home");
+                } else {
+                    tracing::warn!(requested = raw, home = %home, "terminal cwd is not a valid dir, falling back to home");
+                }
+                (std::path::PathBuf::from(home), TerminalCwdSource::Home)
+            }
+        }
+        _ => {
+            let home = resolve_home_dir()?;
+            tracing::warn!(home = %home, "terminal cwd not provided, falling back to home");
+            (std::path::PathBuf::from(home), TerminalCwdSource::Home)
+        }
+    };
+
+    let id = mgr.create(Some(resolved_path.as_path()))?;
+    Ok(TerminalCreateResult {
+        id,
+        cwd: resolved_path.to_string_lossy().to_string(),
+        cwd_source,
+    })
 }
 
 /// Writes data to the terminal's stdin.
@@ -10942,7 +11093,9 @@ pub async fn impl_terminal_write(
     data: String,
 ) -> Result<(), IpcError> {
     let mgr = state.terminal_manager.read().unwrap();
-    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    let mgr = mgr
+        .as_ref()
+        .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
     mgr.write(&id, data.as_bytes())?;
     Ok(())
 }
@@ -10955,25 +11108,26 @@ pub async fn impl_terminal_resize(
     rows: u16,
 ) -> Result<(), IpcError> {
     let mgr = state.terminal_manager.read().unwrap();
-    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    let mgr = mgr
+        .as_ref()
+        .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
     mgr.resize(&id, cols, rows)?;
     Ok(())
 }
 
 /// Kills the terminal.
-pub async fn impl_terminal_kill(
-    state: &AppState,
-    id: String,
-) -> Result<(), IpcError> {
+pub async fn impl_terminal_kill(state: &AppState, id: String) -> Result<(), IpcError> {
     let mgr = state.terminal_manager.read().unwrap();
-    let mgr = mgr.as_ref().ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+    let mgr = mgr
+        .as_ref()
+        .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
     mgr.kill(&id)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::mask_webhook_url;
+    use super::{is_sensitive_dir, mask_webhook_url};
 
     /// SPEC D5 shape: scheme+host kept, per-segment first char, tail-4 of
     /// the last segment; the raw URL is never recoverable from the result.
@@ -10983,7 +11137,7 @@ mod tests {
         let masked = mask_webhook_url(raw);
         assert_eq!(masked, "https://open.feishu.cn/o…/b…/v…/h…/a…x9z8");
         assert!(!masked.contains("open-apis"));
-        assert!(!masked.contains("a1b2c3d4e5f6"));
+        assert!(!masked.contains("a1b2c3d4"));
 
         // Short last segment: no overlapping tail duplication.
         assert_eq!(
@@ -11004,5 +11158,22 @@ mod tests {
         );
         // Missing scheme: nothing sensible to reveal.
         assert_eq!(mask_webhook_url("not-a-url"), "");
+    }
+
+    #[test]
+    fn is_sensitive_dir_detects_unix_root() {
+        assert!(is_sensitive_dir(std::path::Path::new("/")));
+    }
+
+    #[test]
+    fn is_sensitive_dir_rejects_unix_subdir() {
+        assert!(!is_sensitive_dir(std::path::Path::new("/home/user")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn is_sensitive_dir_detects_windows_drive_root() {
+        assert!(is_sensitive_dir(std::path::Path::new("C:\\")));
+        assert!(!is_sensitive_dir(std::path::Path::new("C:\\Users")));
     }
 }

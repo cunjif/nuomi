@@ -118,6 +118,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::workspace_focus_directory,
         tauri_cmds::pin_workspace,
         tauri_cmds::unpin_workspace,
+        tauri_cmds::remove_recent_workspace,
+        tauri_cmds::clear_recent_workspaces,
         tauri_cmds::get_layout_snapshot,
         tauri_cmds::set_layout_snapshot,
         tauri_cmds::get_recent_workspaces,
@@ -236,6 +238,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::sandbox_cancel_task,
         tauri_cmds::sandbox_retry_artifact,
         tauri_cmds::sandbox_list_runtimes,
+        tauri_cmds::get_sandbox_endpoint_info,
+        tauri_cmds::resolve_home_dir,
         tauri_cmds::terminal_create,
         tauri_cmds::terminal_write,
         tauri_cmds::terminal_resize,
@@ -440,7 +444,8 @@ async fn boot_and_wire(
             // Terminal manager (ADR-0024 Part B): construct with a Tauri
             // emitter so terminal output flows to the frontend via events.
             let emitter = std::sync::Arc::new(commands::TauriTerminalEmitter { app: app.clone() });
-            let terminal_mgr = nuomi_core::services::terminal_manager::TerminalManager::new(emitter);
+            let terminal_mgr =
+                nuomi_core::services::terminal_manager::TerminalManager::new(emitter);
             *state.terminal_manager.write().unwrap() = Some(terminal_mgr);
 
             app.manage(state);

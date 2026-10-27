@@ -241,8 +241,8 @@ impl WorkspaceRegistryV2 {
         // The directory joins the current workspace. A path already owned by
         // the current workspace is simply (re)mounted; any other path moves in
         // (repo-layer ownership transaction).
-        if let Some(owned) = work_directories::find_by_path(&conn, &abs_path)?
-            .filter(|d| d.workspace_id == current)
+        if let Some(owned) =
+            work_directories::find_by_path(&conn, &abs_path)?.filter(|d| d.workspace_id == current)
         {
             work_directories::set_mounted(&conn, &owned.id, true)?;
             emit_json(

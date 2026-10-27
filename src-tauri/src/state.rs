@@ -164,7 +164,8 @@ pub struct AppState {
     /// Terminal manager (ADR-0024 Part B). Constructed in `boot_and_wire`
     /// after the AppHandle is available (the emitter needs it to emit Tauri
     /// events). `None` until then; commands return `NotFound` if called early.
-    pub terminal_manager: Arc<std::sync::RwLock<Option<nuomi_core::services::terminal_manager::TerminalManager>>>,
+    pub terminal_manager:
+        Arc<std::sync::RwLock<Option<nuomi_core::services::terminal_manager::TerminalManager>>>,
 }
 
 impl AppState {

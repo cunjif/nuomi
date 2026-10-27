@@ -116,6 +116,9 @@ export interface TerminalInstance {
   id: string;
   title: string;
   createdAt: number;
+  /** Working directory fixed at creation time; absent on legacy instances. */
+  cwd?: string;
+  cwdSource?: "workspace" | "home" | "explicit";
 }
 
 /**
@@ -205,6 +208,8 @@ interface UiState {
   setConversationWorkspaceFilter: (filter: "all" | string) => void;
   setView: (view: View) => void;
   setActiveArea: (area: ActiveArea) => void;
+  settingsInitialTab: string | null;
+  setSettingsInitialTab: (tab: string | null) => void;
   setTheme: (theme: Theme) => void;
   selectSession: (sessionId: string | null) => void;
   /**
@@ -347,6 +352,8 @@ export const useUiStore = create<UiState>((set, get) => ({
    */
   setView: (view) => set({ view, activeArea: "chat" }),
   setActiveArea: (activeArea) => set({ activeArea }),
+  settingsInitialTab: null,
+  setSettingsInitialTab: (settingsInitialTab) => set({ settingsInitialTab }),
   // Pure state flip only — DOM class + persistence side effects live in useTheme.
   setTheme: (theme) => set({ theme }),
   selectSession: (sessionId) =>

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useUiStore } from "../../lib/store/uiStore";
 import { CliAgentsSection } from "./CliAgentsSection";
 import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
 import { IdleProposalSection } from "./IdleProposalSection";
@@ -8,6 +9,7 @@ import { IntegrationsSection } from "./IntegrationsSection";
 import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
+import { SandboxSection } from "./SandboxSection";
 
 /**
  * Settings tabs (用户需求: 集中一页 → 顶部导航分 tab). One section per tab;
@@ -23,6 +25,7 @@ const TABS = [
   { key: "integrations", labelKey: "settings.integrations.heading" },
   { key: "memory", labelKey: "settings.memory.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
+  { key: "sandbox", labelKey: "settings.tab.sandbox" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -46,15 +49,24 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
           <IdleProposalSection />
         </>
       );
+    case "sandbox":
+      return <SandboxSection />;
   }
 }
 
 /** U13 settings: tabbed sections (providers / roles / agents / integrations / access). */
 export function SettingsView({ initialTab }: { initialTab?: string }): ReactNode {
   const { t } = useTranslation();
+  const storeTab = useUiStore((s) => s.settingsInitialTab);
+  const setSettingsInitialTab = useUiStore((s) => s.setSettingsInitialTab);
+  const effectiveInitial = initialTab ?? storeTab ?? "providers";
   const [tab, setTab] = useState<TabKey>(
-    TABS.some((item) => item.key === initialTab) ? (initialTab as TabKey) : "providers",
+    TABS.some((item) => item.key === effectiveInitial) ? (effectiveInitial as TabKey) : "providers",
   );
+  // Consume the pending tab so the next manual open starts fresh.
+  useEffect(() => {
+    if (storeTab !== null) setSettingsInitialTab(null);
+  }, [storeTab, setSettingsInitialTab]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

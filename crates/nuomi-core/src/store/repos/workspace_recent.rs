@@ -101,6 +101,25 @@ pub fn remove(conn: &Connection, workspace_id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Idempotently removes a recent entry. Always returns `Ok(())` regardless of
+/// whether the row existed. Satisfies the "target already absent" idempotent
+/// success semantic (spec 4.2-1) without altering the existing `remove`
+/// signature that some callers may rely on for `NotFound`.
+pub fn remove_idempotent(conn: &Connection, workspace_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM workspace_recent WHERE workspace_id = ?1",
+        params![workspace_id],
+    )?;
+    Ok(())
+}
+
+/// Clears the entire `workspace_recent` table. Idempotent: clearing an empty
+/// table still returns `Ok(())`.
+pub fn clear_all(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM workspace_recent", [])?;
+    Ok(())
+}
+
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecentEntryRow> {
     let is_pinned: i64 = row.get(2)?;
     Ok(RecentEntryRow {
@@ -201,5 +220,52 @@ mod tests {
         assert_eq!(entries.len(), RECENT_LIST_CAPACITY);
         // w0 (pinned) must still be present.
         assert!(entries.iter().any(|e| e.workspace_id == "w0"));
+    }
+
+    #[test]
+    fn remove_idempotent_deletes_existing_row() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        touch(&conn, "w1", 100, false).unwrap();
+        assert_eq!(list_all(&conn).unwrap().len(), 1);
+        remove_idempotent(&conn, "w1").unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_idempotent_succeeds_when_row_absent() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        touch(&conn, "w1", 100, false).unwrap();
+        // Remove once.
+        remove_idempotent(&conn, "w1").unwrap();
+        // Remove again — must not error (idempotent).
+        remove_idempotent(&conn, "w1").unwrap();
+        // Non-existent id also succeeds.
+        remove_idempotent(&conn, "never-existed").unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn clear_all_empties_table() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        seed_workspace(&conn, "w2");
+        seed_workspace(&conn, "w3");
+        touch(&conn, "w1", 100, false).unwrap();
+        touch(&conn, "w2", 200, true).unwrap();
+        touch(&conn, "w3", 300, false).unwrap();
+        assert_eq!(list_all(&conn).unwrap().len(), 3);
+        clear_all(&conn).unwrap();
+        assert_eq!(list_all(&conn).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn clear_all_on_empty_table_succeeds() {
+        let conn = db();
+        clear_all(&conn).unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+        // Idempotent: clear again.
+        clear_all(&conn).unwrap();
     }
 }

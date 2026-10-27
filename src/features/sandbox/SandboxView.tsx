@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "../../components/ui/Badge";
@@ -11,11 +11,14 @@ import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { SandboxBuildForm } from "./SandboxBuildForm";
+import { SandboxSetupGuide } from "./SandboxSetupGuide";
 import { SandboxTaskDetail, toneForStatus } from "./SandboxTaskDetail";
 import { SandboxTaskForm } from "./SandboxTaskForm";
 
 /** How many recent tasks the list column fetches (ADR-0022 task 7.7). */
 const TASK_LIST_LIMIT = 50;
+/** Sandbox probe timeout (spec 4.1.1): degrade to the guide after this. */
+const PROBE_TIMEOUT_MS = 3000;
 
 /**
  * Sandbox view (ADR-0022 task 7.7): toolbar with the two entry points
@@ -39,6 +42,18 @@ export function SandboxView(): ReactNode {
     queryKey: ["sandbox", "tasks"],
     queryFn: () => ipc.sandboxListTasks(TASK_LIST_LIMIT),
   });
+
+  // Degrade to the setup guide when the probe exceeds the timeout (spec 4.1.1).
+  const [probeTimedOut, setProbeTimedOut] = useState(false);
+  useEffect(() => {
+    if (!runtimesQuery.isLoading) {
+      setProbeTimedOut(false);
+      return;
+    }
+    setProbeTimedOut(false);
+    const timer = setTimeout(() => setProbeTimedOut(true), PROBE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [runtimesQuery.isLoading]);
 
   // Kernel sandbox.* events (task state changes, artifact transfers) keep
   // both the list and the selected task's detail current.
@@ -102,14 +117,16 @@ export function SandboxView(): ReactNode {
         </div>
       </div>
 
-      {runtimesQuery.isLoading ? (
+      {runtimesQuery.isLoading && !probeTimedOut ? (
         <div className="m-4 self-center">
           <Spinner />
         </div>
       ) : runtimesQuery.isError ? (
-        <EmptyState title={describeError(runtimesQuery.error)} />
+        <SandboxSetupGuide reason={describeError(runtimesQuery.error)} />
+      ) : probeTimedOut ? (
+        <SandboxSetupGuide reason={t("sandbox.setupGuide.unreachable")} />
       ) : runtimes.length === 0 ? (
-        <EmptyState title={t("sandbox.unavailable")} />
+        <SandboxSetupGuide />
       ) : (
         <div className="flex min-h-0 flex-1 gap-2">
           <section
