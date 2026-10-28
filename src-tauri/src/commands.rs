@@ -2096,9 +2096,29 @@ pub async fn impl_read_file(
     path: String,
     workspace_id: Option<String>,
 ) -> Result<String, IpcError> {
-    Ok(state
-        .workspace_for(workspace_id.as_deref())?
-        .read_file(&path)?)
+    // ADR-0021: a workspace may have multiple mounted work directories and
+    // the active directory follows the most recently focused one. A file tab
+    // stores only a relative path, so a read must search every mounted
+    // directory (active first) — otherwise switching the active directory
+    // (e.g. by adding a new one) makes already-open tabs unreadable.
+    let roots = state.workspace_all_roots(workspace_id.as_deref())?;
+    let mut last_err: Option<nuomi_core::services::WorkspaceError> = None;
+    for root in &roots {
+        let svc = match nuomi_core::services::WorkspaceService::new(root.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        match svc.read_file(&path) {
+            Ok(content) => return Ok(content),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err
+        .map(IpcError::from)
+        .unwrap_or_else(|| IpcError::new("workspace.invalid_path", format!("not a file: {}", path))))
 }
 
 pub async fn impl_write_file(
@@ -2107,10 +2127,33 @@ pub async fn impl_write_file(
     content: String,
     workspace_id: Option<String>,
 ) -> Result<(), IpcError> {
-    state
-        .workspace_for(workspace_id.as_deref())?
-        .write_file_atomic(&path, &content)?;
-    Ok(())
+    // ADR-0021: write to the directory that already contains the file (preserve
+    // origin across active-directory switches); for a brand-new file, write to
+    // the active (first) root. This keeps an edited tab saving back to its
+    // source directory instead of silently forking a copy under the active dir.
+    let roots = state.workspace_all_roots(workspace_id.as_deref())?;
+    let mut last_err: Option<nuomi_core::services::WorkspaceError> = None;
+    for root in &roots {
+        let svc = match nuomi_core::services::WorkspaceService::new(root.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        if svc.resolve(&path).map(|p| p.is_file()).unwrap_or(false) {
+            svc.write_file_atomic(&path, &content)?;
+            return Ok(());
+        }
+    }
+    if let Some(root) = roots.first() {
+        let svc = nuomi_core::services::WorkspaceService::new(root.clone())?;
+        svc.write_file_atomic(&path, &content)?;
+        return Ok(());
+    }
+    Err(last_err
+        .map(IpcError::from)
+        .unwrap_or_else(|| IpcError::new("workspace.invalid_path", format!("not a file: {}", path))))
 }
 
 pub async fn impl_create_file(

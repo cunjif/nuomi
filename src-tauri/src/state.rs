@@ -483,6 +483,114 @@ impl AppState {
         }
     }
 
+    /// Returns all candidate sandbox roots for `workspace_id` (ADR-0021):
+    /// the active work directory first, then every other mounted+available
+    /// work directory, then the legacy `root_path` column as a fallback.
+    /// File read/write operations iterate these roots so that an already-open
+    /// tab stays accessible after the active directory changes (e.g. when a
+    /// new work directory is added and auto-focused).
+    pub fn workspace_all_roots(&self, workspace_id: Option<&str>) -> CoreResult<Vec<PathBuf>> {
+        match workspace_id {
+            Some(id) => {
+                let entry = self
+                    .workspace_registry
+                    .find_by_id(id)
+                    .map_err(|e| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            e.to_string(),
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            id.to_string(),
+                        ))
+                    })?;
+                let active = self.active_directory();
+                let db = nuomi_core::store::Db::open(self.db_path.as_ref())?;
+                let dirs = nuomi_core::store::repos::work_directories::list_by_workspace_with_availability(
+                    &db.0,
+                    id,
+                )?;
+                let mut roots: Vec<PathBuf> = Vec::new();
+                if let Some((ws, dir_id)) = active {
+                    if ws == id {
+                        if let Some(d) = dirs
+                            .iter()
+                            .find(|d| d.directory.id == dir_id && d.available && d.directory.mounted)
+                        {
+                            roots.push(PathBuf::from(&d.directory.abs_path));
+                        }
+                    }
+                }
+                for d in dirs.iter().filter(|d| d.available && d.directory.mounted) {
+                    let p = PathBuf::from(&d.directory.abs_path);
+                    if !roots.iter().any(|r| r == &p) {
+                        roots.push(p);
+                    }
+                }
+                if roots.is_empty() {
+                    roots.push(PathBuf::from(&entry.root_path));
+                }
+                Ok(roots)
+            }
+            None => Ok(vec![self.current_workspace()]),
+        }
+    }
+
+    /// Returns all candidate sandbox roots for `workspace_id` (ADR-0021):
+    /// the active work directory first, then every other mounted+available
+    /// work directory, then the legacy `root_path` column as a fallback.
+    /// File read/write operations iterate these roots so that an already-open
+    /// tab stays accessible after the active directory changes (e.g. when a
+    /// new work directory is added and auto-focused).
+    pub fn workspace_all_roots(&self, workspace_id: Option<&str>) -> CoreResult<Vec<PathBuf>> {
+        match workspace_id {
+            Some(id) => {
+                let entry = self
+                    .workspace_registry
+                    .find_by_id(id)
+                    .map_err(|e| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            e.to_string(),
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        CoreError::Workspace(nuomi_core::services::WorkspaceError::InvalidPath(
+                            id.to_string(),
+                        ))
+                    })?;
+                let active = self.active_directory();
+                let db = nuomi_core::store::Db::open(self.db_path.as_ref())?;
+                let dirs = nuomi_core::store::repos::work_directories::list_by_workspace_with_availability(
+                    &db.0,
+                    id,
+                )?;
+                let mut roots: Vec<PathBuf> = Vec::new();
+                if let Some((ws, dir_id)) = active {
+                    if ws == id {
+                        if let Some(d) = dirs
+                            .iter()
+                            .find(|d| d.directory.id == dir_id && d.available && d.directory.mounted)
+                        {
+                            roots.push(PathBuf::from(&d.directory.abs_path));
+                        }
+                    }
+                }
+                for d in dirs.iter().filter(|d| d.available && d.directory.mounted) {
+                    let p = PathBuf::from(&d.directory.abs_path);
+                    if !roots.iter().any(|r| r == &p) {
+                        roots.push(p);
+                    }
+                }
+                if roots.is_empty() {
+                    roots.push(PathBuf::from(&entry.root_path));
+                }
+                Ok(roots)
+            }
+            None => Ok(vec![self.current_workspace()]),
+        }
+    }
+
     /// Resolves a `GitService` for an explicit workspace id (ADR 0017).
     pub fn git_for(&self, workspace_id: Option<&str>) -> CoreResult<GitService> {
         match workspace_id {
