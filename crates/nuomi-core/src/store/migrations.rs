@@ -345,6 +345,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0043_selfeval_temp_dirs.sql"
         )),
     ),
+    (
+        44,
+        "0044_user_preference_profiles",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0044_user_preference_profiles.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -1529,6 +1537,42 @@ mod tests {
             "idx_selfeval_temp_status",
             "idx_selfeval_temp_created",
             "idx_selfeval_temp_gc_eligible",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [idx],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "index {idx} must exist");
+        }
+    }
+
+    // ---- migration 0044: user_preference_profiles (ADR-0025 Slice 3)
+
+    #[test]
+    fn migrations_0044_user_preference_profiles_idempotent_on_empty_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM user_preference_profiles", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        super::run(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrations_0044_indexes_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        for idx in [
+            "idx_pref_profiles_category",
+            "idx_pref_profiles_status",
+            "idx_pref_profiles_confidence",
+            "idx_pref_profiles_session",
         ] {
             let n: i64 = conn
                 .query_row(

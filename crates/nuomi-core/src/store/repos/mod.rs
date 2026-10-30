@@ -23,6 +23,7 @@ pub mod settings;
 pub mod steward;
 pub mod tasks_runs;
 pub mod teams;
+pub mod user_preference_profiles;
 pub mod whiteboard;
 pub mod work_directories;
 pub mod workspace_layout_snapshot;
