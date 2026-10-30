@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="nuomi cat mascot">
+  <defs>
+    <radialGradient id="furGrad" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#e2d6b2"/>
+      <stop offset="55%" stop-color="#b0a888"/>
+      <stop offset="100%" stop-color="#6a7a8a"/>
+    </radialGradient>
+    <radialGradient id="faceGrad" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#fafaf6"/>
+      <stop offset="100%" stop-color="#e8e8e2"/>
+    </radialGradient>
+    <radialGradient id="eyeGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#9aa86a"/>
+      <stop offset="70%" stop-color="#6a7c4a"/>
+      <stop offset="100%" stop-color="#4a5c32"/>
+    </radialGradient>
+    <radialGradient id="pumpkinGrad" cx="40%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#f4a04a"/>
+      <stop offset="100%" stop-color="#c66828"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 耳朵 -->
+  <g id="ears">
+    <path d="M 58 78 L 46 22 L 100 60 Z" fill="url(#furGrad)"/>
+    <path d="M 66 72 L 56 36 L 92 60 Z" fill="#e8b8b8"/>
+    <path d="M 182 78 L 194 22 L 140 60 Z" fill="url(#furGrad)"/>
+    <path d="M 174 72 L 184 36 L 148 60 Z" fill="#e8b8b8"/>
+  </g>
+
+  <!-- 头部 -->
+  <ellipse cx="120" cy="118" rx="78" ry="72" fill="url(#furGrad)"/>
+
+  <!-- 虎斑纹（额头与脸颊） -->
+  <g id="tabby" fill="#4a5a6a" opacity="0.18">
+    <path d="M 92 72 Q 96 88 92 98 Z"/>
+    <path d="M 104 66 Q 108 84 104 96 Z"/>
+    <path d="M 120 64 Q 124 82 120 96 Z"/>
+    <path d="M 136 66 Q 140 84 136 96 Z"/>
+    <path d="M 148 72 Q 152 88 148 98 Z"/>
+    <path d="M 52 108 Q 68 112 72 124 Q 64 120 52 108 Z"/>
+    <path d="M 188 108 Q 172 112 168 124 Q 176 120 188 108 Z"/>
+    <path d="M 56 132 Q 72 136 78 148 Q 68 144 56 132 Z"/>
+    <path d="M 184 132 Q 168 136 162 148 Q 172 144 184 132 Z"/>
+  </g>
+
+  <!-- 白色面部（鼻线区域） -->
+  <ellipse cx="120" cy="142" rx="44" ry="46" fill="url(#faceGrad)"/>
+
+  <!-- 眼睛 -->
+  <g id="eyes">
+    <ellipse cx="94" cy="118" rx="14" ry="16" fill="#f5f5f0"/>
+    <ellipse cx="94" cy="120" rx="11" ry="13" fill="url(#eyeGrad)"/>
+    <ellipse cx="94" cy="120" rx="3.2" ry="11" fill="#161616"/>
+    <circle cx="91" cy="115" r="2.8" fill="#ffffff"/>
+    <circle cx="96" cy="124" r="1.2" fill="#ffffff" opacity="0.7"/>
+
+    <ellipse cx="146" cy="118" rx="14" ry="16" fill="#f5f5f0"/>
+    <ellipse cx="146" cy="120" rx="11" ry="13" fill="url(#eyeGrad)"/>
+    <ellipse cx="146" cy="120" rx="3.2" ry="11" fill="#161616"/>
+    <circle cx="143" cy="115" r="2.8" fill="#ffffff"/>
+    <circle cx="148" cy="124" r="1.2" fill="#ffffff" opacity="0.7"/>
+  </g>
+
+  <!-- 鼻头 -->
+  <path d="M 114 140 Q 120 138 126 140 L 120 148 Z" fill="#e8a0a0"/>
+
+  <!-- 嘴（ω 形） -->
+  <g fill="none" stroke="#6a6a66" stroke-width="1.6" stroke-linecap="round">
+    <path d="M 120 148 L 120 153"/>
+    <path d="M 120 153 Q 112 158 106 154"/>
+    <path d="M 120 153 Q 128 158 134 154"/>
+  </g>
+
+  <!-- 胡须 -->
+  <g stroke="#c8c8c2" stroke-width="0.8" stroke-linecap="round" opacity="0.8">
+    <line x1="78" y1="146" x2="48" y2="142"/>
+    <line x1="78" y1="152" x2="50" y2="156"/>
+    <line x1="162" y1="146" x2="192" y2="142"/>
+    <line x1="162" y1="152" x2="190" y2="156"/>
+  </g>
+
+  <!-- 围领（白色钩织） -->
+  <g id="collar">
+    <path d="M 70 178 Q 120 206 170 178 Q 176 190 168 200 Q 120 222 72 200 Q 64 190 70 178 Z"
+          fill="#f8f8f4" stroke="#d0d0c8" stroke-width="1.2"/>
+    <!-- 钩织纹理 -->
+    <g fill="none" stroke="#c8c8c0" stroke-width="0.7" opacity="0.7">
+      <path d="M 80 186 Q 86 190 92 188"/>
+      <path d="M 96 192 Q 102 196 108 194"/>
+      <path d="M 112 196 Q 120 200 128 196"/>
+      <path d="M 132 194 Q 138 196 144 192"/>
+      <path d="M 148 188 Q 154 190 160 186"/>
+    </g>
+    <!-- 珍珠 -->
+    <g fill="#fffaf0" stroke="#c8c8c0" stroke-width="0.5">
+      <circle cx="96" cy="182" r="2.2"/>
+      <circle cx="144" cy="182" r="2.2"/>
+      <circle cx="84" cy="190" r="1.8"/>
+      <circle cx="156" cy="190" r="1.8"/>
+    </g>
+  </g>
+
+  <!-- 小南瓜装饰 -->
+  <g id="pumpkin" transform="translate(120, 204)">
+    <ellipse cx="0" cy="0" rx="11" ry="8" fill="url(#pumpkinGrad)"/>
+    <path d="M -5.5 -7 Q -5.5 7 -5.5 7" stroke="#a85820" stroke-width="0.9" fill="none"/>
+    <path d="M -1.8 -7.8 Q -1.8 7.8 -1.8 7.8" stroke="#a85820" stroke-width="0.9" fill="none"/>
+    <path d="M 1.8 -7.8 Q 1.8 7.8 1.8 7.8" stroke="#a85820" stroke-width="0.9" fill="none"/>
+    <path d="M 5.5 -7 Q 5.5 7 5.5 7" stroke="#a85820" stroke-width="0.9" fill="none"/>
+    <rect x="-1.2" y="-10.5" width="2.4" height="3.5" rx="1" fill="#6a8c3a"/>
+    <path d="M 0 -10.5 Q 2 -12 3 -10.5" fill="none" stroke="#6a8c3a" stroke-width="0.8" stroke-linecap="round"/>
+  </g>
+</svg>

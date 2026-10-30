@@ -43,6 +43,8 @@ SPEC D9 将插件化核心 5 件（Loop Engine、SystemPrompt、Memory、MCP、H
 
 扫描顺序：`NUOMI_PLUGIN_PATH`（PATH 风格分隔）→ `dirs::config_dir()/nuomi/plugins` → `<cwd>/.nuomi/plugins`。**同 id 先到先得**（env > user > workspace），后者报 `Skipped{duplicate}`。清单解析失败**永不 crash**：进 `BootReport.failed`，boot 继续——侧载失败非致命是硬性设计约束。
 
+**ADR-0025 修订**：新增专用侧载层 `.nuomi/plugins/evolved/`（自进化产出插件），扫描链位于 `.nuomi/plugins` 之后；`plugin.toml` 增加 `evolution_snapshot_id` 字段用于追踪产出快照与精准回滚。
+
 ### 5. 权限模型 v1 = 声明 + 展示，不建新沙箱
 
 `[permissions]`（fs.read/fs.write globs、network hosts、shell）在 boot report 与 `nuomi plugin list` 中**展示**；执行治理仍由既有机制承担（PreToolCall 钩子可 deny、ApprovalGate 敏感工具名单、Exchange gate）。进程边界本身就是隔离层。v1.1 roadmap 再评估权限强制执行。

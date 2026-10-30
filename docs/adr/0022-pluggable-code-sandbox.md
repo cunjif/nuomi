@@ -55,6 +55,8 @@ SandboxPlugin（内置插件壳，实现 Plugin trait）
 
 任务提交时内核校验 `authorized_dirs ⊆ 当前工作区的工作目录集`（依赖 ADR-0021 两级模型）。越权目录直接拒绝（`sandbox.dir_not_authorized`）。这保证沙箱内的文件访问范围与用户当前工作上下文一致，不因执行器实现差异而放宽。
 
+**ADR-0025 修订**：授权目录收敛扩展为 `authorized_dirs ⊆ 当前工作区工作目录集 ∪ 应用级临时工作目录`（后者仅自进化引擎可调用）；入口假设从"用户提交"改为"工作台/自进化引擎提交"；沙箱新增 `Profile-Light` / `Profile-Heavy` 两档执行规格。
+
 ### 4. 任务生命周期（对齐 Run 铁律）
 
 状态机：`queued → running → succeeded / failed / timed_out / cancelled`。

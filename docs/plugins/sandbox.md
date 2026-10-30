@@ -15,6 +15,7 @@
 |---|---|---|
 | `python` | Python 3 | CubeSandbox 容器隔离 |
 | `node` | Node.js | CubeSandbox 容器隔离 |
+| `rust` | Rust | CubeSandbox 容器隔离 |
 
 运行时清单以执行器声明为准（`sandbox_list_runtimes` 实时查询）——替换执行器后清单随之变化，前端下拉与"沙箱不可用"判定均以该查询结果为准。
 
@@ -38,6 +39,20 @@
 | `networkEnabled` | 否 | — | `false` |
 
 超时行为：任务超过 `timeoutSecs` 被中止、容器回收，落 `timed_out` 终态并保留已产生的部分输出（spec 5.7.3-2）；用户可查看部分输出并重新提交。
+
+`build_app` 任务的默认超时与 `run_code` 不同：当调用方未提供 `limits` 时，`build_app` 使用专属默认超时 **1800 秒（30 分钟）**（`SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS`），显著高于 `run_code` 的 120 秒，足以完成一次 Rust + Tauri 全量构建；调用方仍可经 `limits.timeoutSecs` 覆盖。该差异仅作用于 `build_app` 的 `None` 分支，不改变 `SandboxLimits::default()` 的全局语义。
+
+## 本软件自构建环境要求
+
+`build_app` 可在沙箱内完成 nuomi 自身的完整编译构建，产出可分发 CLI 二进制 / 桌面 bundle。所需构建环境：
+
+| 依赖 | 用途 |
+|---|---|
+| Rust 工具链（`cargo` / `rustc`） | 编译 `crates/` 内核与 `src-tauri/` 桥接层 |
+| Node.js 包管理器（`pnpm`） | 安装前端依赖、运行 Vite 构建与 `tauri-specta` 契约生成 |
+| Tauri 系统依赖 | 目标平台的 WebView / GTK 等系统库（见 AGENTS.md 跨平台构建前置） |
+
+**该环境预装属沙箱执行服务（CubeSandbox 类进程）的部署职责**，非内核 / 桥接 / 前端代码职责——内核仅声明 `rust` 运行时与 `build_app` 默认超时，执行服务负责在隔离容器内提供上述工具链。
 
 ## 任务账本与产物回传
 
