@@ -1,7 +1,9 @@
 //! Self-evolution: trajectory aggregation, GEPA-inspired reflection,
 //! prompt versioning and allowlisted online research (SPEC T11, AC12–AC14).
 
+pub mod b1_gate;
 pub mod journal;
+pub mod preference;
 pub mod reflection;
 pub mod research;
 pub mod review;
@@ -9,10 +11,14 @@ pub mod scheduler;
 pub mod trajectory;
 pub mod versioning;
 
+pub use b1_gate::{
+    B1GateState, B1TriggerGate, SessionActivity, TriggerDecision, TriggerKind, TriggerRejection,
+};
 pub use journal::{
     audit, DriftConfig, DriftDetector, EvolutionJournal, JournalEntry, JournalFilter, JournalKind,
     JournaledReviewGate, JOURNAL_KIND_PREFIX, JOURNAL_SINK_SESSION_ID,
 };
+pub use preference::{PreferenceService, PreferenceSnapshot};
 pub use reflection::{PromptCandidate, ReflectionInput, Reflector};
 pub use research::{
     online_authorized, set_online_authorized, ResearchAllowlist, ResearchFetcher,

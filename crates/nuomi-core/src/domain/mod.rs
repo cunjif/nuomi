@@ -8,13 +8,14 @@ pub mod steward_enums;
 
 pub use entities::{
     AgentProfile, AgentRefKind, Approval, ApprovalDecision, Attachment, AttachmentKind,
-    AutoRemember, Capability, CliFlavor, ConversationKind, ConversationParticipant, EventRecord,
-    EventRollback, EvolutionSettings, Integration, IntegrationKind, MemoryEntry, MemoryPolicy,
-    MessageQueueEntry, ModelEntry, OnlineLearningConfig, PromptStatus, PromptVersion, Proposal,
-    ProposalStatus, ProviderConfig, ProviderProtocol, QueueStatus, RefineConfig, RefineStrategy,
-    RetrievalStrategy, Role, RoleMemoryConfig, RouteMode, Run, Schedule, ScheduleSessionMode,
-    ScheduleTargetKind, Session, SessionCliHandle, SkillCreationConfig, SkillFormat, Task,
-    TaskStatus, Team, TeamTopology, TodoItem, WhiteBoardNote, WhiteboardRouteMode,
+    AutoRemember, B1Config, Capability, CliFlavor, ConversationKind, ConversationParticipant,
+    EventRecord, EventRollback, EvolutionSettings, Integration, IntegrationKind, MemoryEntry,
+    MemoryPolicy, MessageQueueEntry, ModelEntry, OnlineLearningConfig, PromptStatus, PromptVersion,
+    Proposal, ProposalStatus, ProviderConfig, ProviderProtocol, QueueStatus, RefineConfig,
+    RefineStrategy, RetrievalStrategy, Role, RoleMemoryConfig, RouteMode, Run, Schedule,
+    ScheduleSessionMode, ScheduleTargetKind, Session, SessionCliHandle, SkillCreationConfig,
+    SkillFormat, Task, TaskStatus, Team, TeamTopology, TodoItem, WhiteBoardNote,
+    WhiteboardRouteMode,
 };
 pub use run_state::{
     ApprovalOutcome, GenerationalRun, LandingError, LandingEvent, LandingPhase, LandingRecord,

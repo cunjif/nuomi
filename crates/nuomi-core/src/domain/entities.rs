@@ -1154,7 +1154,37 @@ impl Default for MemoryPolicy {
     }
 }
 
-/// Top-level self-evolution configuration aggregating all four dimensions.
+/// Dimension (5): B1 user-layer self-evolution trigger and anti-fatigue config
+/// (ADR-0025 §2.1 Slice 3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct B1Config {
+    /// Idle debounce window in seconds before triggering sedimentation check
+    /// (ADR §2.1.2: default 60s).
+    pub idle_debounce_secs: u64,
+    /// Forced cooldown between two sedimentation proposals in the same session
+    /// (ADR §2.1.3: default 600s = 10min).
+    pub cooldown_secs: u64,
+    /// Daily token budget for silent sedimentation judgments (ADR §2.1.3).
+    pub daily_token_budget: u32,
+    /// Whether dynamic debounce/cooldown adaptation is enabled (ADR §2.1.4).
+    pub adaptive_enabled: bool,
+    /// Minimum confidence threshold for high-confidence trigger (ADR §5: 0.8).
+    pub min_confidence: f64,
+}
+
+impl Default for B1Config {
+    fn default() -> Self {
+        Self {
+            idle_debounce_secs: 60,
+            cooldown_secs: 600,
+            daily_token_budget: 50_000,
+            adaptive_enabled: true,
+            min_confidence: 0.8,
+        }
+    }
+}
+
+/// Top-level self-evolution configuration aggregating all dimensions.
 /// Stored as JSON in `app_settings` (key = `evolution_settings`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EvolutionSettings {
@@ -1162,6 +1192,8 @@ pub struct EvolutionSettings {
     pub refine: RefineConfig,
     pub skill_creation: SkillCreationConfig,
     pub memory_policy: MemoryPolicy,
+    #[serde(default)]
+    pub b1: B1Config,
 }
 
 /// Default research domains — mirrors `evolution::research::ResearchAllowlist::DOMAINS`.
@@ -1260,6 +1292,13 @@ mod tests {
                 retention_days: 180,
                 retrieval: RetrievalStrategy::Hybrid,
             },
+            b1: B1Config {
+                idle_debounce_secs: 90,
+                cooldown_secs: 900,
+                daily_token_budget: 100_000,
+                adaptive_enabled: false,
+                min_confidence: 0.85,
+            },
         };
         let json = serde_json::to_string(&original).unwrap();
         let decoded: EvolutionSettings = serde_json::from_str(&json).unwrap();
@@ -1278,6 +1317,11 @@ mod tests {
             decoded.memory_policy.retrieval,
             RetrievalStrategy::Hybrid
         ));
+        assert_eq!(decoded.b1.idle_debounce_secs, 90);
+        assert_eq!(decoded.b1.cooldown_secs, 900);
+        assert_eq!(decoded.b1.daily_token_budget, 100_000);
+        assert!(!decoded.b1.adaptive_enabled);
+        assert!((decoded.b1.min_confidence - 0.85).abs() < 1e-9);
     }
 
     #[test]
@@ -1298,6 +1342,10 @@ mod tests {
             decoded.memory_policy.retrieval,
             RetrievalStrategy::Semantic
         ));
+        // b1 uses #[serde(default)] — missing field yields B1Config::default().
+        assert_eq!(decoded.b1.idle_debounce_secs, 60);
+        assert_eq!(decoded.b1.cooldown_secs, 600);
+        assert!(decoded.b1.adaptive_enabled);
     }
 
     #[test]
