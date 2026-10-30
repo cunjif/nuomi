@@ -1075,6 +1075,8 @@
     "cut": "剪切",
     "paste": "粘贴",
     "copyPath": "复制路径",
+    "runInSandbox": "在沙箱中运行",
+    "runProjectInSandbox": "在沙箱中运行项目",
     "deleteConfirmTitle": "确认删除",
     "deleteConfirmCount": "确认删除 {{count}} 项",
     "deleteConfirmDirWarning": "文件夹及其所有内容将被永久删除",
@@ -1339,6 +1341,52 @@
       "tooLarge": "文件过大：{{name}}（超过 {{limit}} 上限）",
       "emptyFile": "文件为空：{{name}}",
       "saveFailed": "附件保存失败：{{message}}"
+    }
+  },
+  "workbench": {
+    "run": {
+      "runCode": "运行代码",
+      "buildApp": "构建应用",
+      "sandboxUnreachable": "沙箱不可达，请检查配置",
+      "goConfigure": "去配置"
+    },
+    "runPanel": {
+      "title": "运行结果",
+      "collapse": "折叠",
+      "expand": "展开",
+      "empty": "暂无运行任务",
+      "close": "关闭面板"
+    },
+    "tempWorkspace": {
+      "saveTitle": "保存到目标路径",
+      "saveHint": "确认保存路径，默认不覆盖原文件",
+      "targetPath": "目标路径",
+      "save": "保存",
+      "saveFailed": "保存失败，目标路径不可写",
+      "fileTooLarge": "文件过大（超过 10MB 限制）",
+      "readFailed": "文件无法读取",
+      "unsavedTitle": "未保存的修改",
+      "unsavedHint": "此临时文件有未保存的修改，确认关闭？",
+      "confirmClose": "确认关闭",
+      "dirty": "有未保存修改"
+    },
+    "hover": {
+      "params": "参数",
+      "returns": "返回值",
+      "container": "所属类：{{container}}",
+      "noDoc": "暂无文档"
+    },
+    "settings": {
+      "heading": "工作台增强能力",
+      "hint": "以下三项能力可独立开关，关闭后不影响其余功能。",
+      "runPanel": "编辑页编译运行",
+      "runPanelDesc": "在编辑页工具栏提供运行/构建入口与结果面板",
+      "tempWorkspace": "外部文件拖拽至临时工作区",
+      "tempWorkspaceDesc": "拖入外部文件时在临时工作区打开为可编辑 tab",
+      "enhancedHover": "悬浮注解优化",
+      "enhancedHoverDesc": "按符号类型差异化呈现参数、返回值与所属类",
+      "on": "已启用",
+      "off": "已关闭"
     }
   }
 }

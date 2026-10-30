@@ -83,6 +83,19 @@ interface WorkspaceEditorState {
   crossRefs: Record<string, { sourceWorkspaceId: string; sourcePath: string }>;
 }
 
+/**
+ * workbench_enhance spec 5.2 — one editable temp-workspace file. Memory-only
+ * session state: the original external file content + the user's draft +
+ * a dirty flag. Destroyed on workspace switch / app exit; never persisted.
+ */
+export interface TempFileEntry {
+  absPath: string;
+  name: string;
+  content: string;
+  draft: string;
+  dirty: boolean;
+}
+
 /** Best-effort active-run probe for the guarded close (backend truth).
  * Any failure resolves to an empty list — the backend's NeedConfirm
  * refusal remains the backstop, so a failed probe just skips the dialog. */
@@ -186,8 +199,20 @@ interface UiState {
    * a file OUTSIDE every mounted work directory. Pure memory state: never
    * written to work_directories or any persistence; destroyed on workspace
    * switch and app exit.
+   *
+   * Backwards-compatible view over `tempFileTabs`/`activeTempFile` (the
+   * active tab's {absPath, name} or null). New code should prefer the
+   * multi-tab actions below.
    */
   tempFileTab: { absPath: string; name: string } | null;
+  /**
+   * workbench_enhance spec 5.2 — multi-tab temp workspace state. Each
+   * entry is an in-memory editable copy of an external file. Destroyed on
+   * workspace switch and app exit; never persisted.
+   */
+  tempFileTabs: TempFileEntry[];
+  /** Active temp file absPath (null when no temp tab is focused). */
+  activeTempFile: string | null;
   /**
    * ADR-0024 Part B: per-workspace terminal instances (multi-tab). Each
    * workspace owns an independent set of terminals. Keyed by workspace id.
@@ -228,6 +253,20 @@ interface UiState {
   openTempFile: (absPath: string, name: string) => void;
   /** Closes the temp file tab (no-op when absent). */
   closeTempFile: () => void;
+  /** Opens or focuses a temp file tab (de-dup by absPath). workbench_enhance 5.2. */
+  openTempFileTab: (absPath: string, name: string, content: string) => void;
+  /** Closes a temp file tab by absPath (caller confirms dirty before calling). */
+  closeTempFileTab: (absPath: string) => void;
+  /** Focuses a temp file tab by absPath. */
+  focusTempFileTab: (absPath: string) => void;
+  /** Updates the edit draft for a temp file tab and sets dirty. */
+  updateTempFileDraft: (absPath: string, draft: string) => void;
+  /** Clears the dirty flag after a successful save. */
+  clearTempFileDirty: (absPath: string) => void;
+  /** Returns all temp file tabs. */
+  getTempFileTabs: () => TempFileEntry[];
+  /** Returns the active temp file entry or null. */
+  getActiveTempFile: () => TempFileEntry | null;
   /** Opens a file in the given workspace's editor bucket (ADR 0017). */
   openFile: (path: string, workspaceId: string) => void;
   /** Closes a file in the given workspace's editor bucket. */
@@ -338,6 +377,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   activeWorkspaceId: null,
   lastActiveSessionByWorkspace: {},
   tempFileTab: null,
+  tempFileTabs: [],
+  activeTempFile: null,
   terminalByWorkspace: {},
   previousArea: null,
   layoutMode: "single",
@@ -398,8 +439,64 @@ export const useUiStore = create<UiState>((set, get) => ({
       return { selectedSessionId: sessionId, lastActiveSessionByWorkspace };
     }),
   openTempFile: (absPath, name) =>
-    set({ tempFileTab: { absPath, name }, activeArea: "workbench" }),
-  closeTempFile: () => set({ tempFileTab: null }),
+    set({
+      tempFileTab: { absPath, name },
+      tempFileTabs: [{ absPath, name, content: "", draft: "", dirty: false }],
+      activeTempFile: absPath,
+      activeArea: "workbench",
+    }),
+  closeTempFile: () =>
+    set({ tempFileTab: null, tempFileTabs: [], activeTempFile: null }),
+  openTempFileTab: (absPath, name, content) =>
+    set((s) => {
+      const existing = s.tempFileTabs.find((t) => t.absPath === absPath);
+      if (existing !== undefined) {
+        return { ...s, activeTempFile: absPath, tempFileTab: { absPath, name }, activeArea: "workbench" };
+      }
+      const entry: TempFileEntry = { absPath, name, content, draft: content, dirty: false };
+      return {
+        tempFileTabs: [...s.tempFileTabs, entry],
+        activeTempFile: absPath,
+        tempFileTab: { absPath, name },
+        activeArea: "workbench",
+      };
+    }),
+  closeTempFileTab: (absPath) =>
+    set((s) => {
+      const remaining = s.tempFileTabs.filter((t) => t.absPath !== absPath);
+      const activeTempFile =
+        s.activeTempFile === absPath ? (remaining[remaining.length - 1]?.absPath ?? null) : s.activeTempFile;
+      const tempFileTab = activeTempFile !== null ? (remaining.find((t) => t.absPath === activeTempFile) ?? null) : null;
+      const compat = tempFileTab !== null ? { absPath: tempFileTab.absPath, name: tempFileTab.name } : null;
+      return { tempFileTabs: remaining, activeTempFile, tempFileTab: compat };
+    }),
+  focusTempFileTab: (absPath) =>
+    set((s) => {
+      const entry = s.tempFileTabs.find((t) => t.absPath === absPath);
+      if (entry === undefined) return s;
+      return {
+        activeTempFile: absPath,
+        tempFileTab: { absPath: entry.absPath, name: entry.name },
+        activeArea: "workbench",
+      };
+    }),
+  updateTempFileDraft: (absPath, draft) =>
+    set((s) => ({
+      tempFileTabs: s.tempFileTabs.map((t) =>
+        t.absPath === absPath ? { ...t, draft, dirty: draft !== t.content } : t,
+      ),
+    })),
+  clearTempFileDirty: (absPath) =>
+    set((s) => ({
+      tempFileTabs: s.tempFileTabs.map((t) =>
+        t.absPath === absPath ? { ...t, content: t.draft, dirty: false } : t,
+      ),
+    })),
+  getTempFileTabs: () => get().tempFileTabs,
+  getActiveTempFile: () => {
+    const s = get();
+    return s.activeTempFile !== null ? (s.tempFileTabs.find((t) => t.absPath === s.activeTempFile) ?? null) : null;
+  },
   openFile: (path, workspaceId) =>
     set((s) => {
       const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
@@ -559,8 +656,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     const bucket = get().editorByWorkspace[workspaceId];
     return bucket?.crossRefs[path] ?? null;
   },
-  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id, tempFileTab: null }),
-  switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId, tempFileTab: null }),
+  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id, tempFileTab: null, tempFileTabs: [], activeTempFile: null }),
+  switchWorkspace: (workspaceId) => set({ activeWorkspaceId: workspaceId, tempFileTab: null, tempFileTabs: [], activeTempFile: null }),
   openDirectory: async (path) => {
     try {
       const entry = await measureAsync(
@@ -568,7 +665,7 @@ export const useUiStore = create<UiState>((set, get) => ({
         () => ipc.workspaceAddDirectory(path),
         { path },
       );
-      set({ activeWorkspaceId: entry.id, tempFileTab: null });
+      set({ activeWorkspaceId: entry.id, tempFileTab: null, tempFileTabs: [], activeTempFile: null });
     } catch (e: unknown) {
       // ADR-0024 Part A-d: no open workspace → park the path so the Shell
       // shows a "create workspace" dialog with this directory pre-filled.
@@ -631,7 +728,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       () => ipc.workspaceSwitch(id),
       { workspaceId: id },
     );
-    set({ activeWorkspaceId: id, tempFileTab: null });
+    set({ activeWorkspaceId: id, tempFileTab: null, tempFileTabs: [], activeTempFile: null });
   },
   // Unsaved-edits guard (workspace-level actions): editor dirty state is a
   // FRONTEND ephemeral fact (uiStore buckets — the backend deliberately

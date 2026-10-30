@@ -167,3 +167,36 @@ describe("EditorArea — workspace sidebar toolbar", () => {
     expect(await screen.findByPlaceholderText("输入工作区名称")).toBeTruthy();
   });
 });
+
+describe("EditorArea — workbench enhancement integration", () => {
+  it("mounts RunEntryButtons in the toolbar when workbench.runPanel is enabled", async () => {
+    tdSeedFiles({ "main.py": "print('hi')" });
+    openInStore("main.py");
+    renderPanel();
+
+    // The run-code button appears in the editor toolbar.
+    expect(await screen.findByRole("button", { name: "运行代码" })).toBeInTheDocument();
+  });
+
+  it("mounts RunPanelOverlay at the editor column bottom", async () => {
+    tdSeedFiles({ "main.py": "print('hi')" });
+    openInStore("main.py");
+    renderPanel();
+
+    // The run panel title is visible (collapsed or expanded).
+    expect(await screen.findByText("运行结果")).toBeInTheDocument();
+  });
+
+  it("renders EditableTempFileTab when tempFileTabs is non-empty", async () => {
+    useUiStore.setState({
+      tempFileTabs: [
+        { absPath: "C:\\external\\notes.txt", name: "notes.txt", content: "hello", draft: "hello", dirty: false },
+      ],
+      activeTempFile: "C:\\external\\notes.txt",
+    });
+    renderPanel();
+
+    // The temp file tab shows the file name as a title.
+    expect(await screen.findByText("notes.txt")).toBeInTheDocument();
+  });
+});

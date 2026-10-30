@@ -18,7 +18,7 @@ export function AgentBindingGuide(): ReactNode {
       <button
         type="button"
         onClick={goBind}
-        className="rounded-[12px_255px_15px_225px/225px_15px_255px_12px] bg-ink-accent px-3 py-1 font-note-hand text-xs text-surface-base hover:opacity-90"
+        className="rounded-[12px_255px_15px_225px/225px_15px_255px_12px] bg-ink-accent px-3 py-1 font-note-hand text-xs text-surface hover:opacity-90"
       >
         {t("git.aiCommit.bindingGuide.bind")}
       </button>

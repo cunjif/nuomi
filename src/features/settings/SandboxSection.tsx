@@ -69,7 +69,7 @@ export function SandboxSection(): ReactNode {
           type="button"
           onClick={() => void handleSave()}
           disabled={envOverridden}
-          className="rounded-[12px_255px_15px_225px/225px_15px_255px_12px] bg-ink-accent px-4 py-1.5 font-note-hand text-xs text-surface-base hover:opacity-90 disabled:opacity-60"
+          className="rounded-[12px_255px_15px_225px/225px_15px_255px_12px] bg-ink-accent px-4 py-1.5 font-note-hand text-xs text-surface hover:opacity-90 disabled:opacity-60"
         >
           {t("sandbox.section.save")}
         </button>

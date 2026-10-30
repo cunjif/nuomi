@@ -8,6 +8,7 @@ import {
   activateBuiltinEditorExtensions,
   getOverlays,
   getToolbarActions,
+  isEditorExtensionEnabled,
   useEditorExtVersion,
 } from "../../lib/editor-ext";
 import { ExtensionsPanel } from "../../lib/editor-ext/ExtensionsPanel";
@@ -15,8 +16,11 @@ import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { MonacoTab } from "./MonacoTab";
 import { TempFileTab } from "./TempFileTab";
+import { EditableTempFileTab } from "./temp-workspace/EditableTempFileTab";
 import { WorkspaceBottomBar } from "./WorkspaceBottomBar";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
+import { RunEntryButtons } from "./run/RunEntryButtons";
+import { RunPanelOverlay } from "./run/RunPanelOverlay";
 import { useUiStore } from "../../lib/store/uiStore";
 
 // Register + contribute the builtin editor extensions once at module load so
@@ -54,6 +58,7 @@ export function EditorToolbar(): ReactNode {
         {getToolbarActions().map(({ action }) => (
           <action.Component key={action.id} />
         ))}
+        {isEditorExtensionEnabled("workbench.runPanel") && <RunEntryButtons />}
         <ExtensionsPanel />
       </div>
       {/* 切换工作区 now opens the modal dialog (用户 SVG one.svg) instead of
@@ -92,6 +97,12 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
   // over the editor column while it is open (memory-only, destroyed on
   // workspace switch).
   const tempFileTab = useUiStore((s) => s.tempFileTab);
+  const tempFileTabs = useUiStore((s) => s.tempFileTabs);
+  const activeTempFile = useUiStore((s) => s.activeTempFile);
+  const activeTempEntry =
+    activeTempFile !== null ? tempFileTabs.find((t) => t.absPath === activeTempFile) ?? null : null;
+  // Re-render when feature toggles change (workbench.runPanel etc.).
+  useEditorExtVersion();
 
   return (
     <section aria-label={t("files.treeLabel")} className="flex h-full min-h-0 flex-1 flex-col bg-surface-raised">
@@ -103,7 +114,9 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
         the column itself never scrolls (Monaco owns its own viewport).
         Overlays (extension floating panels) anchor here. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {tempFileTab !== null ? (
+          {activeTempEntry !== null ? (
+            <EditableTempFileTab entry={activeTempEntry} />
+          ) : tempFileTab !== null ? (
             <TempFileTab />
           ) : activeFile !== null && openFiles.includes(activeFile) ? (
             <MonacoTab key={`${workspaceId}:${activeFile}`} path={activeFile} workspaceId={workspaceId} />
@@ -115,6 +128,7 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
           {getOverlays().map(({ overlay }) => (
             <overlay.Component key={overlay.id} />
           ))}
+          {isEditorExtensionEnabled("workbench.runPanel") && <RunPanelOverlay workspaceId={workspaceId} />}
         </div>
         {/* Explorer sidebar (right, per 用户截图): workspace actions + root
         label on top, then ONE scroll container for the whole tree. */}

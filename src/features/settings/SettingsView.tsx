@@ -10,6 +10,7 @@ import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
 import { SandboxSection } from "./SandboxSection";
+import { WorkbenchSection } from "./WorkbenchSection";
 
 /**
  * Settings tabs (用户需求: 集中一页 → 顶部导航分 tab). One section per tab;
@@ -26,6 +27,7 @@ const TABS = [
   { key: "memory", labelKey: "settings.memory.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
   { key: "sandbox", labelKey: "settings.tab.sandbox" },
+  { key: "workbench", labelKey: "workbench.settings.heading" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -51,6 +53,8 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       );
     case "sandbox":
       return <SandboxSection />;
+    case "workbench":
+      return <WorkbenchSection />;
   }
 }
 

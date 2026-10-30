@@ -1068,6 +1068,8 @@
     "cut": "Cut",
     "paste": "Paste",
     "copyPath": "Copy Path",
+    "runInSandbox": "Run in Sandbox",
+    "runProjectInSandbox": "Run Project in Sandbox",
     "deleteConfirmTitle": "Confirm Delete",
     "deleteConfirmCount": "Delete {{count}} items",
     "deleteConfirmDirWarning": "Folders and all their contents will be permanently deleted",
@@ -1339,6 +1341,52 @@
       "tooLarge": "File too large: {{name}} (limit {{limit}})",
       "emptyFile": "Empty file: {{name}}",
       "saveFailed": "Attachment save failed: {{message}}"
+    }
+  },
+  "workbench": {
+    "run": {
+      "runCode": "Run code",
+      "buildApp": "Build app",
+      "sandboxUnreachable": "Sandbox unreachable, check configuration",
+      "goConfigure": "Configure"
+    },
+    "runPanel": {
+      "title": "Run results",
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "empty": "No run tasks",
+      "close": "Close panel"
+    },
+    "tempWorkspace": {
+      "saveTitle": "Save to target path",
+      "saveHint": "Confirm save path, original file not overwritten by default",
+      "targetPath": "Target path",
+      "save": "Save",
+      "saveFailed": "Save failed, target path not writable",
+      "fileTooLarge": "File too large (exceeds 10MB limit)",
+      "readFailed": "File could not be read",
+      "unsavedTitle": "Unsaved changes",
+      "unsavedHint": "This temp file has unsaved changes, confirm close?",
+      "confirmClose": "Confirm close",
+      "dirty": "Unsaved changes"
+    },
+    "hover": {
+      "params": "Parameters",
+      "returns": "Returns",
+      "container": "Container: {{container}}",
+      "noDoc": "No documentation"
+    },
+    "settings": {
+      "heading": "Workbench enhancements",
+      "hint": "Each capability can be toggled independently. Disabling one does not affect the others.",
+      "runPanel": "In-editor compile & run",
+      "runPanelDesc": "Show run/build entry and result panel in the editor toolbar",
+      "tempWorkspace": "Drag external files to temp workspace",
+      "tempWorkspaceDesc": "Open dropped external files as editable temp tabs",
+      "enhancedHover": "Enhanced hover annotations",
+      "enhancedHoverDesc": "Show parameters, return values and container by symbol type",
+      "on": "Enabled",
+      "off": "Disabled"
     }
   }
 }

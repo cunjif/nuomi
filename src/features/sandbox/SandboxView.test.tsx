@@ -1,19 +1,9 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { SandboxTaskDto } from "../../lib/ipc/bindings.gen";
 import { tdState } from "../../lib/ipc/test-double";
 import { renderWithProviders } from "../../test/helpers";
 import { SandboxView } from "./SandboxView";
-
-// Monaco never loads in jsdom — stand in with a plain textarea
-// (mirrors MonacoTab.test.tsx).
-vi.mock("@monaco-editor/react", () => ({
-  default: (props: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={props.value} onChange={(e) => props.onChange(e.target.value)} />
-  ),
-}));
-// Skip the self-hosted monaco wiring (imports the real editor kernel).
-vi.mock("../shell/monacoSetup", () => ({}));
 
 function seedTask(partial: Partial<SandboxTaskDto>): SandboxTaskDto {
   const now = 1700000000000;
@@ -38,14 +28,7 @@ function seedTask(partial: Partial<SandboxTaskDto>): SandboxTaskDto {
   };
 }
 
-/** Toolbar buttons stay disabled until the runtimes query resolves. */
-async function clickToolbarButton(name: string): Promise<void> {
-  const btn = await screen.findByRole("button", { name });
-  await waitFor(() => expect(btn).toBeEnabled());
-  fireEvent.click(btn);
-}
-
-describe("SandboxView — task list + detail (task 7.7)", () => {
+describe("SandboxView — read-only audit board (ADR-0025 Slice 1a)", () => {
   it("renders existing tasks and shows the selected task's detail", async () => {
     tdState.sandboxTasks.push(seedTask({ id: "sbx-1", stdout: "hello from sandbox" }));
 
@@ -69,25 +52,6 @@ describe("SandboxView — task list + detail (task 7.7)", () => {
     fireEvent.click(await screen.findByText("sbx-usage"));
     expect(await screen.findByText("CPU 120 ms")).toBeInTheDocument();
     expect(screen.getByText("峰值内存 64 MB")).toBeInTheDocument();
-  });
-
-  it("submits a run task from the dialog and lists it", async () => {
-    renderWithProviders(<SandboxView />);
-
-    await clickToolbarButton("新建运行");
-    fireEvent.change(await screen.findByLabelText("editor"), { target: { value: "print('ok')" } });
-    fireEvent.click(screen.getByRole("button", { name: "运行" }));
-
-    expect(await screen.findByText("运行代码 · python")).toBeInTheDocument();
-    expect(await screen.findByText("已成功")).toBeInTheDocument();
-  });
-
-  it("opens the build dialog with its hint", async () => {
-    renderWithProviders(<SandboxView />);
-
-    await clickToolbarButton("构建应用");
-
-    expect(await screen.findByText(/签名密钥保留在宿主/)).toBeInTheDocument();
   });
 
   it("cancels a running task", async () => {
@@ -120,6 +84,5 @@ describe("SandboxView — task list + detail (task 7.7)", () => {
     renderWithProviders(<SandboxView />);
 
     expect(await screen.findByText("沙箱服务不可用")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建运行" })).toBeDisabled();
   });
 });

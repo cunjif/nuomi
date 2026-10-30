@@ -7,13 +7,15 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
 import { useUiStore } from "../../lib/store/uiStore";
 import { useOpenWorkspace } from "../../lib/store/workspaceQueries";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/ContextMenu";
+import { languageForPath } from "./editorLanguage";
+import { languageToRuntime } from "./run/languageToRuntime";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import {
   batchDelete,
@@ -78,6 +80,32 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const createFileMut = useCreateFile();
   const createDirMut = useCreateDir();
   const renameMut = useRename();
+
+  const runtimesQuery = useQuery({
+    queryKey: ["sandbox", "runtimes"],
+    queryFn: () => ipc.sandboxListRuntimes(),
+  });
+  const runtimes = runtimesQuery.data ?? [];
+  const sandboxRunMut = useMutation({
+    mutationFn: (vars: { targetPath: string; isProject: boolean }) =>
+      ipc.sandboxRunWorkbenchTarget({
+        targetPath: vars.targetPath,
+        isProject: vars.isProject,
+        runtime:
+          (vars.isProject
+            ? runtimes[0]?.id
+            : languageToRuntime(languageForPath(vars.targetPath), runtimes)) ??
+          runtimes[0]?.id ??
+          "python",
+        limits: null,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["sandbox"] });
+    },
+    onError: (err) => {
+      setError(describeError(err));
+    },
+  });
 
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -265,6 +293,28 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
         void navigator.clipboard?.writeText(text).catch(() => {});
       },
     });
+    const sandboxDisabled =
+      runtimes.length === 0 || runtimesQuery.isError || sandboxRunMut.isPending || singleSelected === null;
+    items.push({ type: "separator" });
+    if (!menuIsDir) {
+      items.push({
+        type: "item",
+        id: "runInSandbox",
+        label: t("files.runInSandbox"),
+        disabled: sandboxDisabled,
+        onSelect: () =>
+          singleSelected && sandboxRunMut.mutate({ targetPath: singleSelected, isProject: false }),
+      });
+    } else {
+      items.push({
+        type: "item",
+        id: "runProjectInSandbox",
+        label: t("files.runProjectInSandbox"),
+        disabled: sandboxDisabled,
+        onSelect: () =>
+          singleSelected && sandboxRunMut.mutate({ targetPath: singleSelected, isProject: true }),
+      });
+    }
     return items;
   }
 

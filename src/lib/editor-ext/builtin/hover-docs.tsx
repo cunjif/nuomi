@@ -7,13 +7,17 @@
  * is core editor behavior). LSP INTEGRATION POINT: a real language server
  * registers higher-priority providers through the same EditorExtContext —
  * this regex + index fallback stays as the offline baseline.
+ *
+ * workbench_enhance spec 5.3: enhanced with per-kind差异化呈现
+ * (parseParameters / parseReturnValue / composeHoverContent).
  */
 import type * as Monaco from "monaco-editor";
 import type { EditorExtContext } from "../types";
-import { getOutlineProviders } from "../registry";
+import { getOutlineProviders, isEditorExtensionEnabled } from "../registry";
 import { i18n } from "../../../i18n";
 import { useUiStore } from "../../../lib/store/uiStore";
 import { extractDocComment, getWorkspaceIndex } from "../indexer/workspace-index";
+import { composeHoverContent, parseParameters, parseReturnValue } from "./hover-parse";
 
 export const EXT_ID = "builtin.hover-docs";
 
@@ -39,31 +43,57 @@ const hoverProvider: Monaco.languages.HoverProvider = {
     const index = getWorkspaceIndex();
     const decl = index.data?.definitions.get(word.word)?.[0];
 
-    const contents: Monaco.IMarkdownString[] = [];
     let signature: string | null = null;
+    let doc: string | null = null;
+    let kind = "function";
+    let container: string | null = null;
+    let location: string | null = null;
+
     if (decl !== undefined) {
       signature = decl.signature;
-      if (decl.doc !== null) contents.push({ value: decl.doc });
-      const location = `${decl.path}:${decl.line + 1}`;
-      contents.push({
-        value:
-          decl.container !== null
-            ? i18n.t("editor.hover.declaredIn", { container: decl.container, location })
-            : i18n.t("editor.hover.declaredInPath", { location }),
-      });
+      doc = decl.doc;
+      kind = decl.kind;
+      container = decl.container;
+      location = `${decl.path}:${decl.line + 1}`;
     } else if (local !== undefined) {
       signature = (lines[local.range.start.line] ?? "").trim();
-      const doc = extractDocComment(lines, local.range.start.line);
-      if (doc !== null) contents.push({ value: doc });
+      doc = extractDocComment(lines, local.range.start.line);
+      kind = local.kind;
     }
-    if (signature !== null && signature.length > 0) {
-      // Signature floats on top, VSCode-style.
-      contents.unshift({ value: `\`\`\`${language}\n${signature}\n\`\`\`` });
+
+    if (signature === null || signature.length === 0) {
+      // No signature → only show refs if any.
+      const refCount = index.data?.references.get(word.word)?.length ?? 0;
+      if (refCount === 0) return null;
+      return { contents: [{ value: `---\n${i18n.t("editor.hover.refs", { count: refCount })}` }] };
     }
+
     const refCount = index.data?.references.get(word.word)?.length ?? 0;
-    if (refCount > 0) {
-      contents.push({ value: `---\n${i18n.t("editor.hover.refs", { count: refCount })}` });
+
+    // Fallback: when enhanced hover is disabled, render basic content
+    // (signature + doc + location + refs) without parameter/return parsing.
+    if (!isEditorExtensionEnabled("workbench.enhancedHover")) {
+      const parts: Monaco.IMarkdownString[] = [];
+      parts.push({ value: "```" + language + "\n" + signature + "\n```" });
+      if (doc !== null && doc.length > 0) parts.push({ value: doc });
+      if (location !== null) parts.push({ value: `---\n${i18n.t("editor.hover.declaredInPath", { location })}` });
+      if (refCount > 0) parts.push({ value: `---\n${i18n.t("editor.hover.refs", { count: refCount })}` });
+      return parts.length > 0 ? { contents: parts } : null;
     }
+
+    const params = parseParameters(signature, doc, language);
+    const returnValue = parseReturnValue(signature, doc, language);
+    const contents = composeHoverContent({
+      kind,
+      signature,
+      doc,
+      params,
+      returnValue,
+      location,
+      container,
+      refCount,
+      language,
+    });
     return contents.length > 0 ? { contents } : null;
   },
 };

@@ -72,6 +72,26 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   const crossRef = useUiStore((s) => s.editorByWorkspace[workspaceId]?.crossRefs[path] ?? null);
   const effectiveWsId = crossRef?.sourceWorkspaceId ?? workspaceId;
   const effectivePath = crossRef?.sourcePath ?? path;
+  // Status-bar full path (ADR-0021): the file tab stores only a relative
+  // path; prefix it with the hosting work directory's abs path so the
+  // status row shows {work-directory-root}/{relative-path} instead of a
+  // bare relative path. Resolve via listWorkspaces so cross-workspace edit
+  // refs (effectiveWsId ≠ workspaceId) also show the correct root.
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => ipc.listWorkspaces(),
+    staleTime: 30_000,
+  });
+  const statusPath = useMemo(() => {
+    const ws = (workspacesQuery.data ?? []).find((w) => w.id === effectiveWsId);
+    const activeDir = (ws?.directories ?? []).find(
+      (d) => d.isActive && d.available && d.mounted,
+    );
+    const root = activeDir?.absPath ?? ws?.rootPath ?? "";
+    if (root === "") return effectivePath;
+    const sep = root.includes("\\") ? "\\" : "/";
+    return `${root}${sep}${effectivePath}`;
+  }, [workspacesQuery.data, effectiveWsId, effectivePath]);
   // Re-render on registry changes so preview/outline swaps are live.
   useEditorExtVersion();
   // HMR may wipe the registry module (wysiwygEditors emptied); re-activate
@@ -436,8 +456,8 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
       {(showEditor || wysiwygActive) && (
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-ink-muted/30 px-2 py-0.5 text-[10px] text-ink-muted">
           {/* Status row: full path left, language right. */}
-          <span className="min-w-0 truncate font-mono" title={path}>
-            {path}
+          <span className="min-w-0 truncate font-mono" title={statusPath}>
+            {statusPath}
           </span>
           <span className="flex shrink-0 items-center gap-2">
             <span>

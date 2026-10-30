@@ -31,6 +31,7 @@ import { EmptyStateGuide } from "./EmptyStateGuide";
 import { useIdleProposalTimer } from "./useIdleProposalTimer";
 import { WorkspaceGuardDialog } from "./WorkspaceGuardDialog";
 import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
+import { handleDropEvent } from "./temp-workspace/TempWorkspaceManager";
 
 type WorkspaceInfo = { root: string; configured: boolean };
 
@@ -225,10 +226,7 @@ export function Shell(): ReactNode {
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((event) => {
           if (event.payload.type !== "drop") return;
-          for (const path of event.payload.paths) {
-            void useUiStore.getState().openDirectory(path)
-              .catch(() => { /* blacklisted or invalid — silently ignore */ });
-          }
+          void handleDropEvent(event.payload.paths);
         }),
       )
       .then((fn) => { unlisten = fn; })

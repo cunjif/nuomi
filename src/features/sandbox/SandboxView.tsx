@@ -3,17 +3,14 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "../../components/ui/Badge";
-import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Spinner } from "../../components/ui/Spinner";
 import { DOMAIN_CHANNEL } from "../../lib/events/types";
 import { useDomainEvents } from "../../lib/events/useDomainEvents";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
-import { SandboxBuildForm } from "./SandboxBuildForm";
 import { SandboxSetupGuide } from "./SandboxSetupGuide";
 import { SandboxTaskDetail, toneForStatus } from "./SandboxTaskDetail";
-import { SandboxTaskForm } from "./SandboxTaskForm";
 
 /** How many recent tasks the list column fetches (ADR-0022 task 7.7). */
 const TASK_LIST_LIMIT = 50;
@@ -21,17 +18,18 @@ const TASK_LIST_LIMIT = 50;
 const PROBE_TIMEOUT_MS = 3000;
 
 /**
- * Sandbox view (ADR-0022 task 7.7): toolbar with the two entry points
- * ("run code" / "build app" dialogs), a newest-first task list on the left
- * and the selected task's detail (status, streams, artifact) on the right.
- * An empty runtime list means the sandbox plugin is not usable — the view
- * degrades to a setup hint instead of the work surface.
+ * Sandbox view (ADR-0025 Slice 1a): read-only audit board for sandbox
+ * tasks. The manual "new run" / "new build" entry points have been removed
+ * (scene C retired) — submission now flows from the workbench editor
+ * (RunEntryButtons / FileTree context menu, scene A). This view keeps the
+ * newest-first task list on the left and the selected task's detail
+ * (status, streams, artifact) on the right for observation. An empty
+ * runtime list means the sandbox plugin is not usable — the view degrades
+ * to a setup hint instead of the work surface.
  */
 export function SandboxView(): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [runOpen, setRunOpen] = useState(false);
-  const [buildOpen, setBuildOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const runtimesQuery = useQuery({
@@ -102,19 +100,6 @@ export function SandboxView(): ReactNode {
     <div className="flex h-full flex-col overflow-hidden p-3">
       <div className="mb-2 flex shrink-0 items-center justify-between">
         <h2 className="text-sm font-semibold">{t("sandbox.title")}</h2>
-        <div className="flex gap-2">
-          <Button size="sm" disabled={runtimes.length === 0} onClick={() => setRunOpen(true)}>
-            {t("sandbox.newRun")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={runtimes.length === 0}
-            onClick={() => setBuildOpen(true)}
-          >
-            {t("sandbox.newBuild")}
-          </Button>
-        </div>
       </div>
 
       {runtimesQuery.isLoading && !probeTimedOut ? (
@@ -143,13 +128,6 @@ export function SandboxView(): ReactNode {
             )}
           </section>
         </div>
-      )}
-
-      {runOpen && (
-        <SandboxTaskForm open={runOpen} onClose={() => setRunOpen(false)} runtimes={runtimes} />
-      )}
-      {buildOpen && (
-        <SandboxBuildForm open={buildOpen} onClose={() => setBuildOpen(false)} runtimes={runtimes} />
       )}
     </div>
   );
