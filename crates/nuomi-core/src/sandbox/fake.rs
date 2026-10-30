@@ -89,8 +89,10 @@ pub struct FakeSandboxExecutor {
 }
 
 impl FakeSandboxExecutor {
-    /// Fake with `python` / `node` runtimes and the default
-    /// running → succeeded poll script.
+    /// Fake with `python` / `node` / `rust` runtimes and the default
+    /// running → succeeded poll script. The declared list mirrors
+    /// `CubeSandboxExecutor::default_runtimes()` so tests asserting the
+    /// default runtime surface stay aligned with the real executor.
     pub fn new() -> Self {
         Self {
             runtimes: vec![
@@ -102,6 +104,11 @@ impl FakeSandboxExecutor {
                 SandboxRuntimeInfo {
                     id: "node".to_string(),
                     name: "Node.js (fake)".to_string(),
+                    isolation: "fake in-memory executor (no isolation)".to_string(),
+                },
+                SandboxRuntimeInfo {
+                    id: "rust".to_string(),
+                    name: "Rust (fake)".to_string(),
                     isolation: "fake in-memory executor (no isolation)".to_string(),
                 },
             ],

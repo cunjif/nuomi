@@ -124,7 +124,11 @@ impl WorkspaceOpenSetService {
             workspace_open_state::set_focused(&conn, workspace_id)?;
         }
 
-        workspace_recent::touch(&conn, workspace_id, now, entry.is_pinned)?;
+        // Restore path: this `open` is invoked by the layout restore pass
+        // (workspace_layout::restore_from_snapshot / restore_default). Respect
+        // the explicit-exclusion marker so user-removed entries do not
+        // resurrect into the recent list on startup.
+        workspace_recent::touch_if_not_excluded(&conn, workspace_id, now, entry.is_pinned)?;
         emit_event(&conn, workspace_id, "workspace.opened");
         emit_event(&conn, workspace_id, "workspace.focused");
         Ok(())
@@ -187,7 +191,9 @@ impl WorkspaceOpenSetService {
         let now = crate::domain::now_ms();
         workspace_open_state::set_focused(&conn, workspace_id)?;
         workspace_open_state::touch_last_focused(&conn, workspace_id, now)?;
-        workspace_recent::touch(&conn, workspace_id, now, false)?;
+        // User-initiated focus: clear any prior explicit-exclusion marker so
+        // focusing a previously-removed workspace brings it back into recent.
+        workspace_recent::touch_clearing_exclusion(&conn, workspace_id, now, false)?;
         emit_event(&conn, workspace_id, "workspace.focused");
         Ok(())
     }

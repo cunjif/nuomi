@@ -446,7 +446,7 @@ mod tests {
         assert!(service.is_enabled());
         let runtimes = service.runtimes();
         let ids: Vec<&str> = runtimes.iter().map(|r| r.id.as_str()).collect();
-        assert!(ids.contains(&"python") && ids.contains(&"node"));
+        assert!(ids.contains(&"python") && ids.contains(&"node") && ids.contains(&"rust"));
     }
 
     #[tokio::test]

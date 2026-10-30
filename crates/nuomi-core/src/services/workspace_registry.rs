@@ -284,6 +284,11 @@ impl WorkspaceRegistry {
         workspace_recent::remove_idempotent(&tx, workspace_id)?;
         repo::clear_pin(&tx, workspace_id)?;
         let now = crate::domain::now_ms();
+        // Persist the "explicitly removed from recent" marker so the startup
+        // restore pass (which walks `workspaces` and touches recent for each)
+        // does not resurrect this entry. Cleared when the user reopens the
+        // workspace (touch_clearing_exclusion).
+        workspace_recent::add_exclusion(&tx, workspace_id, now)?;
         events::append(
             &tx,
             "workspace",
@@ -314,9 +319,13 @@ impl WorkspaceRegistry {
                 |r| r.get(0),
             )
             .map_err(StoreError::Sqlite)?;
+        let now = crate::domain::now_ms();
+        // Persist exclusion markers for every recent entry *before* clearing,
+        // so the startup restore pass does not resurrect the cleared entries.
+        // Reads `workspace_recent` hence must run before `clear_all`.
+        workspace_recent::add_exclusion_for_all_recent(&tx, now)?;
         workspace_recent::clear_all(&tx)?;
         repo::clear_all_pins(&tx)?;
-        let now = crate::domain::now_ms();
         events::append(
             &tx,
             "domain",
@@ -666,5 +675,149 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(json["clearedCount"], 3);
         assert_eq!(json["clearedPinnedCount"], 2);
+    }
+
+    // ---- exclusion-marker persistence regression (issue: recent 删除后复活) ----
+    //
+    // These cover the end-to-end contract: remove_recent / clear_recent write
+    // an exclusion marker; the startup restore path (touch_if_not_excluded)
+    // skips excluded entries; user-initiated reopen (touch_clearing_exclusion)
+    // revives them.
+
+    fn excluded(reg: &WorkspaceRegistry, id: &str) -> bool {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspace_recent::is_excluded(&conn, id).unwrap()
+    }
+
+    /// Simulates the startup restore-path touch for one workspace.
+    fn restore_touch(reg: &WorkspaceRegistry, id: &str, pinned: bool) {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspace_recent::touch_if_not_excluded(
+            &conn,
+            id,
+            crate::domain::now_ms(),
+            pinned,
+        )
+        .unwrap();
+    }
+
+    /// Simulates a user-initiated open/focus touch for one workspace.
+    fn user_touch(reg: &WorkspaceRegistry, id: &str, pinned: bool) {
+        let conn = reg.conn().unwrap();
+        crate::store::repos::workspace_recent::touch_clearing_exclusion(
+            &conn,
+            id,
+            crate::domain::now_ms(),
+            pinned,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn remove_recent_persists_exclusion_marker() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        touch_recent(&reg, &ea.id, false);
+        touch_recent(&reg, &eb.id, false);
+        assert!(!excluded(&reg, &eb.id));
+
+        reg.remove_recent(&eb.id).unwrap();
+
+        // Marker persisted even though the recent cache row is gone.
+        assert!(excluded(&reg, &eb.id));
+        assert!(!excluded(&reg, &ea.id));
+    }
+
+    #[test]
+    fn remove_recent_then_restore_touch_does_not_resurrect() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        touch_recent(&reg, &ea.id, false);
+        touch_recent(&reg, &eb.id, false);
+        reg.remove_recent(&eb.id).unwrap();
+        assert!(!recent_ids(&reg).contains(&eb.id));
+
+        // Startup restore walks `workspaces` and touches each. The removed
+        // entry must NOT come back.
+        restore_touch(&reg, &ea.id, false);
+        restore_touch(&reg, &eb.id, false);
+
+        let ids = recent_ids(&reg);
+        assert!(ids.contains(&ea.id));
+        assert!(!ids.contains(&eb.id), "removed entry must not resurrect on restore");
+    }
+
+    #[test]
+    fn remove_recent_then_user_reopen_revives() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        touch_recent(&reg, &ea.id, false);
+        touch_recent(&reg, &eb.id, false);
+        reg.remove_recent(&eb.id).unwrap();
+        assert!(excluded(&reg, &eb.id));
+
+        // User explicitly reopens the previously-removed workspace.
+        user_touch(&reg, &eb.id, false);
+
+        // Marker cleared, entry back in recent.
+        assert!(!excluded(&reg, &eb.id));
+        assert!(recent_ids(&reg).contains(&eb.id));
+    }
+
+    #[test]
+    fn clear_recent_then_restore_touch_does_not_resurrect_any() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let c = make_ws_dir(dir.path(), "c");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        let ec = reg.register(&c).unwrap();
+        touch_recent(&reg, &ea.id, false);
+        touch_recent(&reg, &eb.id, false);
+        touch_recent(&reg, &ec.id, false);
+        reg.clear_recent().unwrap();
+        assert!(recent_ids(&reg).is_empty());
+
+        // Startup restore touches every workspace — none should resurrect.
+        restore_touch(&reg, &ea.id, false);
+        restore_touch(&reg, &eb.id, false);
+        restore_touch(&reg, &ec.id, false);
+
+        assert!(recent_ids(&reg).is_empty(), "cleared entries must not resurrect on restore");
+        // Markers persisted for all three.
+        assert!(excluded(&reg, &ea.id));
+        assert!(excluded(&reg, &eb.id));
+        assert!(excluded(&reg, &ec.id));
+    }
+
+    #[test]
+    fn clear_recent_then_user_reopen_revives_one() {
+        let (reg, dir) = registry();
+        let a = make_ws_dir(dir.path(), "a");
+        let b = make_ws_dir(dir.path(), "b");
+        let ea = reg.register(&a).unwrap();
+        let eb = reg.register(&b).unwrap();
+        touch_recent(&reg, &ea.id, false);
+        touch_recent(&reg, &eb.id, false);
+        reg.clear_recent().unwrap();
+
+        // User reopens only b.
+        user_touch(&reg, &eb.id, false);
+
+        let ids = recent_ids(&reg);
+        assert!(ids.contains(&eb.id));
+        assert!(!ids.contains(&ea.id), "a stays excluded until explicitly reopened");
+        assert!(!excluded(&reg, &eb.id));
+        assert!(excluded(&reg, &ea.id));
     }
 }

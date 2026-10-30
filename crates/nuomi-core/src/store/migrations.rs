@@ -329,6 +329,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0041_workspace_name.sql"
         )),
     ),
+    (
+        42,
+        "0042_workspace_recent_excluded",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0042_workspace_recent_excluded.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

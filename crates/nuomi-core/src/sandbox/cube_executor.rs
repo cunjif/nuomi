@@ -89,6 +89,11 @@ fn default_runtimes() -> Vec<SandboxRuntimeInfo> {
             name: "Node.js".to_string(),
             isolation: "CubeSandbox container-isolated runtime".to_string(),
         },
+        SandboxRuntimeInfo {
+            id: "rust".to_string(),
+            name: "Rust".to_string(),
+            isolation: "CubeSandbox container-isolated runtime".to_string(),
+        },
     ]
 }
 
@@ -418,6 +423,14 @@ mod tests {
             .runtimes()
             .iter()
             .any(|r| r.id == "python" && r.isolation.contains("CubeSandbox")));
+        assert!(defaults
+            .runtimes()
+            .iter()
+            .any(|r| r.id == "node" && r.isolation.contains("CubeSandbox")));
+        assert!(defaults
+            .runtimes()
+            .iter()
+            .any(|r| r.id == "rust" && r.name == "Rust" && r.isolation.contains("CubeSandbox")));
 
         let custom =
             CubeSandboxExecutor::new("http://x/").with_runtimes(vec![SandboxRuntimeInfo {

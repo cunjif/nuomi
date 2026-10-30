@@ -1856,6 +1856,15 @@ pub async fn sandbox_build_app(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn sandbox_run_workbench_target(
+    state: tauri::State<'_, AppState>,
+    request: commands::SandboxRunWorkbenchTargetRequest,
+) -> Result<commands::SandboxTaskDto, IpcError> {
+    commands::impl_sandbox_run_workbench_target(&state, request).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn sandbox_list_tasks(
     state: tauri::State<'_, AppState>,
     limit: Option<u32>,
@@ -1957,4 +1966,13 @@ pub async fn terminal_resize(
 #[specta::specta]
 pub async fn terminal_kill(state: tauri::State<'_, AppState>, id: String) -> Result<(), IpcError> {
     commands::impl_terminal_kill(&state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn evolution_dry_run_preview(
+    state: tauri::State<'_, AppState>,
+    request: commands::EvolutionDryRunPreviewRequest,
+) -> Result<commands::EvolutionDryRunDto, IpcError> {
+    commands::impl_evolution_dry_run_preview(&state, request).await
 }

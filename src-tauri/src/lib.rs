@@ -233,6 +233,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::steward_set_online_authorization,
         tauri_cmds::sandbox_run_code,
         tauri_cmds::sandbox_build_app,
+        tauri_cmds::sandbox_run_workbench_target,
         tauri_cmds::sandbox_list_tasks,
         tauri_cmds::sandbox_get_task,
         tauri_cmds::sandbox_cancel_task,
@@ -244,6 +245,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::terminal_write,
         tauri_cmds::terminal_resize,
         tauri_cmds::terminal_kill,
+        tauri_cmds::evolution_dry_run_preview,
         tauri_cmds::__nuomi_heartbeat,
     ])
 }

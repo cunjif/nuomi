@@ -62,6 +62,102 @@ pub fn touch(
     Ok(())
 }
 
+// -----------------------------------------------------------------------
+// Explicit-exclusion marker (migration 0042).
+//
+// `workspace_recent` is a recency *cache*, not a deletion-state store. When
+// the user removes an entry via `remove_recent` / `clear_recent`, the
+// underlying `workspaces` entity is kept (the workspace is still registered).
+// On startup, `restore_from_snapshot` walks `workspaces` and calls `touch` for
+// each, which re-inserts the removed row — the entry "resurrects".
+//
+// `workspace_recent_excluded` persists the "user explicitly removed this from
+// the recent list" signal. `touch_if_not_excluded` (restore path) skips
+// excluded workspaces; `touch_clearing_exclusion` (user-initiated open/focus)
+// drops the marker and re-joins the list ("reuse overrides prior explicit
+// removal").
+// -----------------------------------------------------------------------
+
+/// Returns true when `workspace_id` is explicitly excluded from the recent
+/// list (user previously removed it).
+pub fn is_excluded(conn: &Connection, workspace_id: &str) -> Result<bool, StoreError> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM workspace_recent_excluded WHERE workspace_id = ?1",
+        params![workspace_id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// Marks `workspace_id` as explicitly excluded from the recent list.
+/// Idempotent (updates `excluded_at` on conflict). No-op when the workspace
+/// entity does not exist — the exclusion marker only matters for entries that
+/// `restore_from_snapshot` (which walks `workspaces`) could resurrect, and a
+/// missing entity is never walked. The `WHERE EXISTS` guard also satisfies
+/// the `REFERENCES workspaces(id)` foreign key without requiring callers to
+/// pre-check existence.
+pub fn add_exclusion(conn: &Connection, workspace_id: &str, ts: i64) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO workspace_recent_excluded (workspace_id, excluded_at)
+         SELECT ?1, ?2
+         WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?1)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+             excluded_at = excluded.excluded_at",
+        params![workspace_id, ts],
+    )?;
+    Ok(())
+}
+
+/// Marks every workspace currently in the recent list as excluded. Used by
+/// `clear_recent` so that the startup restore pass does not resurrect the
+/// cleared entries. Must be called *before* `clear_all` (it reads
+/// `workspace_recent`). Idempotent over prior per-id exclusions.
+pub fn add_exclusion_for_all_recent(conn: &Connection, ts: i64) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT OR IGNORE INTO workspace_recent_excluded (workspace_id, excluded_at)
+         SELECT workspace_id, ?1 FROM workspace_recent",
+        params![ts],
+    )?;
+    Ok(())
+}
+
+/// Clears the explicit-exclusion marker for `workspace_id`. Idempotent.
+pub fn remove_exclusion(conn: &Connection, workspace_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM workspace_recent_excluded WHERE workspace_id = ?1",
+        params![workspace_id],
+    )?;
+    Ok(())
+}
+
+/// Touches the recent list but skips when the workspace is explicitly
+/// excluded. Used by the startup restore path so that user-removed entries
+/// do not reappear after restart.
+pub fn touch_if_not_excluded(
+    conn: &Connection,
+    workspace_id: &str,
+    ts: i64,
+    is_pinned: bool,
+) -> Result<(), StoreError> {
+    if is_excluded(conn, workspace_id)? {
+        return Ok(());
+    }
+    touch(conn, workspace_id, ts, is_pinned)
+}
+
+/// Touches the recent list and clears any explicit-exclusion marker first.
+/// Used by user-initiated open/focus so that reopening a previously-removed
+/// workspace brings it back into the recent list.
+pub fn touch_clearing_exclusion(
+    conn: &Connection,
+    workspace_id: &str,
+    ts: i64,
+    is_pinned: bool,
+) -> Result<(), StoreError> {
+    remove_exclusion(conn, workspace_id)?;
+    touch(conn, workspace_id, ts, is_pinned)
+}
+
 /// Lists recent entries ordered by pinned-first, then `last_used_at DESC`.
 /// At most `limit` entries are returned.
 pub fn list(conn: &Connection, limit: usize) -> Result<Vec<RecentEntryRow>, StoreError> {
@@ -267,5 +363,117 @@ mod tests {
         assert!(list_all(&conn).unwrap().is_empty());
         // Idempotent: clear again.
         clear_all(&conn).unwrap();
+    }
+
+    // ---- explicit-exclusion marker (migration 0042) ----
+
+    #[test]
+    fn is_excluded_false_by_default() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        assert!(!is_excluded(&conn, "w1").unwrap());
+    }
+
+    #[test]
+    fn add_exclusion_marks_and_is_idempotent() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        add_exclusion(&conn, "w1", 100).unwrap();
+        assert!(is_excluded(&conn, "w1").unwrap());
+        // Re-mark with a later timestamp — still excluded, no error.
+        add_exclusion(&conn, "w1", 200).unwrap();
+        assert!(is_excluded(&conn, "w1").unwrap());
+    }
+
+    #[test]
+    fn remove_exclusion_clears_marker_and_is_idempotent() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        add_exclusion(&conn, "w1", 100).unwrap();
+        remove_exclusion(&conn, "w1").unwrap();
+        assert!(!is_excluded(&conn, "w1").unwrap());
+        // Removing an absent marker is a no-op.
+        remove_exclusion(&conn, "w1").unwrap();
+        assert!(!is_excluded(&conn, "w1").unwrap());
+    }
+
+    #[test]
+    fn touch_if_not_excluded_skips_excluded_workspace() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        touch(&conn, "w1", 100, false).unwrap();
+        // User removes from recent → exclusion marker set, cache row deleted.
+        remove_idempotent(&conn, "w1").unwrap();
+        add_exclusion(&conn, "w1", 200).unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+        // Restore-path touch must NOT resurrect the entry.
+        touch_if_not_excluded(&conn, "w1", 300, false).unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn touch_if_not_excluded_touches_when_not_excluded() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        // No exclusion marker → behaves like plain touch.
+        touch_if_not_excluded(&conn, "w1", 100, false).unwrap();
+        let entries = list_all(&conn).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].workspace_id, "w1");
+    }
+
+    #[test]
+    fn touch_clearing_exclusion_revives_excluded_workspace() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        touch(&conn, "w1", 100, false).unwrap();
+        remove_idempotent(&conn, "w1").unwrap();
+        add_exclusion(&conn, "w1", 200).unwrap();
+        assert!(is_excluded(&conn, "w1").unwrap());
+        // User-initiated open/focus → marker cleared, entry rejoins recent.
+        touch_clearing_exclusion(&conn, "w1", 300, false).unwrap();
+        assert!(!is_excluded(&conn, "w1").unwrap());
+        let entries = list_all(&conn).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].workspace_id, "w1");
+        assert_eq!(entries[0].last_used_at, 300);
+    }
+
+    #[test]
+    fn add_exclusion_for_all_recent_marks_every_entry() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        seed_workspace(&conn, "w2");
+        seed_workspace(&conn, "w3");
+        touch(&conn, "w1", 100, false).unwrap();
+        touch(&conn, "w2", 200, true).unwrap();
+        touch(&conn, "w3", 300, false).unwrap();
+        // Mark all recent entries as excluded (clear_recent pre-step).
+        add_exclusion_for_all_recent(&conn, 400).unwrap();
+        clear_all(&conn).unwrap();
+        // Every previously-recent workspace is now excluded.
+        assert!(is_excluded(&conn, "w1").unwrap());
+        assert!(is_excluded(&conn, "w2").unwrap());
+        assert!(is_excluded(&conn, "w3").unwrap());
+        // Restore-path touch skips all of them.
+        touch_if_not_excluded(&conn, "w1", 500, false).unwrap();
+        touch_if_not_excluded(&conn, "w2", 500, true).unwrap();
+        touch_if_not_excluded(&conn, "w3", 500, false).unwrap();
+        assert!(list_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn add_exclusion_for_all_recent_is_idempotent_with_prior_markers() {
+        let conn = db();
+        seed_workspace(&conn, "w1");
+        seed_workspace(&conn, "w2");
+        touch(&conn, "w1", 100, false).unwrap();
+        touch(&conn, "w2", 200, false).unwrap();
+        // w1 already excluded from a prior single remove.
+        add_exclusion(&conn, "w1", 150).unwrap();
+        // Bulk-mark must not error on the pre-existing w1 marker.
+        add_exclusion_for_all_recent(&conn, 400).unwrap();
+        assert!(is_excluded(&conn, "w1").unwrap());
+        assert!(is_excluded(&conn, "w2").unwrap());
     }
 }

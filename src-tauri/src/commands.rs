@@ -10899,11 +10899,96 @@ pub async fn impl_sandbox_build_app(
             "the active workspace has no mounted work directories to build against",
         ));
     }
-    let limits = request.limits.map(Into::into).unwrap_or_default();
+    let limits = resolve_build_limits(request.limits);
     let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
         task_type: nuomi_core::sandbox::types::SandboxTaskType::BuildApp,
         runtime: request.runtime,
         source: request.source,
+        authorized_dirs,
+        limits,
+    };
+    let record = state.kernel.sandbox().submit(spec).await?;
+    Ok(record.into())
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxRunWorkbenchTargetRequest {
+    /// Absolute path of the file or directory to run.
+    pub target_path: String,
+    /// True = run the whole project (BuildApp); false = run a single file (RunCode).
+    pub is_project: bool,
+    /// Sandbox runtime id (e.g. "python", "node").
+    pub runtime: String,
+    pub limits: Option<SandboxLimitsDto>,
+}
+
+/// `sandbox_run_workbench_target` (ADR-0025 scene A): run the workbench's
+/// current file or project in the sandbox. Authorized dirs are forced to
+/// the active workspace's mounted directories; the target path must lie
+/// within one of them. For a single file the source is read host-side
+/// (not passed by the frontend) so submission cannot inject arbitrary code.
+pub async fn impl_sandbox_run_workbench_target(
+    state: &AppState,
+    request: SandboxRunWorkbenchTargetRequest,
+) -> Result<SandboxTaskDto, IpcError> {
+    let db_path = state.db_path.clone();
+    let target_path = request.target_path.clone();
+    let is_project = request.is_project;
+    let (authorized_dirs, source) = tokio::task::spawn_blocking(
+        move || -> Result<(Vec<String>, String), IpcError> {
+            let db = nuomi_core::store::Db::open(&db_path)?;
+            let workspace = nuomi_core::store::repos::workspaces::find_active(&db.0)
+                .map_err(|e| IpcError::new("store.failed", e.to_string()))?
+                .ok_or_else(|| IpcError::new("sandbox.unavailable", "no active workspace"))?;
+            let mounted: Vec<String> =
+                nuomi_core::store::repos::work_directories::list_by_workspace(&db.0, &workspace.id)
+                    .map_err(|e| IpcError::new("store.failed", e.to_string()))?
+                    .into_iter()
+                    .filter(|d| d.mounted)
+                    .map(|d| d.abs_path)
+                    .collect();
+            if mounted.is_empty() {
+                return Err(IpcError::new(
+                    "sandbox.dir_not_authorized",
+                    "no mounted work directories",
+                ));
+            }
+            let target_canon = std::fs::canonicalize(&target_path)
+                .map_err(|e| IpcError::new("sandbox.dir_not_authorized", e.to_string()))?;
+            let within = mounted.iter().any(|dir| {
+                std::fs::canonicalize(dir)
+                    .ok()
+                    .is_some_and(|c| target_canon.starts_with(&c))
+            });
+            if !within {
+                return Err(IpcError::new(
+                    "sandbox.dir_not_authorized",
+                    "target path is outside the mounted work directories",
+                ));
+            }
+            let source = if is_project {
+                String::new()
+            } else {
+                std::fs::read_to_string(&target_path)
+                    .map_err(|e| IpcError::new("sandbox.dir_not_authorized", e.to_string()))?
+            };
+            Ok((mounted, source))
+        },
+    )
+    .await
+    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+
+    let limits = request.limits.map(Into::into).unwrap_or_default();
+    let task_type = if request.is_project {
+        nuomi_core::sandbox::types::SandboxTaskType::BuildApp
+    } else {
+        nuomi_core::sandbox::types::SandboxTaskType::RunCode
+    };
+    let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
+        task_type,
+        runtime: request.runtime,
+        source,
         authorized_dirs,
         limits,
     };
@@ -10965,6 +11050,28 @@ pub struct SandboxEndpointInfo {
 
 const DEFAULT_SANDBOX_CUBE_URL: &str = "http://127.0.0.1:8819";
 const SANDBOX_CUBE_URL_SETTING: &str = "sandbox_cube_url";
+/// Build-app专属默认墙钟超时（秒）。显著高于 `run_code` 默认 120 秒
+/// （`SandboxLimits::default().timeout_secs`），足以完成一次 Rust + Tauri
+/// 全量构建；可由调用方经 `limits.timeout_secs` 覆盖。仅用于
+/// `impl_sandbox_build_app` 的 `None` 分支，不改变 `SandboxLimits::default()`
+/// 的全局语义（`run_code` 等复用 `default()` 的路径不受影响）。
+const SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS: u64 = 1800;
+
+/// 解析 `build_app` 任务的生效 limits。调用方未提供 limits（`None`）时，
+/// `timeout_secs` 取 `SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS`，其余字段取
+/// `SandboxLimits::default()`；调用方提供 limits 时原样采用（既有覆盖
+/// 能力不变）。提取为纯函数以便在不依赖外部执行服务的前提下单测。
+fn resolve_build_limits(
+    limits: Option<SandboxLimitsDto>,
+) -> nuomi_core::sandbox::types::SandboxLimits {
+    match limits {
+        Some(l) => l.into(),
+        None => nuomi_core::sandbox::types::SandboxLimits {
+            timeout_secs: SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS,
+            ..Default::default()
+        },
+    }
+}
 
 /// Returns the effective sandbox endpoint and where it came from, so the
 /// settings UI can show "env var override" and disable editing.
@@ -11168,9 +11275,62 @@ pub async fn impl_terminal_kill(state: &AppState, id: String) -> Result<(), IpcE
     Ok(())
 }
 
+// ---------- evolution dry-run preview (ADR-0025 E3, Slice 1c skeleton) ----------
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionDryRunPreviewRequest {
+    /// Evolution tier override (e.g. "L0".."L3"); defaults to L0.
+    pub tier: Option<String>,
+    /// Optional natural-language goal steering the dry-run.
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionDryRunDiffDto {
+    /// Repository-relative path of the file the patch applies to.
+    pub file_path: String,
+    /// Unified-diff patch text.
+    pub patch: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EvolutionDryRunDto {
+    /// Resolved tier that was simulated.
+    pub tier: String,
+    /// Generated diff patches (empty in skeleton).
+    pub diffs: Vec<EvolutionDryRunDiffDto>,
+    /// Affected component/module names (empty in skeleton).
+    pub affected_components: Vec<String>,
+    /// Human-readable summary of the dry-run.
+    pub summary: String,
+}
+
+/// `evolution_dry_run_preview` (ADR-0025 E3): simulate an evolution step in
+/// the sandbox — generate diff patches + affected-component list + static AST
+/// scan, without compiling or replacing anything. Slice 1c ships the IPC
+/// skeleton only; the real diff/impact generation lands in Slice 4/6.
+pub async fn impl_evolution_dry_run_preview(
+    _state: &AppState,
+    request: EvolutionDryRunPreviewRequest,
+) -> Result<EvolutionDryRunDto, IpcError> {
+    let tier = request.tier.unwrap_or_else(|| "L0".to_string());
+    Ok(EvolutionDryRunDto {
+        tier,
+        diffs: Vec::new(),
+        affected_components: Vec::new(),
+        summary: "dry-run preview skeleton — diff generation lands in Slice 4 (ADR-0025)".to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_sensitive_dir, mask_webhook_url};
+    use super::{
+        is_sensitive_dir, mask_webhook_url, resolve_build_limits, SandboxLimitsDto,
+        SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS,
+    };
 
     /// SPEC D5 shape: scheme+host kept, per-segment first char, tail-4 of
     /// the last segment; the raw URL is never recoverable from the result.
@@ -11218,5 +11378,31 @@ mod tests {
     fn is_sensitive_dir_detects_windows_drive_root() {
         assert!(is_sensitive_dir(std::path::Path::new("C:\\")));
         assert!(!is_sensitive_dir(std::path::Path::new("C:\\Users")));
+    }
+
+    /// `build_app` 在调用方未提供 limits 时使用专属默认超时
+    /// `SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS`（1800 秒），其余字段取
+    /// `SandboxLimits::default()`。
+    #[test]
+    fn build_app_default_timeout_when_limits_none() {
+        let limits = resolve_build_limits(None);
+        assert_eq!(limits.timeout_secs, SANDBOX_BUILD_DEFAULT_TIMEOUT_SECS);
+        assert_eq!(limits.timeout_secs, 1800);
+        assert_eq!(limits.cpu_percent, None);
+        assert_eq!(limits.memory_mb, None);
+        assert!(!limits.network_enabled);
+    }
+
+    /// `build_app` 在调用方提供 limits 时原样采用，用户覆盖生效。
+    #[test]
+    fn build_app_user_timeout_when_limits_some() {
+        let dto = SandboxLimitsDto {
+            timeout_secs: 60,
+            cpu_percent: None,
+            memory_mb: None,
+            network_enabled: false,
+        };
+        let limits = resolve_build_limits(Some(dto));
+        assert_eq!(limits.timeout_secs, 60);
     }
 }

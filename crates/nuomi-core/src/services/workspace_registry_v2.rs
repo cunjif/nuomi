@@ -533,7 +533,10 @@ fn focus_and_sync(conn: &Connection, workspace_id: &str) -> Result<(), RegistryV
     let pinned = repo::find_by_id(conn, workspace_id)?
         .map(|e| e.is_pinned)
         .unwrap_or(false);
-    workspace_recent::touch(conn, workspace_id, now, pinned)?;
+    // User-initiated open/switch: clear any prior explicit-exclusion marker so
+    // reopening a previously-removed workspace brings it back into recent
+    // ("reuse overrides prior explicit removal").
+    workspace_recent::touch_clearing_exclusion(conn, workspace_id, now, pinned)?;
     emit(conn, workspace_id, "workspace.focused");
     Ok(())
 }
