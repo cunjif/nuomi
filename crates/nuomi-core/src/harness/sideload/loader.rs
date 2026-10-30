@@ -5,6 +5,7 @@
 //! 2. extra paths passed by the embedder (`NuomiConfig.plugin_paths`)
 //! 3. `<config>/nuomi/plugins` — immediate subdirectories are plugins
 //! 4. `<cwd>/.nuomi/plugins` — workspace plugins
+//! 5. `<cwd>/.nuomi/plugins/evolved` — self-evolution-generated plugins (ADR-0025 §3)
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ pub enum SourceKind {
     Extra,
     UserConfig,
     Workspace,
+    Evolved,
 }
 
 impl SourceKind {
@@ -28,6 +30,7 @@ impl SourceKind {
             Self::Extra => "config",
             Self::UserConfig => "user",
             Self::Workspace => "workspace",
+            Self::Evolved => "evolved",
         }
     }
 }
@@ -70,12 +73,16 @@ pub fn scan(extra_paths: &[PathBuf]) -> Vec<LoadOutcome> {
     let workspace = std::env::current_dir()
         .ok()
         .map(|cwd| cwd.join(".nuomi").join("plugins"));
+    let evolved = std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join(".nuomi").join("plugins").join("evolved"));
 
     let locations: Vec<(SourceKind, Vec<PathBuf>)> = [
         (SourceKind::Env, env_dirs),
         (SourceKind::Extra, extra_paths.to_vec()),
         (SourceKind::UserConfig, user_config.into_iter().collect()),
         (SourceKind::Workspace, workspace.into_iter().collect()),
+        (SourceKind::Evolved, evolved.into_iter().collect()),
     ]
     .into();
 

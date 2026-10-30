@@ -209,6 +209,11 @@ pub struct PluginManifest {
     pub events: Vec<EventSubscription>,
     #[serde(default)]
     pub editor: Option<EditorSection>,
+    /// ADR-0025 §3 Slice 4: tracks which evolution snapshot produced this
+    /// plugin. `None` for manually-installed plugins; `Some(id)` for
+    /// self-evolution-generated plugins in `.nuomi/plugins/evolved/`.
+    #[serde(default)]
+    pub evolution_snapshot_id: Option<String>,
 }
 
 /// Bare-key charset shared by `id` and tool names (kebab-case).
