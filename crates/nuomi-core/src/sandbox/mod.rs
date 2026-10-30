@@ -9,6 +9,7 @@
 //! mirroring the Run state-machine iron rule (AGENTS.md §4).
 
 pub mod cube_executor;
+pub mod ephemeral;
 pub mod executor;
 pub mod fake;
 pub mod task_manager;
