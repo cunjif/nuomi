@@ -388,6 +388,7 @@ mod tests {
             runtime: "python".to_string(),
             source: "print('hi')".to_string(),
             authorized_dirs: vec!["C:\\proj\\alpha".to_string()],
+            app_temp_dirs: vec![],
             limits: SandboxLimits {
                 timeout_secs: 90,
                 cpu_percent: Some(50),

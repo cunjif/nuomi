@@ -10857,6 +10857,7 @@ pub async fn impl_sandbox_run_code(
         runtime: request.runtime,
         source: request.source,
         authorized_dirs: request.authorized_dirs,
+        app_temp_dirs: vec![],
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;
@@ -10905,6 +10906,7 @@ pub async fn impl_sandbox_build_app(
         runtime: request.runtime,
         source: request.source,
         authorized_dirs,
+        app_temp_dirs: vec![],
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;
@@ -10990,6 +10992,7 @@ pub async fn impl_sandbox_run_workbench_target(
         runtime: request.runtime,
         source,
         authorized_dirs,
+        app_temp_dirs: vec![],
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;

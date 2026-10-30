@@ -13,6 +13,8 @@
 //! (poll-until-terminal with backoff) belong to the plugin shell
 //! (task 7.5); `run_to_completion` is the bounded convenience driver.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -21,6 +23,7 @@ use uuid::Uuid;
 
 use crate::domain::now_ms;
 use crate::harness::{Event, EventBus};
+use crate::sandbox::ephemeral::EphemeralManager;
 use crate::sandbox::executor::{SandboxExecutor, SandboxOutputChunk, SandboxTaskSnapshot};
 use crate::sandbox::types::{
     SandboxError, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskSpec, SandboxTaskStatus,
@@ -28,6 +31,9 @@ use crate::sandbox::types::{
 use crate::store::repos::sandbox_tasks::{self, SandboxTaskRecord};
 use crate::store::repos::{events, work_directories, workspaces};
 use crate::store::StoreError;
+
+/// Prefix of ephemeral dir names (`nuomi-selfeval-{id}`).
+const SELF_EVAL_DIR_PREFIX: &str = "nuomi-selfeval-";
 
 /// Audit aggregate type for sandbox tasks.
 pub const AGGREGATE_TYPE: &str = "sandbox_task";
@@ -54,6 +60,17 @@ pub struct SandboxTaskManager {
     /// Plugin enablement: submissions are rejected while disabled
     /// (`sandbox.unavailable`); reads/cancels keep working.
     enabled: AtomicBool,
+    /// Ephemeral root for `app_temp_dirs` prefix validation
+    /// (ADR-0025 §4.2 Slice 2). `None` ⇒ any non-empty `app_temp_dirs`
+    /// is rejected. Set by the plugin shell when wiring the manager.
+    ephemeral_root: Mutex<Option<PathBuf>>,
+    /// Ephemeral manager for Phase 1 GC on task terminal state
+    /// (ADR-0025 §4.2 Slice 2). `None` ⇒ GC is skipped.
+    ephemeral_mgr: Mutex<Option<Arc<EphemeralManager>>>,
+    /// In-memory index of task_id → ephemeral temp dir IDs, populated
+    /// at submit time from `spec.app_temp_dirs`. Lost on restart, but
+    /// orphaned dirs are reclaimed by `sweep_expired` on boot.
+    temp_dir_index: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl SandboxTaskManager {
@@ -62,6 +79,9 @@ impl SandboxTaskManager {
             executor,
             bus: Mutex::new(None),
             enabled: AtomicBool::new(true),
+            ephemeral_root: Mutex::new(None),
+            ephemeral_mgr: Mutex::new(None),
+            temp_dir_index: Mutex::new(HashMap::new()),
         }
     }
 
@@ -69,6 +89,40 @@ impl SandboxTaskManager {
     pub fn with_bus(self, bus: EventBus) -> Self {
         self.set_bus(bus);
         self
+    }
+
+    /// Sets the ephemeral root for `app_temp_dirs` prefix validation
+    /// (ADR-0025 §4.2). Called by the plugin shell during init.
+    pub fn set_ephemeral_root(&self, root: PathBuf) {
+        *self.ephemeral_root.lock().unwrap_or_else(PoisonError::into_inner) = Some(root);
+    }
+
+    /// Attaches the ephemeral manager for Phase 1 GC on terminal state
+    /// (ADR-0025 §4.2 Slice 2). Called by the plugin shell during init.
+    pub fn set_ephemeral_manager(&self, mgr: Arc<EphemeralManager>) {
+        *self
+            .ephemeral_mgr
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(mgr);
+    }
+
+    /// Returns the configured ephemeral root, if any.
+    fn ephemeral_root(&self) -> Option<PathBuf> {
+        self.ephemeral_root
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Extracts the temp dir ID from a path like
+    /// `<root>/nuomi-selfeval-{id}`; returns `None` if the last
+    /// component doesn't match the expected prefix.
+    fn extract_temp_dir_id(path: &str) -> Option<String> {
+        PathBuf::from(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix(SELF_EVAL_DIR_PREFIX))
+            .map(|id| id.to_string())
     }
 
     /// Attaches the kernel bus post-construction (the plugin shell wires
@@ -150,6 +204,26 @@ impl SandboxTaskManager {
                 )));
             }
         }
+        // ADR-0025 §4.2 Slice 2: app_temp_dirs must each reside under
+        // the configured ephemeral root. The workbench never sets this;
+        // only the self-evolution engine does, when submitting assessment
+        // tasks that need access to `nuomi-selfeval-{id}` directories.
+        if !spec.app_temp_dirs.is_empty() {
+            let root = self.ephemeral_root().ok_or_else(|| {
+                SandboxError::DirNotAuthorized(
+                    "app_temp_dirs provided but ephemeral root is not configured".to_string(),
+                )
+            })?;
+            for dir in &spec.app_temp_dirs {
+                let path = PathBuf::from(dir);
+                if !path.starts_with(&root) {
+                    return Err(SandboxError::DirNotAuthorized(format!(
+                        "app_temp_dir is outside the ephemeral root {}: {dir}",
+                        root.display()
+                    )));
+                }
+            }
+        }
         Ok(SubmitCheck {
             workspace_id: workspace.id,
             allowed_dirs,
@@ -200,6 +274,22 @@ impl SandboxTaskManager {
             },
         )?;
 
+        // Index temp dir IDs for Phase 1 GC on terminal state
+        // (ADR-0025 §4.2 Slice 2).
+        if !spec.app_temp_dirs.is_empty() {
+            let ids: Vec<String> = spec
+                .app_temp_dirs
+                .iter()
+                .filter_map(|d| Self::extract_temp_dir_id(d))
+                .collect();
+            if !ids.is_empty() {
+                self.temp_dir_index
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(record.id.clone(), ids);
+            }
+        }
+
         if let Err(err) = self.executor.submit(&record.id, spec).await {
             let exit_info = format!("submit failed: {err}");
             self.audit_transition(
@@ -223,11 +313,41 @@ impl SandboxTaskManager {
                 now_ms(),
             )
             .map_err(store_err)?;
+            self.trigger_gc_phase1(conn, &record.id, false);
             let failed = self.get_task(conn, &record.id)?;
             self.publish_progress(&failed, "", "");
             return Ok(failed);
         }
         self.get_task(conn, &record.id)
+    }
+
+    /// Triggers Phase 1 GC for all ephemeral temp dirs associated with
+    /// the given task (ADR-0025 §4.2 Slice 2). Best-effort: errors are
+    /// logged but never propagated — GC failure must not break the
+    /// task lifecycle. The index entry is consumed so GC runs once.
+    fn trigger_gc_phase1(&self, conn: &Connection, task_id: &str, success: bool) {
+        let ids = self
+            .temp_dir_index
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(task_id);
+        let Some(ids) = ids else {
+            return;
+        };
+        let mgr = self
+            .ephemeral_mgr
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(mgr) = mgr else {
+            return;
+        };
+        let now = now_ms();
+        for id in &ids {
+            if let Err(e) = mgr.gc_phase1(conn, id, success, now) {
+                tracing::warn!(error = %e, dir_id = %id, "ephemeral GC phase 1 failed");
+            }
+        }
     }
 
     /// Advances one poll cycle: executor.poll (read) → pull output deltas
@@ -297,6 +417,9 @@ impl SandboxTaskManager {
                 // second now_ms() guess.
                 let mut record = self.get_task(conn, task_id)?;
                 self.resolve_artifact(conn, &mut record, &snapshot).await?;
+                // Phase 1 GC for ephemeral temp dirs (ADR-0025 §4.2
+                // Slice 2): triggered on terminal state, best-effort.
+                self.trigger_gc_phase1(conn, &record.id, status == SandboxTaskStatus::Succeeded);
                 self.publish_progress(&record, &stdout_delta, &stderr_delta);
                 Ok(record)
             }
@@ -574,6 +697,8 @@ impl SandboxTaskManager {
                 "sandbox watchdog: executor cancel failed"
             );
         }
+        // Phase 1 GC for watchdog-timed-out tasks (ADR-0025 §4.2 Slice 2).
+        self.trigger_gc_phase1(conn, &record.id, false);
         self.publish_progress(&record, &stdout_delta, &stderr_delta);
         Ok(record)
     }
@@ -649,9 +774,11 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::TempDir;
 
+    use crate::sandbox::ephemeral::{EphemeralConfig, EphemeralManager};
     use crate::sandbox::executor::SandboxArtifact;
     use crate::sandbox::fake::{FakeExecutorCall, FakeSandboxExecutor};
     use crate::sandbox::types::{SandboxLimits, SandboxTaskType};
+    use crate::store::repos::selfeval_temp_dirs;
     use crate::store::repos::workspaces::WorkspaceEntry;
 
     fn db() -> Connection {
@@ -687,6 +814,7 @@ mod tests {
             runtime: runtime.to_string(),
             source: "print('hi')".to_string(),
             authorized_dirs: dirs.iter().map(|d| d.to_string()).collect(),
+            app_temp_dirs: vec![],
             limits: SandboxLimits::default(),
         }
     }
@@ -777,6 +905,112 @@ mod tests {
             .submit_check(&conn, &spec_for("python", &["D:\\evil"]))
             .unwrap_err();
         assert!(matches!(foreign, SandboxError::DirNotAuthorized(_)));
+    }
+
+    #[test]
+    fn submit_check_rejects_app_temp_dirs_without_ephemeral_root() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let mut spec = spec_for("python", &[]);
+        spec.app_temp_dirs = vec!["C:\\appdata\\ephemeral\\nuomi-selfeval-abc".to_string()];
+        let err = manager.submit_check(&conn, &spec).unwrap_err();
+        assert!(matches!(err, SandboxError::DirNotAuthorized(_)));
+    }
+
+    #[test]
+    fn submit_check_validates_app_temp_dirs_under_ephemeral_root() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        manager.set_ephemeral_root(PathBuf::from("C:\\appdata\\ephemeral"));
+
+        let mut spec = spec_for("python", &[]);
+        spec.app_temp_dirs = vec![
+            "C:\\appdata\\ephemeral\\nuomi-selfeval-abc".to_string(),
+            "C:\\appdata\\ephemeral\\nuomi-selfeval-def".to_string(),
+        ];
+        assert!(manager.submit_check(&conn, &spec).is_ok());
+
+        spec.app_temp_dirs = vec!["D:\\evil\\nuomi-selfeval-xyz".to_string()];
+        let err = manager.submit_check(&conn, &spec).unwrap_err();
+        assert!(matches!(err, SandboxError::DirNotAuthorized(_)));
+    }
+
+    #[tokio::test]
+    async fn gc_phase1_triggered_on_task_success() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let root = std::env::temp_dir()
+            .join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mgr = Arc::new(EphemeralManager::new(EphemeralConfig {
+            root: root.clone(),
+            ..Default::default()
+        }));
+        let handle = mgr.create(&conn, 1000).unwrap();
+
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+        manager.set_ephemeral_root(root.clone());
+        manager.set_ephemeral_manager(mgr.clone());
+
+        let mut spec = spec_for("python", &["C:\\proj\\alpha"]);
+        spec.app_temp_dirs = vec![handle.path.to_string_lossy().into_owned()];
+        let record = manager.submit(&conn, &spec).await.unwrap();
+
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        assert_eq!(done.status, SandboxTaskStatus::Succeeded);
+
+        let rec = selfeval_temp_dirs::get(&conn, &handle.id).unwrap().unwrap();
+        assert_eq!(
+            rec.status,
+            selfeval_temp_dirs::TempDirStatus::Cleaned,
+            "gc_phase1 should mark the dir cleaned on success"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[tokio::test]
+    async fn gc_phase1_triggered_on_task_failure() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let root = std::env::temp_dir()
+            .join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mgr = Arc::new(EphemeralManager::new(EphemeralConfig {
+            root: root.clone(),
+            ..Default::default()
+        }));
+        let handle = mgr.create(&conn, 1000).unwrap();
+
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+        manager.set_ephemeral_root(root.clone());
+        manager.set_ephemeral_manager(mgr.clone());
+
+        let mut spec = spec_for("python", &["C:\\proj\\alpha"]);
+        spec.app_temp_dirs = vec![handle.path.to_string_lossy().into_owned()];
+        let record = manager.submit(&conn, &spec).await.unwrap();
+
+        fake.set_poll_script(
+            &record.id,
+            vec![SandboxTaskSnapshot::terminal(
+                SandboxTaskStatus::Failed,
+                Some("exit 1".to_string()),
+                Some(500),
+            )],
+        );
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        assert_eq!(done.status, SandboxTaskStatus::Failed);
+
+        let rec = selfeval_temp_dirs::get(&conn, &handle.id).unwrap().unwrap();
+        assert_eq!(
+            rec.status,
+            selfeval_temp_dirs::TempDirStatus::GcPending,
+            "gc_phase1 should retain target/ (gc_pending) on failure"
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 
     // ---- submission + iron rule ------------------------------------------

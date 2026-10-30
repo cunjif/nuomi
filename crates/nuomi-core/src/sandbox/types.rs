@@ -172,6 +172,13 @@ pub struct SandboxTaskSpec {
     /// Directory allowlist (JSON array column; kernel-enforced subset of
     /// the current workspace's work directories, ADR-0021 semantics).
     pub authorized_dirs: Vec<String>,
+    /// Application-level ephemeral temp dirs the sandbox may access
+    /// (ADR-0025 §4.2 Slice 2). Each path must reside under the
+    /// ephemeral root (`<app_data_dir>/ephemeral/nuomi-selfeval-*`).
+    /// The workbench leaves this empty; the self-evolution engine
+    /// populates it when submitting assessment tasks. Validated in
+    /// `submit_check` as a kernel-enforced convergence boundary.
+    pub app_temp_dirs: Vec<String>,
     pub limits: SandboxLimits,
 }
 
