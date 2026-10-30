@@ -4,6 +4,7 @@
 #   .\start.ps1 cli "任务"           启动 headless CLI 执行任务 (nuomi-cli run)
 #   .\start.ps1 cli-resume <id> "…"  续传会话 (nuomi-cli resume)
 #   .\start.ps1 cli-repl             启动 headless CLI REPL (nuomi-cli repl)
+#   .\start.ps1 clean                清理 Rust 增量缓存 (修复 LNK2019 链接错误后重新启动)
 param(
     [Parameter(Position = 0)]
     [string]$Mode = "dev",
@@ -41,6 +42,16 @@ switch ($Mode.ToLower()) {
     "cli-repl" {
         Write-Host "[nuomi] Starting CLI REPL..."
         cargo run -p nuomi-cli -- repl
+    }
+    "clean" {
+        Write-Host "[nuomi] Cleaning Rust incremental cache (nuomi-core + nuomi-shell)..."
+        Write-Host "[hint]  Targets LNK2019 'unresolved external symbol anon.*.llvm.*' link errors."
+        cargo clean -p nuomi-core -p nuomi-shell
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[error] cargo clean failed." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "[ok]    Cache cleaned. Re-run .\start.ps1 to rebuild." -ForegroundColor Green
     }
     default {
         Write-Host "[nuomi] Starting Tauri desktop dev mode..."

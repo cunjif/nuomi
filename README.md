@@ -1,8 +1,10 @@
 <div align="center">
 
-# 🍡 nuomi · 糯米
+# 🐱 nuomi
 
-### 一颗「白、软、黏」的 Agent Harness 内核
+<img src="docs/assets/nuomi-cat.svg" width="168" alt="nuomi cat mascot" />
+
+### 一只蓝金英短守护的 Agent Harness 内核
 
 **简体中文** | [English](README.en.md)
 
@@ -10,7 +12,7 @@
 
 ```text
             ╭──────────────────────────────────────────────╮
-            │              🍡  nuomi · 糯米                │
+            │                  nuomi                       │
             │       "everything is a plugin."              │
             ╰──────────────────────────────────────────────╯
                           │            │            │
@@ -43,9 +45,9 @@
 
 ## 📖 这是什么 / What is it
 
-**nuomi（糯米）** 是一个**插件化 Agent Harness 内核**。
+**nuomi** 是一个**插件化 Agent Harness 内核**。
 
-名字取自糯米——**白、软、黏**：白盒可观测、软装可插拔、黏合多 Agent 协作。它把一个 Agent Harness 该有的所有零件（Loop Engine、SystemPrompt、Memory、MCP、Hook、Command、Skills、Plugins、ReAct）都做成**插件**，跑在自研的 Rust 插件内核上（借鉴 [Cordis](https://cordis.moe/zh-CN/guide/) 理念，但不引入 Node 运行时）。
+nuomi 本是只蓝金英短（Blue Golden British Shorthair）的名字——蓝灰毛尖渐层出蜜金底色、圆脸圆眼、常披白色钩织围领、胸前悬一颗橙色小南瓜。本项目以猫为名，它把一个 Agent Harness 该有的所有零件（Loop Engine、SystemPrompt、Memory、MCP、Hook、Command、Skills、Plugins、ReAct）都做成**插件**，跑在自研的 Rust 插件内核上（借鉴 [Cordis](https://cordis.moe/zh-CN/guide/) 理念，但不引入 Node 运行时）。
 
 > 一句话：**一切组件皆插件 · 可观测（append-only 事件溯源）· 可编排（Pipeline/Router/群聊）· 可演进（GEPA 式反思进化 + 白名单联网学习）**。
 
@@ -332,7 +334,7 @@ nuomi 由一支 AI 开发团队协作构建（配置在 `.opencode/agent/`）：
 
 <div align="center">
 
-**🍡 先内核，后 UI · Kernel first, UI later.**
+**🐱 先内核，后 UI · Kernel first, UI later.**
 
 *"创建超越 MultiAgent、个人 Agent 的跨时代的 Agent项目。"*
 *"UI/UX 将超越用户预期。"*

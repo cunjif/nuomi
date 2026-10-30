@@ -1,8 +1,10 @@
 <div align="center">
 
-# 🍡 nuomi · 糯米
+# 🐱 nuomi
 
-### A "White, Soft, Sticky" Agent Harness Kernel
+<img src="docs/assets/nuomi-cat.svg" width="168" alt="nuomi cat mascot" />
+
+### An Agent Harness kernel guarded by a blue golden British Shorthair
 
 **Plugin-based Agent Harness kernel + terminal acceptance entry** · Provider Master-Slave orchestration · Role/Team multi-agent collaboration · Long-term Memory · Self-Evolution
 
@@ -10,7 +12,7 @@
 
 ```text
             ╭──────────────────────────────────────────────╮
-            │              🍡  nuomi · 糯米                │
+            │                  nuomi                       │
             │       "everything is a plugin."              │
             ╰──────────────────────────────────────────────╯
                           │            │            │
@@ -43,9 +45,9 @@
 
 ## 📖 What is it
 
-**nuomi (糯米, "sticky rice")** is a **plugin-based Agent Harness kernel**.
+**nuomi** is a **plugin-based Agent Harness kernel**.
 
-The name comes from sticky rice — **white, soft, sticky**: white-box observability, softly pluggable, and sticky enough to glue multiple agents into collaboration. Every part an Agent Harness needs (Loop Engine, SystemPrompt, Memory, MCP, Hooks, Commands, Skills, Plugins, ReAct) is built as a **plugin**, running on a self-developed Rust plugin kernel (inspired by [Cordis](https://cordis.moe/zh-CN/guide/) but with no Node runtime).
+nuomi is the name of a blue golden British Shorthair — blue-grey tipped guard hairs shading to a honey undercoat, round face and round eyes, often wearing a white crochet collar with a tiny orange pumpkin dangling at the chest. The project takes the cat's name; it builds every part an Agent Harness needs (Loop Engine, SystemPrompt, Memory, MCP, Hooks, Commands, Skills, Plugins, ReAct) as a **plugin**, running on a self-developed Rust plugin kernel (inspired by [Cordis](https://cordis.moe/zh-CN/guide/) but with no Node runtime).
 
 > In one sentence: **everything is a plugin · observable (append-only event sourcing) · orchestrable (Pipeline/Router/group chat) · evolvable (GEPA-style reflective evolution + whitelisted online learning)**.
 
@@ -332,7 +334,7 @@ nuomi is built by a collaborating AI dev team (configured in `.opencode/agent/`)
 
 <div align="center">
 
-**🍡 Kernel first, UI later.**
+**🐱 Kernel first, UI later.**
 
 *"Create an era-defining Agent project that transcends multi-agent systems and personal agents."*
 *"UI/UX will exceed user expectations."*
