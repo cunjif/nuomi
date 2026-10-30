@@ -56,6 +56,7 @@
     "toastError": "错误",
     "toastSuccess": "成功",
     "toastWarn": "警告",
+    "toastInfo": "提示",
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",

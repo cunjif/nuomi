@@ -1524,6 +1524,9 @@ export function testDoubleCommands(): CommandSet {
     async deleteMemory(_id) {
       return ok(true);
     },
+    async revokePreference(_preferenceId) {
+      return ok(null);
+    },
     async listActiveRuns() {
       return ok<import("./bindings.gen").RunDto[]>([]);
     },

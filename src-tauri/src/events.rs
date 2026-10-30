@@ -49,6 +49,7 @@ fn is_domain_topic(topic: &str) -> bool {
         || topic.starts_with("change.")
         || topic.starts_with("conversation.")
         || topic.starts_with("sandbox.")
+        || topic.starts_with("evolution.")
 }
 
 fn extract(event: &Event) -> (Option<String>, Option<String>, Option<String>, Option<i64>) {

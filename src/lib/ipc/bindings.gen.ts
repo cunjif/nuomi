@@ -1174,6 +1174,14 @@ async deleteMemory(id: string) : Promise<Result<boolean, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async revokePreference(preferenceId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("revoke_preference", { preferenceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listActiveRuns() : Promise<Result<RunDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_active_runs") };
@@ -1743,6 +1751,7 @@ export type AppStateSnapshotDto = { providers: ProviderSummaryDto[]; roles: Role
 export type ApprovalDto = { id: string; runId: string; toolName: string; argumentsJson: string; workspaceId: string; workspaceLabel: string | null }
 export type AsrModelDto = { id: string; name: string; provider: string; builtin: boolean }
 export type AttachmentDto = { id: string; sessionId: string; seq: number | null; kind: string; name: string; mime: string; relPath: string; sizeBytes: number; sha256: string; createdAt: number }
+export type B1ConfigDto = { idleDebounceSecs: number; cooldownSecs: number; dailyTokenBudget: number; adaptiveEnabled: boolean; minConfidence: number }
 export type BindingConfigDto = { mode: BindingModeDto; providerId: string | null; 
 /**
  * The model id pinned for the Provider binding (`params.model_id`);
@@ -1885,7 +1894,7 @@ tier: string | null;
  * Optional natural-language goal steering the dry-run.
  */
 prompt: string | null }
-export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto }
+export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto; b1?: B1ConfigDto }
 export type EvolutionTaskDto = { id: string; cycleId: string; phase: string; devRole: string; dependsOn: string[]; status: string; acceptanceCriteria: string; triggerSource: string; createdAt: number; updatedAt: number }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
 /**

@@ -318,6 +318,8 @@ export const ipc = {
   listMemory: (roleId?: string | null, limit: number = 100) =>
     unwrap(current.listMemory(roleId ?? null, limit)),
   deleteMemory: (id: string) => unwrap(current.deleteMemory(id)),
+  revokePreference: (preferenceId: string) =>
+    unwrap(current.revokePreference(preferenceId)),
   listActiveRuns: () => unwrap(current.listActiveRuns()),
   cancelRun: (runId: string) => unwrap(current.cancelRun(runId)),
   saveAttachment: (sessionId: string, name: string, mime: string, dataBase64: string) =>

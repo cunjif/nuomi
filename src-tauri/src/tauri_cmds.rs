@@ -1354,6 +1354,15 @@ pub async fn delete_memory(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn revoke_preference(
+    state: tauri::State<'_, AppState>,
+    preference_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_revoke_preference(&state, preference_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn list_active_runs(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::RunDto>, IpcError> {

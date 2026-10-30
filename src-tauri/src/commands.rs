@@ -2116,9 +2116,9 @@ pub async fn impl_read_file(
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err
-        .map(IpcError::from)
-        .unwrap_or_else(|| IpcError::new("workspace.invalid_path", format!("not a file: {}", path))))
+    Err(last_err.map(IpcError::from).unwrap_or_else(|| {
+        IpcError::new("workspace.invalid_path", format!("not a file: {}", path))
+    }))
 }
 
 pub async fn impl_write_file(
@@ -2151,9 +2151,9 @@ pub async fn impl_write_file(
         svc.write_file_atomic(&path, &content)?;
         return Ok(());
     }
-    Err(last_err
-        .map(IpcError::from)
-        .unwrap_or_else(|| IpcError::new("workspace.invalid_path", format!("not a file: {}", path))))
+    Err(last_err.map(IpcError::from).unwrap_or_else(|| {
+        IpcError::new("workspace.invalid_path", format!("not a file: {}", path))
+    }))
 }
 
 pub async fn impl_create_file(
@@ -3221,11 +3221,36 @@ pub struct MemoryPolicyDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
+pub struct B1ConfigDto {
+    pub idle_debounce_secs: u64,
+    pub cooldown_secs: u64,
+    pub daily_token_budget: u32,
+    pub adaptive_enabled: bool,
+    pub min_confidence: f64,
+}
+
+impl Default for B1ConfigDto {
+    fn default() -> Self {
+        let b = nuomi_core::domain::B1Config::default();
+        Self {
+            idle_debounce_secs: b.idle_debounce_secs,
+            cooldown_secs: b.cooldown_secs,
+            daily_token_budget: b.daily_token_budget,
+            adaptive_enabled: b.adaptive_enabled,
+            min_confidence: b.min_confidence,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct EvolutionSettingsDto {
     pub online_learning: OnlineLearningConfigDto,
     pub refine: RefineConfigDto,
     pub skill_creation: SkillCreationConfigDto,
     pub memory_policy: MemoryPolicyDto,
+    #[serde(default)]
+    pub b1: B1ConfigDto,
 }
 
 const EVOLUTION_SETTINGS_KEY: &str = "evolution_settings";
@@ -3264,6 +3289,13 @@ impl EvolutionSettingsDto {
             retention_days,
             retrieval,
         } = e.memory_policy;
+        let nuomi_core::domain::B1Config {
+            idle_debounce_secs,
+            cooldown_secs,
+            daily_token_budget,
+            adaptive_enabled,
+            min_confidence,
+        } = e.b1;
         Self {
             online_learning: OnlineLearningConfigDto {
                 authorized,
@@ -3282,6 +3314,13 @@ impl EvolutionSettingsDto {
             memory_policy: MemoryPolicyDto {
                 retention_days,
                 retrieval: map_retrieval(retrieval),
+            },
+            b1: B1ConfigDto {
+                idle_debounce_secs,
+                cooldown_secs,
+                daily_token_budget,
+                adaptive_enabled,
+                min_confidence,
             },
         }
     }
@@ -3323,6 +3362,13 @@ impl EvolutionSettingsDto {
             memory_policy: MemoryPolicy {
                 retention_days: self.memory_policy.retention_days,
                 retrieval: map_retrieval(self.memory_policy.retrieval),
+            },
+            b1: nuomi_core::domain::B1Config {
+                idle_debounce_secs: self.b1.idle_debounce_secs,
+                cooldown_secs: self.b1.cooldown_secs,
+                daily_token_budget: self.b1.daily_token_budget,
+                adaptive_enabled: self.b1.adaptive_enabled,
+                min_confidence: self.b1.min_confidence,
             },
         }
     }
@@ -6575,6 +6621,38 @@ pub async fn impl_update_schedule(
     .await
     .map_err(join_err)??;
     Ok(ScheduleDto::from(updated))
+}
+
+/// Revoke a confirmed user preference (ADR-0025 §2.3 Slice 3 soft-undo).
+///
+/// Marks the `user_preference_profiles` row as `revoked` (logical delete,
+/// append-only preserved) and appends an `evolution.asset_revoked` domain
+/// event for audit. The Toast UI calls this when the user clicks "撤回"
+/// within the 30-second soft-undo window.
+pub async fn impl_revoke_preference(
+    state: &AppState,
+    preference_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let pid = preference_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        repos::user_preference_profiles::revoke(&db.0, &pid, now)?;
+        append_domain_event(
+            &db.0,
+            "evolution.asset_revoked",
+            serde_json::json!({
+                "artifactType": "preference",
+                "preferenceId": pid,
+                "revokedAt": now
+            }),
+            now,
+        )?;
+        Ok(())
+    })
+    .await?
 }
 
 fn append_domain_event(
@@ -10937,8 +11015,8 @@ pub async fn impl_sandbox_run_workbench_target(
     let db_path = state.db_path.clone();
     let target_path = request.target_path.clone();
     let is_project = request.is_project;
-    let (authorized_dirs, source) = tokio::task::spawn_blocking(
-        move || -> Result<(Vec<String>, String), IpcError> {
+    let (authorized_dirs, source) =
+        tokio::task::spawn_blocking(move || -> Result<(Vec<String>, String), IpcError> {
             let db = nuomi_core::store::Db::open(&db_path)?;
             let workspace = nuomi_core::store::repos::workspaces::find_active(&db.0)
                 .map_err(|e| IpcError::new("store.failed", e.to_string()))?
@@ -10976,10 +11054,9 @@ pub async fn impl_sandbox_run_workbench_target(
                     .map_err(|e| IpcError::new("sandbox.dir_not_authorized", e.to_string()))?
             };
             Ok((mounted, source))
-        },
-    )
-    .await
-    .map_err(|e| IpcError::new("join_error", e.to_string()))??;
+        })
+        .await
+        .map_err(|e| IpcError::new("join_error", e.to_string()))??;
 
     let limits = request.limits.map(Into::into).unwrap_or_default();
     let task_type = if request.is_project {
@@ -11324,7 +11401,8 @@ pub async fn impl_evolution_dry_run_preview(
         tier,
         diffs: Vec::new(),
         affected_components: Vec::new(),
-        summary: "dry-run preview skeleton — diff generation lands in Slice 4 (ADR-0025)".to_string(),
+        summary: "dry-run preview skeleton — diff generation lands in Slice 4 (ADR-0025)"
+            .to_string(),
     })
 }
 
