@@ -180,6 +180,7 @@ mod tests {
             source: "print('hi')".to_string(),
             authorized_dirs: vec!["C:\\proj\\alpha".to_string()],
             app_temp_dirs: vec![],
+            profile: Default::default(),
             limits: SandboxLimits::default(),
         }
     }

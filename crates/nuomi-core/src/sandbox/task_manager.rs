@@ -818,6 +818,7 @@ mod tests {
             source: "print('hi')".to_string(),
             authorized_dirs: dirs.iter().map(|d| d.to_string()).collect(),
             app_temp_dirs: vec![],
+            profile: Default::default(),
             limits: SandboxLimits::default(),
         }
     }

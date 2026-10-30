@@ -110,6 +110,48 @@ pub struct SandboxLimits {
     pub network_enabled: bool,
 }
 
+/// Build profile for sandbox tasks (ADR-0025 §4.1 Slice 4).
+///
+/// `Light` is for scenario A and L0–L2 lightweight evolution.
+/// `Heavy` is for L3 native full builds with relaxed limits and
+/// toolchain cache mounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SandboxProfile {
+    /// Default: 120s timeout, 2GB memory, standard isolation.
+    #[default]
+    Light,
+    /// L3 native builds: 1800s timeout, 8GB memory, toolchain cache mount.
+    Heavy,
+}
+
+impl SandboxProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SandboxProfile::Light => "light",
+            SandboxProfile::Heavy => "heavy",
+        }
+    }
+
+    /// Returns the default limits for this profile (ADR-0025 §4.1).
+    pub fn default_limits(&self) -> SandboxLimits {
+        match self {
+            SandboxProfile::Light => SandboxLimits {
+                timeout_secs: 120,
+                cpu_percent: None,
+                memory_mb: Some(2048),
+                network_enabled: false,
+            },
+            SandboxProfile::Heavy => SandboxLimits {
+                timeout_secs: 1800,
+                cpu_percent: None,
+                memory_mb: Some(8192),
+                network_enabled: false,
+            },
+        }
+    }
+}
+
 impl Default for SandboxLimits {
     fn default() -> Self {
         Self {
@@ -179,6 +221,9 @@ pub struct SandboxTaskSpec {
     /// populates it when submitting assessment tasks. Validated in
     /// `submit_check` as a kernel-enforced convergence boundary.
     pub app_temp_dirs: Vec<String>,
+    /// Build profile (ADR-0025 §4.1 Slice 4). Determines default limits
+    /// when the caller does not override them explicitly.
+    pub profile: SandboxProfile,
     pub limits: SandboxLimits,
 }
 

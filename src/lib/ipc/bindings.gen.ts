@@ -1182,6 +1182,14 @@ async revokePreference(preferenceId: string) : Promise<Result<null, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async evolutionReloadFrontend(artifactDir: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("evolution_reload_frontend", { artifactDir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listActiveRuns() : Promise<Result<RunDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_active_runs") };

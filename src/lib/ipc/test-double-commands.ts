@@ -1527,6 +1527,9 @@ export function testDoubleCommands(): CommandSet {
     async revokePreference(_preferenceId) {
       return ok(null);
     },
+    async evolutionReloadFrontend(_artifactDir) {
+      return ok(null);
+    },
     async listActiveRuns() {
       return ok<import("./bindings.gen").RunDto[]>([]);
     },

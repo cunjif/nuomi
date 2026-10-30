@@ -183,6 +183,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::list_memory,
         tauri_cmds::delete_memory,
         tauri_cmds::revoke_preference,
+        tauri_cmds::evolution_reload_frontend,
         tauri_cmds::list_active_runs,
         tauri_cmds::cancel_run,
         tauri_cmds::save_attachment,

@@ -320,6 +320,8 @@ export const ipc = {
   deleteMemory: (id: string) => unwrap(current.deleteMemory(id)),
   revokePreference: (preferenceId: string) =>
     unwrap(current.revokePreference(preferenceId)),
+  evolutionReloadFrontend: (artifactDir: string) =>
+    unwrap(current.evolutionReloadFrontend(artifactDir)),
   listActiveRuns: () => unwrap(current.listActiveRuns()),
   cancelRun: (runId: string) => unwrap(current.cancelRun(runId)),
   saveAttachment: (sessionId: string, name: string, mime: string, dataBase64: string) =>

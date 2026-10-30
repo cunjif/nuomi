@@ -6655,6 +6655,38 @@ pub async fn impl_revoke_preference(
     .await?
 }
 
+/// Reload the frontend from a new build artifact directory (ADR-0025 §3 L2 Slice 4).
+///
+/// Called after the evolution engine builds a new frontend bundle in the
+/// sandbox. Emits a `evolution://reload_frontend` event to the WebView,
+/// which the frontend listens for and calls `window.location.reload()`.
+/// Also appends a domain event for audit.
+pub async fn impl_evolution_reload_frontend(
+    app_handle: tauri::AppHandle,
+    state: &AppState,
+    artifact_dir: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let dir = artifact_dir.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let now = now_ms();
+        append_domain_event(
+            &db.0,
+            "evolution.frontend_reloaded",
+            serde_json::json!({ "artifactDir": dir, "reloadedAt": now }),
+            now,
+        )?;
+        Ok(())
+    })
+    .await??;
+    app_handle
+        .emit("evolution://reload_frontend", &artifact_dir)
+        .map_err(|e| IpcError::new("evolution.emit_failed", format!("emit failed: {e}")))?;
+    Ok(())
+}
+
 fn append_domain_event(
     conn: &rusqlite::Connection,
     topic: &str,
@@ -10936,6 +10968,7 @@ pub async fn impl_sandbox_run_code(
         source: request.source,
         authorized_dirs: request.authorized_dirs,
         app_temp_dirs: vec![],
+        profile: Default::default(),
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;
@@ -10985,6 +11018,7 @@ pub async fn impl_sandbox_build_app(
         source: request.source,
         authorized_dirs,
         app_temp_dirs: vec![],
+        profile: Default::default(),
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;
@@ -11070,6 +11104,7 @@ pub async fn impl_sandbox_run_workbench_target(
         source,
         authorized_dirs,
         app_temp_dirs: vec![],
+        profile: Default::default(),
         limits,
     };
     let record = state.kernel.sandbox().submit(spec).await?;

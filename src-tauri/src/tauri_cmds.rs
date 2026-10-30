@@ -1363,6 +1363,16 @@ pub async fn revoke_preference(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn evolution_reload_frontend(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    artifact_dir: String,
+) -> Result<(), IpcError> {
+    commands::impl_evolution_reload_frontend(app_handle, &state, artifact_dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn list_active_runs(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<commands::RunDto>, IpcError> {
