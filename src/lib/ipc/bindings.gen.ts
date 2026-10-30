@@ -1582,6 +1582,14 @@ async sandboxBuildApp(request: SandboxBuildAppRequest) : Promise<Result<SandboxT
     else return { status: "error", error: e  as any };
 }
 },
+async sandboxRunWorkbenchTarget(request: SandboxRunWorkbenchTargetRequest) : Promise<Result<SandboxTaskDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sandbox_run_workbench_target", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async sandboxListTasks(limit: number | null) : Promise<Result<SandboxTaskDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sandbox_list_tasks", { limit }) };
@@ -1665,6 +1673,14 @@ async terminalResize(id: string, cols: number, rows: number) : Promise<Result<nu
 async terminalKill(id: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("terminal_kill", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async evolutionDryRunPreview(request: EvolutionDryRunPreviewRequest) : Promise<Result<EvolutionDryRunDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("evolution_dry_run_preview", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1834,6 +1850,41 @@ export type EventSummaryDto = { id: number; kind: string; aggregateType: string 
 export type EvolutionArtifactDto = { id: string; taskId: string; producedByRole: string; artifactType: string; content: JsonValue; status: string; diffPreview?: string | null; rollbackPlan?: JsonValue | null; createdAt: number }
 export type EvolutionCycleDto = { id: string; triggerSource: string; triggerContext: string; phase: string; status: string; createdAt: number; endedAt?: number | null }
 export type EvolutionDataPoolDto = { id: string; createdAt: number }
+export type EvolutionDryRunDiffDto = { 
+/**
+ * Repository-relative path of the file the patch applies to.
+ */
+filePath: string; 
+/**
+ * Unified-diff patch text.
+ */
+patch: string }
+export type EvolutionDryRunDto = { 
+/**
+ * Resolved tier that was simulated.
+ */
+tier: string; 
+/**
+ * Generated diff patches (empty in skeleton).
+ */
+diffs: EvolutionDryRunDiffDto[]; 
+/**
+ * Affected component/module names (empty in skeleton).
+ */
+affectedComponents: string[]; 
+/**
+ * Human-readable summary of the dry-run.
+ */
+summary: string }
+export type EvolutionDryRunPreviewRequest = { 
+/**
+ * Evolution tier override (e.g. "L0".."L3"); defaults to L0.
+ */
+tier: string | null; 
+/**
+ * Optional natural-language goal steering the dry-run.
+ */
+prompt: string | null }
 export type EvolutionSettingsDto = { onlineLearning: OnlineLearningConfigDto; refine: RefineConfigDto; skillCreation: SkillCreationConfigDto; memoryPolicy: MemoryPolicyDto }
 export type EvolutionTaskDto = { id: string; cycleId: string; phase: string; devRole: string; dependsOn: string[]; status: string; acceptanceCriteria: string; triggerSource: string; createdAt: number; updatedAt: number }
 export type FileEntryDto = { name: string; isDir: boolean; size: number }
@@ -2102,6 +2153,19 @@ export type SandboxEndpointSource = "envvar" | "persisted" | "default"
 export type SandboxLimitsDto = { timeoutSecs: number; cpuPercent: number | null; memoryMb: number | null; networkEnabled: boolean }
 export type SandboxResourceUsageDto = { cpuTimeMs: number | null; peakMemoryMb: number | null }
 export type SandboxRunCodeRequest = { runtime: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto | null }
+export type SandboxRunWorkbenchTargetRequest = { 
+/**
+ * Absolute path of the file or directory to run.
+ */
+targetPath: string; 
+/**
+ * True = run the whole project (BuildApp); false = run a single file (RunCode).
+ */
+isProject: boolean; 
+/**
+ * Sandbox runtime id (e.g. "python", "node").
+ */
+runtime: string; limits: SandboxLimitsDto | null }
 export type SandboxRuntimeDto = { id: string; name: string; isolation: string }
 export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; 
 /**

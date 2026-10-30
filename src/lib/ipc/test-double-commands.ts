@@ -1955,6 +1955,41 @@ export function testDoubleCommands(): CommandSet {
       tdState.sandboxTasks.unshift(task);
       return ok(task);
     },
+    async sandboxRunWorkbenchTarget(request) {
+      const limits = request.limits ?? {
+        timeoutSecs: 120,
+        cpuPercent: null,
+        memoryMb: null,
+        networkEnabled: false,
+      };
+      const mounted =
+        (tdState.workspaces.find((w) => w.isActive) ?? tdState.workspaces[0])
+          ?.directories?.filter((d) => d.mounted) ?? [];
+      if (mounted.length === 0) {
+        return err("sandbox.dir_not_authorized", "no mounted work directories");
+      }
+      const now = Date.now();
+      const task = {
+        id: nextId("sbx"),
+        taskType: request.isProject ? "build_app" : "run_code",
+        runtime: request.runtime,
+        status: "succeeded",
+        source: request.isProject ? "" : `// ${request.targetPath}`,
+        authorizedDirs: mounted.map((d) => d.absPath),
+        limits,
+        stdout: "",
+        stderr: "",
+        artifactRef: null,
+        artifactRetryable: false,
+        exitInfo: "exit 0",
+        durationMs: 10,
+        usage: null,
+        createdAt: now,
+        finishedAt: now,
+      };
+      tdState.sandboxTasks.unshift(task);
+      return ok(task);
+    },
     async sandboxListTasks(limit) {
       const cap = Math.min(limit ?? 50, 200);
       return ok(tdState.sandboxTasks.slice(0, cap));
@@ -1987,6 +2022,14 @@ export function testDoubleCommands(): CommandSet {
     },
     async sandboxListRuntimes() {
       return ok(tdState.sandboxRuntimes);
+    },
+    async evolutionDryRunPreview(request) {
+      return ok({
+        tier: request.tier ?? "L0",
+        diffs: [],
+        affectedComponents: [],
+        summary: "dry-run preview skeleton (test-double)",
+      });
     },
     // Terminal commands (ADR-0024 Part B): test-double stubs — no real pty.
     async terminalCreate(_cwd?: string | null) {
