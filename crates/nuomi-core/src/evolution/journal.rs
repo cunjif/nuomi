@@ -822,6 +822,7 @@ mod tests {
                 diff_text: "diff".into(),
                 parent_version: None,
             },
+            user_profile: vec![],
         };
         assert_eq!(gate.review(&proposal).await, ReviewVerdict::Approve);
         // Duplicate within the dedup window → reject.

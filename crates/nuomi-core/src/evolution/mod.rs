@@ -2,17 +2,23 @@
 //! prompt versioning and allowlisted online research (SPEC T11, AC12–AC14).
 
 pub mod b1_gate;
+pub mod evaluator;
 pub mod journal;
 pub mod preference;
 pub mod reflection;
 pub mod research;
 pub mod review;
 pub mod scheduler;
+pub mod snapshot_types;
 pub mod trajectory;
 pub mod versioning;
 
 pub use b1_gate::{
     B1GateState, B1TriggerGate, SessionActivity, TriggerDecision, TriggerKind, TriggerRejection,
+};
+pub use evaluator::{
+    EvaluationInput, EvaluationVerdict, FourTrackEvaluator, Track1Runner, Track2Runner,
+    Track4Runner,
 };
 pub use journal::{
     audit, DriftConfig, DriftDetector, EvolutionJournal, JournalEntry, JournalFilter, JournalKind,
@@ -26,6 +32,10 @@ pub use research::{
 };
 pub use review::{DefaultReviewGate, LlmReviewGate, ReviewGate, ReviewProposal, ReviewVerdict};
 pub use scheduler::{CooldownDecision, CooldownGate, PeriodicResearch, DEFAULT_COOLDOWN};
+pub use snapshot_types::{
+    CategoryCount, EvaluationMetrics, ProfileSummary, ShadowMetricComparison, Track1Result,
+    Track2Result, Track3Result, Track4Result,
+};
 pub use trajectory::{TrajectoryAggregator, TrajectorySummary};
 pub use versioning::{ApplyBaseline, ApplySnapshot, PromptVersionManager};
 

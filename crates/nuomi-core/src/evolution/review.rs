@@ -24,6 +24,9 @@ pub struct ReviewProposal {
     /// Prompt slot the candidate targets (e.g. `"system_prompt"`).
     pub plugin: String,
     pub candidate: PromptCandidate,
+    /// User preference profile strings for context-aware review
+    /// (ADR-0025 §5.3 Slice 4 Track 3).
+    pub user_profile: Vec<String>,
 }
 
 /// Outcome of a review pass.
@@ -170,8 +173,19 @@ impl ReviewGate for LlmReviewGate {
                     .collect::<Vec<_>>()
                     .join("\n")
             };
+            let profile = if proposal.user_profile.is_empty() {
+                "(none)".to_string()
+            } else {
+                proposal
+                    .user_profile
+                    .iter()
+                    .map(|p| format!("- {p}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
             format!(
                 "Prompt slot: {}\n\nProposed candidate:\n{}\n\nDiff against parent:\n{}\n\n\
+                 User preference profile:\n{profile}\n\n\
                  Reasons recent candidates were rejected:\n{recent}",
                 proposal.plugin, proposal.candidate.content, proposal.candidate.diff_text,
             )
@@ -245,6 +259,7 @@ mod tests {
                 diff_text: "diff".to_string(),
                 parent_version: None,
             },
+            user_profile: vec![],
         }
     }
 
