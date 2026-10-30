@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod change_log;
 pub mod event_rollbacks;
 pub mod events;
+pub mod evolution_snapshots;
 pub mod file_authorizations;
 pub mod integrations;
 pub mod journal;

@@ -353,6 +353,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0044_user_preference_profiles.sql"
         )),
     ),
+    (
+        45,
+        "0045_evolution_snapshots",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0045_evolution_snapshots.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -1573,6 +1581,40 @@ mod tests {
             "idx_pref_profiles_status",
             "idx_pref_profiles_confidence",
             "idx_pref_profiles_session",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [idx],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "index {idx} must exist");
+        }
+    }
+
+    // ---- migration 0045: evolution_snapshots (ADR-0025 Slice 4)
+
+    #[test]
+    fn migrations_0045_evolution_snapshots_idempotent_on_empty_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM evolution_snapshots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        super::run(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrations_0045_indexes_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        for idx in [
+            "idx_evolution_snapshots_status",
+            "idx_evolution_snapshots_created",
+            "idx_evolution_snapshots_parent",
+            "idx_evolution_snapshots_tier",
         ] {
             let n: i64 = conn
                 .query_row(
