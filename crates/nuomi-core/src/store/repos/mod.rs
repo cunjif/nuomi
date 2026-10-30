@@ -16,6 +16,7 @@ pub mod proposals;
 pub mod providers;
 pub mod roles;
 pub mod sandbox_tasks;
+pub mod selfeval_temp_dirs;
 pub mod session_cli_handles;
 pub mod sessions;
 pub mod settings;

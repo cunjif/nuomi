@@ -337,6 +337,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0042_workspace_recent_excluded.sql"
         )),
     ),
+    (
+        43,
+        "0043_selfeval_temp_dirs",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0043_selfeval_temp_dirs.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -1496,5 +1504,40 @@ mod tests {
             .query_row("SELECT count(*) FROM file_authorizations", [], |r| r.get(0))
             .unwrap();
         assert_eq!(remaining, 0, "authorizations cascade with session");
+    }
+
+    // ---- migration 0043: selfeval_temp_dirs (ADR-0025 Slice 2)
+
+    #[test]
+    fn migrations_0043_selfeval_temp_dirs_idempotent_on_empty_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        // Table exists and is empty.
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM selfeval_temp_dirs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        // Re-running is a no-op (user_version already at 43).
+        super::run(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrations_0043_indexes_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        for idx in [
+            "idx_selfeval_temp_status",
+            "idx_selfeval_temp_created",
+            "idx_selfeval_temp_gc_eligible",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [idx],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "index {idx} must exist");
+        }
     }
 }
