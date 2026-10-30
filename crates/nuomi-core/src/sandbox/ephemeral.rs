@@ -212,20 +212,14 @@ impl EphemeralManager {
     /// Checks the quota and evicts oldest `gc_pending` dirs until the
     /// projected footprint fits. `needed` is the additional bytes the
     /// caller intends to allocate.
-    fn evict_if_needed(
-        &self,
-        conn: &Connection,
-        needed: i64,
-    ) -> Result<(), EphemeralError> {
+    fn evict_if_needed(&self, conn: &Connection, needed: i64) -> Result<(), EphemeralError> {
         let current = selfeval_temp_dirs::total_size(conn)?;
         if current + needed <= self.cfg.quota_bytes {
             return Ok(());
         }
         // Evict oldest gc_pending dirs until we fit.
-        let pending = selfeval_temp_dirs::list_by_status(
-            conn,
-            selfeval_temp_dirs::TempDirStatus::GcPending,
-        )?;
+        let pending =
+            selfeval_temp_dirs::list_by_status(conn, selfeval_temp_dirs::TempDirStatus::GcPending)?;
         let mut freed = 0i64;
         for rec in pending {
             if current - freed + needed <= self.cfg.quota_bytes {
@@ -344,7 +338,10 @@ mod tests {
 
         mgr.gc_phase1(&conn, &handle.id, false, 2000).unwrap();
 
-        assert!(handle.path.join("target").exists(), "target retained on failure");
+        assert!(
+            handle.path.join("target").exists(),
+            "target retained on failure"
+        );
         assert!(!handle.path.join("src").exists());
         let rec = selfeval_temp_dirs::get(&conn, &handle.id).unwrap().unwrap();
         assert_eq!(rec.status, selfeval_temp_dirs::TempDirStatus::GcPending);

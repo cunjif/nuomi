@@ -514,10 +514,9 @@ impl AppState {
                 let mut roots: Vec<PathBuf> = Vec::new();
                 if let Some((ws, dir_id)) = active {
                     if ws == id {
-                        if let Some(d) = dirs
-                            .iter()
-                            .find(|d| d.directory.id == dir_id && d.available && d.directory.mounted)
-                        {
+                        if let Some(d) = dirs.iter().find(|d| {
+                            d.directory.id == dir_id && d.available && d.directory.mounted
+                        }) {
                             roots.push(PathBuf::from(&d.directory.abs_path));
                         }
                     }

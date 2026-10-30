@@ -94,7 +94,10 @@ impl SandboxTaskManager {
     /// Sets the ephemeral root for `app_temp_dirs` prefix validation
     /// (ADR-0025 §4.2). Called by the plugin shell during init.
     pub fn set_ephemeral_root(&self, root: PathBuf) {
-        *self.ephemeral_root.lock().unwrap_or_else(PoisonError::into_inner) = Some(root);
+        *self
+            .ephemeral_root
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(root);
     }
 
     /// Attaches the ephemeral manager for Phase 1 GC on terminal state
@@ -941,8 +944,7 @@ mod tests {
     async fn gc_phase1_triggered_on_task_success() {
         let conn = db();
         seed_active_workspace(&conn);
-        let root = std::env::temp_dir()
-            .join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
+        let root = std::env::temp_dir().join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
         std::fs::create_dir_all(&root).unwrap();
         let mgr = Arc::new(EphemeralManager::new(EphemeralConfig {
             root: root.clone(),
@@ -975,8 +977,7 @@ mod tests {
     async fn gc_phase1_triggered_on_task_failure() {
         let conn = db();
         seed_active_workspace(&conn);
-        let root = std::env::temp_dir()
-            .join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
+        let root = std::env::temp_dir().join(format!("nuomi-test-gc-{}", crate::domain::new_id()));
         std::fs::create_dir_all(&root).unwrap();
         let mgr = Arc::new(EphemeralManager::new(EphemeralConfig {
             root: root.clone(),

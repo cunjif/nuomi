@@ -750,7 +750,10 @@ mod tests {
 
         let ids = recent_ids(&reg);
         assert!(ids.contains(&ea.id));
-        assert!(!ids.contains(&eb.id), "removed entry must not resurrect on restore");
+        assert!(
+            !ids.contains(&eb.id),
+            "removed entry must not resurrect on restore"
+        );
     }
 
     #[test]
@@ -793,7 +796,10 @@ mod tests {
         restore_touch(&reg, &eb.id, false);
         restore_touch(&reg, &ec.id, false);
 
-        assert!(recent_ids(&reg).is_empty(), "cleared entries must not resurrect on restore");
+        assert!(
+            recent_ids(&reg).is_empty(),
+            "cleared entries must not resurrect on restore"
+        );
         // Markers persisted for all three.
         assert!(excluded(&reg, &ea.id));
         assert!(excluded(&reg, &eb.id));
@@ -816,7 +822,10 @@ mod tests {
 
         let ids = recent_ids(&reg);
         assert!(ids.contains(&eb.id));
-        assert!(!ids.contains(&ea.id), "a stays excluded until explicitly reopened");
+        assert!(
+            !ids.contains(&ea.id),
+            "a stays excluded until explicitly reopened"
+        );
         assert!(!excluded(&reg, &eb.id));
         assert!(excluded(&reg, &ea.id));
     }
