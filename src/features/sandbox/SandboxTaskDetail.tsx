@@ -90,14 +90,14 @@ export function SandboxTaskDetail({ task }: { task: SandboxTaskDto }): ReactNode
       </div>
 
       <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <h3 className="font-note-hand text-sm text-ink">stdout</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">stdout</h3>
         <pre
           aria-label="stdout"
           className="min-h-16 flex-1 overflow-auto rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-dashed border-ink-muted/40 bg-surface p-2 font-mono text-xs whitespace-pre-wrap text-ink"
         >
           {task.stdout === "" ? "—" : task.stdout}
         </pre>
-        <h3 className="font-note-hand text-sm text-ink">stderr</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">stderr</h3>
         <pre
           aria-label="stderr"
           className="min-h-12 overflow-auto rounded-[12px_255px_15px_225px/225px_15px_255px_12px] border border-dashed border-ink-muted/40 bg-surface p-2 font-mono text-xs whitespace-pre-wrap text-state-danger"
