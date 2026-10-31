@@ -128,8 +128,15 @@ pub fn atomic_replace(
         Err(e) => {
             // Try cross-filesystem fallback: copy + rename.
             if is_cross_device_err(&e) {
-                copy_and_rename(new_binary, target)?;
-                Ok(archive_path.unwrap_or_else(|| PathBuf::from("")))
+                match copy_and_rename(new_binary, target) {
+                    Ok(()) => Ok(archive_path.unwrap_or_else(|| PathBuf::from(""))),
+                    Err(e2) => {
+                        if let Some(ref archive) = archive_path {
+                            let _ = fs::rename(archive, target);
+                        }
+                        Err(e2)
+                    }
+                }
             } else {
                 // Restore the old binary if we archived it.
                 if let Some(ref archive) = archive_path {
@@ -161,8 +168,14 @@ fn copy_and_rename(src: &Path, dst: &Path) -> Result<(), ReplaceError> {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tmp = dst_dir.join(format!(".nuomi_tmp_{ts}"));
-    fs::copy(src, &tmp)?;
-    fs::rename(&tmp, dst)?;
+    if let Err(e) = fs::copy(src, &tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(ReplaceError::Io(e));
+    }
+    if let Err(e) = fs::rename(&tmp, dst) {
+        let _ = fs::remove_file(&tmp);
+        return Err(ReplaceError::Io(e));
+    }
     Ok(())
 }
 
@@ -282,8 +295,7 @@ mod tests {
         // Use a very high PID that almost certainly doesn't exist.
         let result = wait_for_pid(999_999, Duration::from_secs(1));
         // On most systems this PID doesn't exist, so it should succeed.
-        // If it does exist (extremely unlikely), the test still passes
-        // because the function returns Ok after the process exits.
-        assert!(result.is_ok() || result.is_err());
+        // PID 999_999 almost certainly doesn't exist on any real system.
+        assert!(result.is_ok(), "expected PID 999999 to not exist");
     }
 }
