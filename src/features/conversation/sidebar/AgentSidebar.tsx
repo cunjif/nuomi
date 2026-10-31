@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentRefDto, ConversationDto } from "../../../lib/ipc/client";
 import { ipc } from "../../../lib/ipc/client";
@@ -33,6 +33,7 @@ export function AgentSidebar({
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [selectedAgent, setSelectedAgent] = useState<AgentRefDto | null>(null);
+  const avatarListRef = useRef<HTMLDivElement>(null);
 
   // State machine: closing the sidebar also dismisses the BottomSheet.
   useEffect(() => {
@@ -92,7 +93,7 @@ export function AgentSidebar({
         </div>
 
         {/* Upper: avatar list */}
-        <div className="shrink-0 border-b border-ink-muted/30">
+        <div ref={avatarListRef} className="shrink-0 border-b border-ink-muted/30">
           <AgentAvatarList
             agents={conversation.participantAgents}
             sessionId={sessionId}
@@ -115,6 +116,7 @@ export function AgentSidebar({
             canRemove={canRemove}
             onRemove={handleRemove}
             sessionId={sessionId}
+            triggerRef={avatarListRef}
           />
         )}
       </aside>

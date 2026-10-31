@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDraggable } from "@dnd-kit/core";
 import type { TaskDto, TeamDto } from "../../lib/ipc/bindings.gen";
 import { Spinner } from "../../components/ui/Spinner";
 import { Icon } from "../../components/ui/Icon/Icon";
+import { useClickOutside } from "../../components/ui/useClickOutside";
 import { formatRelativeTime, type RelativeTimeLocale } from "../../lib/format/relativeTime";
 import { WorkspaceBadge } from "../conversation/WorkspaceBadge";
 import { statusLabelKey, TASK_STATUSES, type TaskStatus } from "./taskStatuses";
@@ -42,12 +43,19 @@ export function TaskCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
   const locale: RelativeTimeLocale = i18n.language.startsWith("zh") ? "zh-CN" : "en";
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
 
   const closeMenu = (): void => {
     setMenuOpen(false);
     setTeamListOpen(false);
     setConfirmingDelete(false);
   };
+
+  useClickOutside([moreBtnRef, menuRef], {
+    enabled: menuOpen,
+    onOutside: closeMenu,
+  });
 
   return (
     <div
@@ -88,6 +96,7 @@ export function TaskCard({
         </div>
       )}
       <button
+        ref={moreBtnRef}
         type="button"
         aria-label={t("board.cardMenu")}
         aria-expanded={menuOpen}
@@ -101,7 +110,7 @@ export function TaskCard({
         <Icon name="more" size={16} />
       </button>
       {menuOpen && (
-        <ul className="sketch-card sketch-shadow-md absolute right-0 top-6 z-10 w-40 bg-surface-raised py-1">
+        <ul ref={menuRef} className="sketch-card sketch-shadow-md absolute right-0 top-6 z-10 w-40 bg-surface-raised py-1">
           {TASK_STATUSES.filter((s) => s !== task.status).map((status) => (
             <li key={status}>
               <button

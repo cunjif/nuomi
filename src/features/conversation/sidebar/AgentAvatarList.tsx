@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentRefDto } from "../../../lib/ipc/client";
 import { AddAgentPopover } from "./AddAgentPopover";
@@ -30,6 +30,7 @@ export function AgentAvatarList({
 }: AgentAvatarListProps): ReactNode {
   const { t } = useTranslation();
   const [showAdd, setShowAdd] = useState(false);
+  const addTriggerRef = useRef<HTMLDivElement>(null);
 
   const excludeKeys = new Set(agents.map((a) => `${a.kind}:${a.id}`));
 
@@ -55,7 +56,7 @@ export function AgentAvatarList({
           </button>
         );
       })}
-      <div className="relative shrink-0">
+      <div ref={addTriggerRef} className="relative shrink-0">
         <button
           type="button"
           onClick={() => setShowAdd((v) => !v)}
@@ -70,6 +71,7 @@ export function AgentAvatarList({
             excludeAgentKeys={excludeKeys}
             onAdded={() => { setShowAdd(false); onAgentAdded(); }}
             onClose={() => setShowAdd(false)}
+            triggerRef={addTriggerRef}
           />
         )}
       </div>

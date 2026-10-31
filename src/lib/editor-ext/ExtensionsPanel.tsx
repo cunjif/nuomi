@@ -5,9 +5,10 @@
  * is owned by another milestone and this surface is editor-scoped.
  */
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useUiStore } from "../store/uiStore";
+import { useClickOutside } from "../../components/ui/useClickOutside";
 import {
   ensureEditorExtensionsActivated,
   getRegisteredEditorExtensions,
@@ -23,6 +24,8 @@ export function ExtensionsPanel(): ReactNode {
   const setView = useUiStore((s) => s.setView);
   const [open, setOpen] = useState(false);
   const extensions = getRegisteredEditorExtensions();
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside([rootRef], { enabled: open, onOutside: () => setOpen(false) });
 
   const toggle = (id: string, next: boolean): void => {
     setEditorExtensionEnabled(id, next);
@@ -31,7 +34,7 @@ export function ExtensionsPanel(): ReactNode {
   };
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

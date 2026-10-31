@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { Dialog } from "../../components/ui/Dialog";
+import { useClickOutside } from "../../components/ui/useClickOutside";
 import { ipc } from "../../lib/ipc/client";
 import type { WorkDirectoryDto } from "../../lib/ipc/bindings.gen";
 import { toast } from "../../lib/store/toastStore";
@@ -30,6 +31,14 @@ export function WorkspaceBottomBar({
   const [menuForId, setMenuForId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside([rootRef], {
+    enabled: menuForId !== null || addOpen,
+    onOutside: () => {
+      setMenuForId(null);
+      setAddOpen(false);
+    },
+  });
 
   const { data: open } = useOpenWorkspace();
   // Render only when the open workspace is this component's host (a mismatch
@@ -129,7 +138,7 @@ export function WorkspaceBottomBar({
   const confirmDirtyFiles = confirmRemoveId !== null ? dirtyFiles : [];
 
   return (
-    <div className="relative shrink-0 border-t border-ink-muted/30 bg-surface">
+    <div ref={rootRef} className="relative shrink-0 border-t border-ink-muted/30 bg-surface">
       <div
         className="flex items-center gap-0.5 overflow-x-auto px-1 py-1"
         role="tablist"

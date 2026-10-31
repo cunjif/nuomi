@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import type { RefObject } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { groupAgentOptions } from "../../../lib/conversation/agentResolve";
 import { describeError } from "../../../i18n";
 import { toast } from "../../../lib/store/toastStore";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 
 export interface AddAgentPopoverProps {
   sessionId: string;
@@ -13,6 +15,9 @@ export interface AddAgentPopoverProps {
   excludeAgentKeys: Set<string>;
   onAdded: () => void;
   onClose: () => void;
+  /** Ref of the trigger button container so clicking "+" to toggle does not
+   *  immediately close the popover it just opened. */
+  triggerRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -25,10 +30,16 @@ export function AddAgentPopover({
   excludeAgentKeys,
   onAdded,
   onClose,
+  triggerRef,
 }: AddAgentPopoverProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside(triggerRef !== undefined ? [rootRef, triggerRef] : [rootRef], {
+    enabled: true,
+    onOutside: onClose,
+  });
 
   const { data: options } = useQuery({
     queryKey: ["agentOptions"],
@@ -56,6 +67,7 @@ export function AddAgentPopover({
 
   return (
     <div
+      ref={rootRef}
       className="absolute left-0 top-full z-30 mt-1 w-64 rounded border border-ink-muted/40 bg-surface-raised shadow-lg"
       role="dialog"
       aria-label={t("conversation.addAgent.title")}

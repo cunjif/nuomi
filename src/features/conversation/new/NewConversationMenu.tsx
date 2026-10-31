@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NewConversationDialog } from "./NewConversationDialog";
 import type { ConversationKind } from "../../../lib/conversation/kinds";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 
 const MENU_ITEMS: Array<{ kind: ConversationKind; labelKey: string }> = [
   { kind: "chat", labelKey: "conversation.newChat" },
@@ -20,6 +21,12 @@ export function NewConversationMenu(): ReactNode {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialogKind, setDialogKind] = useState<ConversationKind | null>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useClickOutside([menuRef, triggerRef], {
+    enabled: menuOpen,
+    onOutside: () => setMenuOpen(false),
+  });
 
   return (
     <div className="relative flex">
@@ -31,6 +38,7 @@ export function NewConversationMenu(): ReactNode {
         {t("sessions.newSession")}
       </button>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         aria-label={t("conversation.newMenuLabel")}
@@ -39,7 +47,7 @@ export function NewConversationMenu(): ReactNode {
         ▾
       </button>
       {menuOpen && (
-        <ul className="absolute right-0 top-full z-10 mt-0.5 rounded border border-ink-muted/40 bg-surface-raised shadow-lg">
+        <ul ref={menuRef} className="absolute right-0 top-full z-10 mt-0.5 rounded border border-ink-muted/40 bg-surface-raised shadow-lg">
           {MENU_ITEMS.map((item) => (
             <li key={item.kind}>
               <button

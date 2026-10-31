@@ -4,6 +4,7 @@ import type * as Monaco from "monaco-editor";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Spinner } from "../../components/ui/Spinner";
+import { useClickOutside } from "../../components/ui/useClickOutside";
 import { describeError } from "../../i18n";
 import {
   activateBuiltinEditorExtensions,
@@ -115,6 +116,14 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   // editor's decorations collection.
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  // Outline floating controls container — shared by the showEditor / wysiwygActive
+  // branches (mutually exclusive, so a single ref is enough). Used by
+  // useClickOutside to dismiss the outline panel on outside mousedown.
+  const outlineControlsRef = useRef<HTMLDivElement>(null);
+  useClickOutside([outlineControlsRef], {
+    enabled: outlineOpen,
+    onOutside: () => setOutlineOpen(false),
+  });
   // Full-width WYSIWYG toolbar host: format buttons are portaled here by the
   // wysiwyg editor so the toolbar spans the outline panel too (用户布局).
   const [wysiwygToolbarHost, setWysiwygToolbarHost] = useState<HTMLDivElement | null>(null);
@@ -418,7 +427,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
             {/* Top-right floating controls: </> toggle (md only) + outline
             button row, with the outline panel dropping below as a block. */}
             {(isMdFile || symbols.length > 0) && (
-              <div className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
+              <div ref={outlineControlsRef} className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
                 <div className="flex items-center gap-1 rounded border border-ink-muted/40 bg-surface-raised p-1 shadow-sm">
                   {viewToggleButton}
                   {outlineButton}
@@ -437,7 +446,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           <div className={`relative min-h-0 min-w-0 flex-1 ${outlineOpen && symbols.length > 0 ? 'pr-[11vw]' : ''}`}>
             {editorBody}
             {(isMdFile || symbols.length > 0) && (
-              <div className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
+              <div ref={outlineControlsRef} className="absolute right-1 top-1 z-20 flex flex-col items-end gap-1">
                 <div className="flex items-center gap-1 rounded border border-ink-muted/40 bg-surface-raised p-1 shadow-sm">
                   {viewToggleButton}
                   {outlineButton}

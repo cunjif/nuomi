@@ -1,15 +1,20 @@
 import type { ReactNode } from "react";
+import type { RefObject } from "react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { describeError } from "../../../i18n";
 import { toast } from "../../../lib/store/toastStore";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 import { ARCHIVE_EXTENSIONS, IMAGE_EXTENSIONS } from "../../../lib/conversation/attachmentModel";
 
 export interface FunctionMenuProps {
   sessionId: string;
   onClose: () => void;
+  /** Ref of the trigger button container so clicking "+" to toggle does not
+   *  immediately close the menu it just opened. */
+  triggerRef?: RefObject<HTMLElement | null>;
   /** File handoff for the three attachment entries (chat_rich_bind 5.7):
    * the Composer runs the shared validation + upload chain. */
   onFilesSelected: (files: FileList | null, category: "image" | "document" | "archive") => void;
@@ -26,7 +31,7 @@ const ARCHIVE_ACCEPT = (ARCHIVE_EXTENSIONS as readonly string[]).map((e) => `.${
  * plus import session info, apply rule, or inject custom SystemPrompt.
  * 150ms expand animation.
  */
-export function FunctionMenu({ sessionId, onClose, onFilesSelected }: FunctionMenuProps): ReactNode {
+export function FunctionMenu({ sessionId, onClose, triggerRef, onFilesSelected }: FunctionMenuProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [mode, setMode] = useState<MenuMode>("root");
@@ -35,6 +40,11 @@ export function FunctionMenu({ sessionId, onClose, onFilesSelected }: FunctionMe
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const documentInputRef = useRef<HTMLInputElement | null>(null);
   const archiveInputRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside(triggerRef !== undefined ? [rootRef, triggerRef] : [rootRef], {
+    enabled: true,
+    onOutside: onClose,
+  });
 
   const sessionsQuery = useQuery({
     queryKey: ["injectableSessions"],
@@ -63,6 +73,7 @@ export function FunctionMenu({ sessionId, onClose, onFilesSelected }: FunctionMe
 
   return (
     <div
+      ref={rootRef}
       className="absolute bottom-full left-0 z-20 mb-1 w-72 rounded border border-ink-muted/40 bg-surface-raised shadow-lg transition-opacity duration-150"
       role="dialog"
       aria-label={t("composer.functionMenu.title")}

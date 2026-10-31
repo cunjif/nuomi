@@ -14,6 +14,7 @@
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 import { create } from "zustand";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -134,9 +135,12 @@ function NavPanel(): ReactNode {
   const word = useNavPanelStore((s) => s.word);
   const hits = useNavPanelStore((s) => s.hits);
   const close = useNavPanelStore((s) => s.close);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside([rootRef], { enabled: open, onOutside: close });
   if (!open) return null;
   return (
     <div
+      ref={rootRef}
       role="dialog"
       aria-label={t("editor.nav.findReferences")}
       className="absolute bottom-4 right-4 z-20 flex max-h-96 w-96 flex-col gap-2 rounded border border-ink-muted/40 bg-surface-raised p-3 shadow-lg"

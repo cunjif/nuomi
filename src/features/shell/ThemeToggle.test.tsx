@@ -22,14 +22,16 @@ describe("ThemeToggle — four-theme selector", () => {
     document.documentElement.dataset.theme = "chalkboard-dark";
     renderWithProviders(<ThemeToggle />);
 
-    // Open the selector via its <summary>, then pick Paper Light (light family).
-    fireEvent.click(document.querySelector("summary") as HTMLElement);
+    // Open the selector via its trigger button, then pick Paper Light (light family).
+    const trigger = screen.getByRole("button", { name: /切换主题/ });
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: /纸质亮/ }));
     expect(document.documentElement.dataset.theme).toBe("paper-light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("paper-light");
 
-    // Panel stays open; pick High Contrast (dark family keeps .dark).
+    // Panel auto-closes after selecting; reopen, then pick High Contrast (dark family keeps .dark).
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: /高对比/ }));
     expect(document.documentElement.dataset.theme).toBe("high-contrast");
     expect(document.documentElement.classList.contains("dark")).toBe(true);

@@ -31,6 +31,7 @@ import { FunctionMenu } from "./FunctionMenu";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { WorkDirectoryIndicator } from "./WorkDirectoryIndicator";
 import { Icon } from "../../../components/ui/Icon/Icon";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 
 export interface ComposerProps {
   disabled: boolean;
@@ -81,6 +82,8 @@ export function Composer({
   const [functionMenuOpen, setFunctionMenuOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const executingRef = useRef(false);
+  const functionMenuTriggerRef = useRef<HTMLDivElement>(null);
+  const completionHostRef = useRef<HTMLDivElement>(null);
   const { optimize, runOptimize, clearOptimize, describeOptimizeError } =
     usePromptOptimize(sessionId);
 
@@ -203,6 +206,12 @@ export function Composer({
   const activeIndex = items.length === 0 ? 0 : Math.min(highlight, items.length - 1);
   const empty = trigger !== null && !dismissed && items.length === 0;
 
+  // Click outside the composer input area dismisses the completion panel.
+  useClickOutside([completionHostRef], {
+    enabled: panelOpen || empty,
+    onOutside: () => setDismissed(true),
+  });
+
   const syncCaret = (): void => {
     setCaret(inputRef.current?.selectionStart ?? 0);
   };
@@ -317,7 +326,7 @@ export function Composer({
       )}
       <div className="flex items-end gap-2">
         {leftSlot}
-        <div className="relative flex min-h-0 flex-1">
+        <div ref={completionHostRef} className="relative flex min-h-0 flex-1">
           {(panelOpen || empty) && trigger?.mode === "command" && (
             <CompletionMenu
               items={items}
@@ -399,7 +408,7 @@ export function Composer({
             placeholder={t("chat.inputPlaceholder")}
             className="min-h-0 w-full resize-none rounded border border-ink-muted/40 bg-surface-raised px-2 pb-9 pt-1.5 text-sm text-ink placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-ink-accent disabled:opacity-50"
           />
-          <div className="absolute bottom-1 left-1 z-10">
+          <div ref={functionMenuTriggerRef} className="absolute bottom-1 left-1 z-10">
             <ComposerToolbar
               onFunctionMenuClick={() => setFunctionMenuOpen((open) => !open)}
             />
@@ -408,6 +417,7 @@ export function Composer({
             <FunctionMenu
               sessionId={sessionId}
               onClose={() => setFunctionMenuOpen(false)}
+              triggerRef={functionMenuTriggerRef}
               onFilesSelected={(files, category) => onFilesSelected(files, category)}
             />
           )}

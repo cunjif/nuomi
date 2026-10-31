@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import type { RefObject } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../../lib/ipc/client";
 import { AsyncBoundary } from "../../../components/ui/AsyncBoundary";
+import { useClickOutside } from "../../../components/ui/useClickOutside";
 import { flavorLabel } from "../../../lib/conversation/agentResolve";
 import { toast } from "../../../lib/store/toastStore";
 import { i18n } from "../../../i18n";
@@ -19,6 +21,9 @@ export interface AgentBottomSheetProps {
   /** Session whose conversation detail (binding/policies) the panel shows
    * (chat_rich_bind 5.5); null hides the session-info section. */
   sessionId?: string | null;
+  /** Ref of the avatar-list container so clicking an avatar to toggle/switch
+   *  does not immediately close the sheet it just opened. */
+  triggerRef?: RefObject<HTMLElement | null>;
 }
 
 type PolicyValue = "authorize" | "deny" | "unset";
@@ -32,12 +37,17 @@ type PolicyValue = "authorize" | "deny" | "unset";
  * provider / CLI agent / remove member). Slides up from the sidebar's
  * bottom half, 250ms transition.
  */
-export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRemove, sessionId }: AgentBottomSheetProps): ReactNode {
+export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRemove, sessionId, triggerRef }: AgentBottomSheetProps): ReactNode {
   const { t } = useTranslation();
   const qc = useQueryClient();
   /** Policy in flight per participant (keyed by role id) — guards the
-   * optimistic three-state switch and reverts on save failure. */
+    * optimistic three-state switch and reverts on save failure. */
   const [pendingPolicy, setPendingPolicy] = useState<Record<string, PolicyValue>>({});
+  const rootRef = useRef<HTMLDivElement>(null);
+  useClickOutside(triggerRef !== undefined ? [rootRef, triggerRef] : [rootRef], {
+    enabled: true,
+    onOutside: onClose,
+  });
 
   const detailQuery = useQuery({
     queryKey: ["agentDetail", agentKind, agentId],
@@ -78,6 +88,7 @@ export function AgentBottomSheet({ agentKind, agentId, onClose, onRemove, canRem
 
   return (
     <div
+      ref={rootRef}
       className="absolute inset-x-0 bottom-0 z-20 flex max-h-[60%] flex-col rounded-t border-t border-ink-muted/40 bg-surface-raised shadow-lg transition-transform duration-[250ms] ease-out"
       role="dialog"
       aria-label={t("conversation.conversationDetail.title")}
