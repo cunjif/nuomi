@@ -4,6 +4,7 @@
 pub mod b1_gate;
 pub mod evaluator;
 pub mod journal;
+pub mod notifications;
 pub mod preference;
 pub mod reflection;
 pub mod research;
@@ -23,6 +24,9 @@ pub use evaluator::{
 pub use journal::{
     audit, DriftConfig, DriftDetector, EvolutionJournal, JournalEntry, JournalFilter, JournalKind,
     JournaledReviewGate, JOURNAL_KIND_PREFIX, JOURNAL_SINK_SESSION_ID,
+};
+pub use notifications::{
+    dispatch as dispatch_notification, EvolutionLayer, EvolutionNotification, FailureReason,
 };
 pub use preference::{PreferenceService, PreferenceSnapshot};
 pub use reflection::{PromptCandidate, ReflectionInput, Reflector};
