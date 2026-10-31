@@ -1,5 +1,6 @@
 //! Domain entities and the run/session state machines (single source of truth).
 
+pub mod boot_health;
 pub mod entities;
 pub mod evolution_run_state;
 pub mod run_state;
@@ -7,6 +8,10 @@ pub mod status;
 pub mod steward;
 pub mod steward_enums;
 
+pub use boot_health::{
+    app_version, clear_attempt, health_check, read_attempt, record_attempt, should_safe_mode,
+    BootAttempt, HealthReport, CRASH_THRESHOLD,
+};
 pub use entities::{
     AgentProfile, AgentRefKind, Approval, ApprovalDecision, Attachment, AttachmentKind,
     AutoRemember, B1Config, Capability, CliFlavor, ConversationKind, ConversationParticipant,

@@ -203,6 +203,10 @@ impl AppState {
             // Plugin side-load dirs default to env + user config (ADR 0009);
             // the desktop shell adds no extra paths of its own.
             plugin_paths: Vec::new(),
+            // Safe Mode defaults to false in the desktop shell; the crash
+            // watchdog (ADR-0025 §6.2) will force it via CLI flag when the
+            // trampoline re-launches after detecting a crash loop.
+            safe_mode: false,
         })
         .await?;
         let kernel_boot_ms = boot_started.elapsed().as_millis() as u64;

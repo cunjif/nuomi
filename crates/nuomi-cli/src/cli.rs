@@ -57,7 +57,9 @@ pub enum Command {
     /// (ADR 0009). Pure disk read: no database, no provider, no boot.
     PluginList,
     /// `nuomi evolution list` — print evolution snapshots (ADR-0025 §6.7).
-    EvolutionList { opts: CliOptions },
+    EvolutionList {
+        opts: CliOptions,
+    },
     /// `nuomi evolution rollback [snapshot-id]` — revert a snapshot
     /// (ADR-0025 §6.7).
     EvolutionRollback {
@@ -153,7 +155,35 @@ async fn boot_kernel(opts: &CliOptions) -> anyhow::Result<NuomiKernel> {
     };
     let db_env = std::env::var("NUOMI_DB_PATH").ok();
     let db_path = resolve_db_path(opts.db.clone(), db_env);
-    Ok(NuomiKernel::boot(NuomiConfig::new(db_path, endpoint)).await?)
+
+    // Crash watchdog (ADR-0025 §6.2): if prior boot attempts hit the
+    // threshold, force Safe Mode regardless of the CLI flag.
+    let auto_safe = nuomi_core::domain::should_safe_mode(&db_path);
+    let safe_mode = opts.safe_mode || auto_safe;
+    if auto_safe {
+        eprintln!(
+            "warning: crash loop detected (boot_attempt >= {}), forcing safe mode",
+            nuomi_core::domain::CRASH_THRESHOLD
+        );
+    }
+    // Record this boot attempt before proceeding. If the boot crashes,
+    // the marker persists and the next boot increments the count.
+    let version = nuomi_core::domain::app_version();
+    nuomi_core::domain::record_attempt(&db_path, version);
+
+    let config = NuomiConfig::new(db_path.clone(), endpoint).with_safe_mode(safe_mode);
+    let kernel = NuomiKernel::boot(config).await?;
+
+    // Post-boot health self-check (ADR-0025 §6.2). If all probes pass,
+    // clear the boot attempt marker — the boot is confirmed healthy.
+    let report = nuomi_core::domain::health_check(&db_path.to_string_lossy()).await;
+    if report.all_ok {
+        nuomi_core::domain::clear_attempt(&db_path);
+    } else {
+        eprintln!("warning: post-boot health check failed — boot attempt marker retained");
+    }
+
+    Ok(kernel)
 }
 
 /// Echoes streamed deltas to stdout with flush.
@@ -505,7 +535,12 @@ fn print_evolution_list(opts: &CliOptions) -> anyhow::Result<()> {
     )?;
 
     println!("Evolution snapshots (ADR-0025 §6.7)");
-    println!("  Active: {}  Staged: {}  Reverted: {}", active.len(), staged.len(), reverted.len());
+    println!(
+        "  Active: {}  Staged: {}  Reverted: {}",
+        active.len(),
+        staged.len(),
+        reverted.len()
+    );
     println!();
     for snap in active.iter().chain(staged.iter()).chain(reverted.iter()) {
         println!(

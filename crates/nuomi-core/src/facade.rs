@@ -120,6 +120,11 @@ pub struct NuomiConfig {
     /// Additional plugin side-load directories (ADR 0009), searched after
     /// `NUOMI_PLUGIN_PATH` and before the user config dir. Empty = defaults.
     pub plugin_paths: Vec<PathBuf>,
+    /// Safe Mode (ADR-0025 §6.2/§6.7): skips all third-party sideload
+    /// plugins and evolved overlays (`.nuomi/plugins/evolved/`). Only
+    /// built-in plugins are registered. Set by `--safe-mode` CLI flag or
+    /// by the crash watchdog when `boot_attempt.count >= CRASH_THRESHOLD`.
+    pub safe_mode: bool,
 }
 
 impl NuomiConfig {
@@ -128,6 +133,7 @@ impl NuomiConfig {
             db_path,
             provider: ProviderSource::Endpoint(endpoint),
             plugin_paths: Vec::new(),
+            safe_mode: false,
         }
     }
 
@@ -138,12 +144,19 @@ impl NuomiConfig {
             db_path,
             provider: ProviderSource::Fake(script),
             plugin_paths: Vec::new(),
+            safe_mode: false,
         }
     }
 
     /// Sets additional plugin side-load directories (ADR 0009).
     pub fn with_plugin_paths(mut self, paths: Vec<PathBuf>) -> Self {
         self.plugin_paths = paths;
+        self
+    }
+
+    /// Enables Safe Mode (ADR-0025 §6.2/§6.7).
+    pub fn with_safe_mode(mut self, safe: bool) -> Self {
+        self.safe_mode = safe;
         self
     }
 }
@@ -271,22 +284,31 @@ impl NuomiKernel {
 
         // Side-loaded third-party plugins (ADR 0009). Failures are recorded
         // into the boot report and never abort boot (Tolerant adapter).
+        //
+        // Safe Mode (ADR-0025 §6.2/§6.7): skips ALL sideload plugins
+        // (third-party + evolved overlays) when `config.safe_mode` is set.
+        // Only built-in plugins (Tools, Hooks, SystemPrompt, Memory,
+        // Sandbox) remain registered — a clean recovery surface.
         let mut boot_report = BootReport::default();
-        let outcomes = scan(&config.plugin_paths);
-        apply_to_report(&outcomes, &mut boot_report);
         let report_handle = Arc::new(std::sync::Mutex::new(BootReport::default()));
-        for outcome in outcomes {
-            if let LoadOutcome::Loaded { dir, manifest, .. } = outcome {
-                let plugin = Arc::new(SideloadedPlugin::new(*manifest, dir.clone()));
-                let tolerant = Arc::new(Tolerant::new(
-                    plugin,
-                    dir.display().to_string(),
-                    Arc::clone(&report_handle),
-                ));
-                if let Err(e) = kernel.register(tolerant) {
-                    boot_report.record_failed(dir.display().to_string(), e.to_string());
+        if !config.safe_mode {
+            let outcomes = scan(&config.plugin_paths);
+            apply_to_report(&outcomes, &mut boot_report);
+            for outcome in outcomes {
+                if let LoadOutcome::Loaded { dir, manifest, .. } = outcome {
+                    let plugin = Arc::new(SideloadedPlugin::new(*manifest, dir.clone()));
+                    let tolerant = Arc::new(Tolerant::new(
+                        plugin,
+                        dir.display().to_string(),
+                        Arc::clone(&report_handle),
+                    ));
+                    if let Err(e) = kernel.register(tolerant) {
+                        boot_report.record_failed(dir.display().to_string(), e.to_string());
+                    }
                 }
             }
+        } else {
+            tracing::warn!("safe mode active — skipping all sideload plugins and evolved overlays");
         }
 
         kernel.boot().await?;
