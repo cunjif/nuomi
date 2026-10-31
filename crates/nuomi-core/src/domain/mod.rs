@@ -1,6 +1,7 @@
 //! Domain entities and the run/session state machines (single source of truth).
 
 pub mod entities;
+pub mod evolution_run_state;
 pub mod run_state;
 pub mod status;
 pub mod steward;
@@ -17,6 +18,7 @@ pub use entities::{
     SkillFormat, Task, TaskStatus, Team, TeamTopology, TodoItem, WhiteBoardNote,
     WhiteboardRouteMode,
 };
+pub use evolution_run_state::{transition as evolution_transition, EvolutionRunState};
 pub use run_state::{
     ApprovalOutcome, GenerationalRun, LandingError, LandingEvent, LandingPhase, LandingRecord,
     LandingTracker, LandingTransitionError, MutationError, RunEvent, RunState, TransitionError,

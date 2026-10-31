@@ -18,13 +18,16 @@ pub const USAGE: &str = "\
 nuomi — headless agent harness
 
 USAGE:
-  nuomi run \"<task>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
+  nuomi run \"<task>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic] [--safe-mode]
   nuomi resume <session-id> \"<new input>\" [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
   nuomi repl   [--db <path>] [--base-url <url>] [--model <name>] [--protocol openai|anthropic]
   nuomi plugin list
+  nuomi evolution list [--db <path>]
+  nuomi evolution rollback [snapshot-id] [--db <path>]
 
 REPL commands: /new  /sessions  /resume <session-id>  /exit
-API key is read from the NUOMI_API_KEY environment variable.";
+API key is read from the NUOMI_API_KEY environment variable.
+--safe-mode: skip third-party plugins and personalized overlays (ADR-0025 §6.7).";
 
 /// Shared connection options for all subcommands.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -33,6 +36,7 @@ pub struct CliOptions {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub protocol: Option<String>,
+    pub safe_mode: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +56,14 @@ pub enum Command {
     /// `nuomi plugin list` — scan side-load dirs and print what would load
     /// (ADR 0009). Pure disk read: no database, no provider, no boot.
     PluginList,
+    /// `nuomi evolution list` — print evolution snapshots (ADR-0025 §6.7).
+    EvolutionList { opts: CliOptions },
+    /// `nuomi evolution rollback [snapshot-id]` — revert a snapshot
+    /// (ADR-0025 §6.7).
+    EvolutionRollback {
+        snapshot_id: Option<String>,
+        opts: CliOptions,
+    },
 }
 
 /// Parses argv (without the program name). Returns `Err(usage)` on anything
@@ -76,6 +88,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
             "--base-url" => opts.base_url = Some(take_value(&mut i)?),
             "--model" => opts.model = Some(take_value(&mut i)?),
             "--protocol" => opts.protocol = Some(take_value(&mut i)?),
+            "--safe-mode" => opts.safe_mode = true,
             other => positionals.push(other.to_string()),
         }
         i += 1;
@@ -92,6 +105,13 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
         }),
         "repl" if positionals.is_empty() => Ok(Command::Repl { opts }),
         "plugin" if positionals == vec!["list"] => Ok(Command::PluginList),
+        "evolution" if positionals.first().map(|s| s.as_str()) == Some("list") => {
+            Ok(Command::EvolutionList { opts })
+        }
+        "evolution" if positionals.first().map(|s| s.as_str()) == Some("rollback") => {
+            let snapshot_id = positionals.get(1).cloned();
+            Ok(Command::EvolutionRollback { snapshot_id, opts })
+        }
         _ => Err(USAGE.to_string()),
     }
 }
@@ -203,6 +223,14 @@ pub async fn execute(cmd: Command) -> anyhow::Result<i32> {
         Command::Repl { opts } => repl_interactive(boot_kernel(&opts).await?).await,
         Command::PluginList => {
             print_plugin_list();
+            Ok(0)
+        }
+        Command::EvolutionList { opts } => {
+            print_evolution_list(&opts)?;
+            Ok(0)
+        }
+        Command::EvolutionRollback { snapshot_id, opts } => {
+            evolution_rollback(snapshot_id, &opts)?;
             Ok(0)
         }
     }
@@ -447,6 +475,91 @@ async fn repl_interactive(kernel: NuomiKernel) -> anyhow::Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// `nuomi evolution list` — prints evolution snapshots from the database
+/// (ADR-0025 §6.7). Pure database read, no provider boot.
+fn print_evolution_list(opts: &CliOptions) -> anyhow::Result<()> {
+    use nuomi_core::store::repos::evolution_snapshots;
+    use nuomi_core::store::{migrations, Db};
+
+    let db_env = std::env::var("NUOMI_DB_PATH").ok();
+    let db_path = resolve_db_path(opts.db.clone(), db_env);
+    let db = Db::open(db_path.to_string_lossy().as_ref())?;
+    migrations::run(&db.0)?;
+
+    let active = evolution_snapshots::list_by_status(
+        &db.0,
+        &evolution_snapshots::SnapshotStatus::Active,
+        50,
+    )?;
+    let staged = evolution_snapshots::list_by_status(
+        &db.0,
+        &evolution_snapshots::SnapshotStatus::Staged,
+        50,
+    )?;
+    let reverted = evolution_snapshots::list_by_status(
+        &db.0,
+        &evolution_snapshots::SnapshotStatus::Reverted,
+        50,
+    )?;
+
+    println!("Evolution snapshots (ADR-0025 §6.7)");
+    println!("  Active: {}  Staged: {}  Reverted: {}", active.len(), staged.len(), reverted.len());
+    println!();
+    for snap in active.iter().chain(staged.iter()).chain(reverted.iter()) {
+        println!(
+            "  {} [{}] {} {}→{} ({})",
+            snap.id,
+            snap.status.as_str(),
+            snap.tier.as_str(),
+            snap.from_version,
+            snap.to_version,
+            snap.trigger_source.as_str(),
+        );
+    }
+    if active.is_empty() && staged.is_empty() && reverted.is_empty() {
+        println!("  (no snapshots)");
+    }
+    Ok(())
+}
+
+/// `nuomi evolution rollback [snapshot-id]` — reverts a snapshot
+/// (ADR-0025 §6.7). If no ID is given, reverts the most recent active snapshot.
+fn evolution_rollback(snapshot_id: Option<String>, opts: &CliOptions) -> anyhow::Result<()> {
+    use nuomi_core::store::repos::evolution_snapshots;
+    use nuomi_core::store::{migrations, Db};
+
+    let db_env = std::env::var("NUOMI_DB_PATH").ok();
+    let db_path = resolve_db_path(opts.db.clone(), db_env);
+    let db = Db::open(db_path.to_string_lossy().as_ref())?;
+    migrations::run(&db.0)?;
+
+    let target_id = match snapshot_id {
+        Some(id) => id,
+        None => {
+            let active = evolution_snapshots::list_by_status(
+                &db.0,
+                &evolution_snapshots::SnapshotStatus::Active,
+                1,
+            )?;
+            match active.first() {
+                Some(snap) => snap.id.clone(),
+                None => {
+                    println!("No active snapshot to rollback.");
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    evolution_snapshots::update_status(
+        &db.0,
+        &target_id,
+        &evolution_snapshots::SnapshotStatus::Reverted,
+    )?;
+    println!("Snapshot {} reverted.", target_id);
+    Ok(())
 }
 
 #[cfg(test)]
