@@ -2674,6 +2674,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nuomi-trampoline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "objc2"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

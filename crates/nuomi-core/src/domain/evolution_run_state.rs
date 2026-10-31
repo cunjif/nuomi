@@ -128,7 +128,14 @@ mod tests {
     #[test]
     fn any_active_state_can_fail() {
         use EvolutionRunState::*;
-        for from in [Queued, Compiling, Evaluating, AwaitingApproval, Staging, Replacing] {
+        for from in [
+            Queued,
+            Compiling,
+            Evaluating,
+            AwaitingApproval,
+            Staging,
+            Replacing,
+        ] {
             assert!(transition(from, Failed).is_ok(), "{from} → Failed");
         }
     }
@@ -136,7 +143,14 @@ mod tests {
     #[test]
     fn any_active_state_can_cancel() {
         use EvolutionRunState::*;
-        for from in [Queued, Compiling, Evaluating, AwaitingApproval, Staging, Replacing] {
+        for from in [
+            Queued,
+            Compiling,
+            Evaluating,
+            AwaitingApproval,
+            Staging,
+            Replacing,
+        ] {
             assert!(transition(from, Cancelled).is_ok(), "{from} → Cancelled");
         }
     }
