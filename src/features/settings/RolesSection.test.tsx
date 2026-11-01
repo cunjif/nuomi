@@ -182,4 +182,49 @@ describe("RolesSection (SPEC team-shell-m1 T5)", () => {
     await waitFor(() => expect(generateRole).toHaveBeenCalledWith("我要一个帮我写周报的角色", binding));
     expect(await screen.findByText("周报助手")).toBeInTheDocument();
   });
+
+  it("shows the role's pinned modelId (params.model_id) in the card, not the provider's first model", async () => {
+    // Regression: the binding badge used to read provider.settings.models[0].id
+    // and ignore the role's own model pin, so the card and the "Edit Binding"
+    // panel could disagree. Per AGENTS.md §4 a Role is a behavior overlay that
+    // can override the provider's default modelId, so params.model_id is
+    // authoritative and the card must mirror the panel.
+    injectIpcCommands({
+      listRoles: vi.fn().mockResolvedValue(
+        ok([
+          role({
+            id: "r-plan",
+            name: "Plan",
+            providerId: "prov-1",
+            params: { model_id: "deepseek-v4.1-flash" },
+          }),
+        ]),
+      ),
+      listProviders: vi.fn().mockResolvedValue(
+        ok([
+          provider({
+            id: "prov-1",
+            name: "Sensenova",
+            settings: {
+              models: [
+                { id: "sensenova-6.8-flash-lite", capabilities: [] },
+                { id: "deepseek-v4.1-flash", capabilities: [] },
+              ],
+              enabled: true,
+            },
+          }),
+        ]),
+      ),
+      listAgentProfiles: vi.fn().mockResolvedValue(ok([])),
+      upsertRole: vi.fn(),
+      deleteRole: vi.fn(),
+    } as never);
+    renderWithProviders(<RolesSection />);
+
+    // The card must show the role's pinned model (the same value the
+    // "Edit Binding" panel reads via readModelId(role.params)), not the
+    // provider's first model.
+    expect(await screen.findByText("Provider: Sensenova/deepseek-v4.1-flash")).toBeInTheDocument();
+    expect(screen.queryByText("Provider: Sensenova/sensenova-6.8-flash-lite")).not.toBeInTheDocument();
+  });
 });

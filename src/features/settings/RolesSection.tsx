@@ -7,7 +7,7 @@ import { AsyncBoundary } from "../../components/ui/AsyncBoundary";
 import { describeError } from "../../i18n";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
-import { readAgentProfileId, isRoleReady } from "../../lib/conversation/roleReady";
+import { readAgentProfileId, readModelId, isRoleReady } from "../../lib/conversation/roleReady";
 import { RoleBindingPanel } from "./RoleBindingPanel";
 import { RoleForm } from "./RoleForm";
 import { RoleQuickBinding } from "./RoleQuickBinding";
@@ -40,8 +40,14 @@ function BindingBadge({
   } else if (role.providerId !== null) {
     const providerName = providerNames.get(role.providerId) ?? role.providerId;
     const modelIds = providerModelIds.get(role.providerId) ?? [];
-    label = modelIds.length > 0
-      ? t("settings.roles.badgeProviderModel", { name: providerName, model: modelIds[0] })
+    // The role's own model pin (params.model_id) is authoritative — it is
+    // the value shown in the "Edit Binding" panel. Fall back to the
+    // provider's first model only when the role hasn't overridden it, so
+    // the card and the panel never disagree (see AGENTS.md §4: Role is a
+    // behavior overlay that can override the provider's default modelId).
+    const pinnedModel = readModelId(role.params) ?? modelIds[0] ?? null;
+    label = pinnedModel !== null
+      ? t("settings.roles.badgeProviderModel", { name: providerName, model: pinnedModel })
       : t("settings.roles.badgeProvider", { name: providerName });
   }
   return (
