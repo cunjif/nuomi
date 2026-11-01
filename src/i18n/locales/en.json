@@ -1168,7 +1168,7 @@
     "emptyBody": "Open a directory to start working, or resume from the recent list",
     "openDirectory": "Open directory",
     "recentTitle": "Recently used",
-    "recentRemove": "Remove from recent",
+    "recentRemove": "Remove workspace",
     "recentClear": "Clear all",
     "recentClearConfirmTitle": "Clear recent workspaces",
     "recentClearConfirmBody": "This removes all workspaces from the recent list and clears pin markers. The workspaces themselves are not deleted.",

@@ -25,6 +25,7 @@ export function EmptyStateGuide() {
   const { data: recentWorkspaces } = useRecentWorkspaces(10);
   const [createOpen, setCreateOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
 
   // Same invalidation set as WorkspaceListDialog: switching/opening changes
   // the active root, and listDir queries don't carry the workspace id, so
@@ -45,11 +46,11 @@ export function EmptyStateGuide() {
 
   const handleRemoveRecent = async (workspaceId: string): Promise<void> => {
     try {
-      await ipc.removeRecentWorkspace(workspaceId);
+      await ipc.removeWorkspace(workspaceId);
       invalidate();
-      toast.success(t("workspace.recentRemoved"));
-    } catch {
-      toast.error(t("workspace.recentRemoveFailed"));
+      toast.success(t("workspace.removed"));
+    } catch (e) {
+      toast.error(`${t("workspace.removeFailed")}: ${String(e)}`);
     }
   };
 
@@ -114,7 +115,7 @@ export function EmptyStateGuide() {
                   title={t("workspace.recentRemove")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    void handleRemoveRecent(ws.workspaceId);
+                    setRemoveConfirmId(ws.workspaceId);
                   }}
                   className="opacity-0 group-hover:opacity-100 text-xs text-ink-muted hover:text-state-danger focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ink-accent rounded px-1 shrink-0"
                 >
@@ -134,6 +135,15 @@ export function EmptyStateGuide() {
           void handleClearRecent();
         }}
         onClose={() => setClearConfirmOpen(false)}
+      />
+      <ClearConfirmDialog
+        open={removeConfirmId !== null}
+        title={t("workspace.recentRemove")}
+        description={t("workspace.removeConfirm")}
+        onConfirm={() => {
+          if (removeConfirmId !== null) void handleRemoveRecent(removeConfirmId);
+        }}
+        onClose={() => setRemoveConfirmId(null)}
       />
     </div>
   );

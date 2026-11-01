@@ -86,6 +86,33 @@ describe("EmptyStateGuide — recent list", () => {
       expect(tdState.workspaces.find((w) => w.id === "ws-1")?.isFocused).toBe(true);
     });
   });
+
+  it("hard-deletes the workspace on ✕ confirm (removeWorkspace, not removeRecent)", async () => {
+    tdState.workspaces.push(makeWs({ id: "ws-1" }));
+    tdState.recentWorkspaces = [makeRecent({ workspaceId: "ws-1", label: "alpha" })];
+    renderWithProviders(<EmptyStateGuide />);
+
+    await screen.findByText("alpha");
+    fireEvent.click(screen.getByRole("button", { name: "移除工作区" }));
+    expect(screen.getByText("确认移除此工作区？关联会话将保留为孤儿会话。")).toBeTruthy();
+    fireEvent.click(screen.getByText("确认"));
+
+    await waitFor(() => {
+      expect(tdState.workspaces.find((w) => w.id === "ws-1")).toBeUndefined();
+    });
+  });
+
+  it("does not remove when ✕ confirm is cancelled", async () => {
+    tdState.workspaces.push(makeWs({ id: "ws-1" }));
+    tdState.recentWorkspaces = [makeRecent({ workspaceId: "ws-1", label: "alpha" })];
+    renderWithProviders(<EmptyStateGuide />);
+
+    await screen.findByText("alpha");
+    fireEvent.click(screen.getByRole("button", { name: "移除工作区" }));
+    fireEvent.click(screen.getByText("取消"));
+
+    expect(tdState.workspaces.find((w) => w.id === "ws-1")).toBeDefined();
+  });
 });
 
 describe("EmptyStateGuide — anomaly entries", () => {

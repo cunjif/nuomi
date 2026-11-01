@@ -1175,7 +1175,7 @@
     "emptyBody": "打开一个目录开始工作，或从最近使用列表中恢复",
     "openDirectory": "打开目录",
     "recentTitle": "最近使用",
-    "recentRemove": "从最近使用移除",
+    "recentRemove": "移除工作区",
     "recentClear": "全部清理",
     "recentClearConfirmTitle": "清理最近使用列表",
     "recentClearConfirmBody": "将清空最近使用列表中的所有工作区，并清除置顶标记。工作区本身不会被删除。",
