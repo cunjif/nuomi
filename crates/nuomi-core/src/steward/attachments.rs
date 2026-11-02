@@ -281,6 +281,9 @@ mod tests {
                 route_mode: None,
                 whiteboard_route_mode: None,
                 deleted_at: None,
+                archived_at: None,
+                archived_workspace_path: None,
+                archived_directory_path: None,
             };
             sessions_repo::insert(conn, &session).unwrap();
             sessions_repo::set_workspace_id(conn, id, "__migrated__").unwrap();
@@ -473,6 +476,9 @@ mod tests {
                 route_mode: None,
                 whiteboard_route_mode: None,
                 deleted_at: None,
+                archived_at: None,
+                archived_workspace_path: None,
+                archived_directory_path: None,
             };
             sessions_repo::insert(conn, &session).unwrap();
             sessions_repo::set_workspace_id(conn, "chat-only", "__migrated__").unwrap();

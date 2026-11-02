@@ -505,6 +505,9 @@ pub async fn create_steward_session(
             route_mode: None,
             whiteboard_route_mode: None,
             deleted_at: None,
+            archived_at: None,
+            archived_workspace_path: None,
+            archived_directory_path: None,
         };
         sessions::insert(&tx, &session)?;
         sessions::set_workspace_id(&tx, &session_id, &workspace_id)?;

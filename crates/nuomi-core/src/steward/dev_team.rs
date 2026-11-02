@@ -409,6 +409,9 @@ async fn create_temp_session(db_path: &Arc<str>) -> Result<String, StewardError>
             route_mode: None,
             whiteboard_route_mode: None,
             deleted_at: None,
+            archived_at: None,
+            archived_workspace_path: None,
+            archived_directory_path: None,
         };
         sessions::insert(conn, &session)?;
         Ok(session_id)
