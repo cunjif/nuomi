@@ -176,20 +176,16 @@ fn orphan_reclaim_to_new_workspace() {
         repos::sessions::set_workspace_id(&db.0, "s1", &ea.id).unwrap();
     }
 
-    // Remove A → session becomes orphan.
+    // Remove A → session is archived (migration 0047) rather than orphaned.
     reg.remove(&ea.id).unwrap();
 
-    // Register B and reclaim orphans into B.
+    // Register B and restore the archived session into B.
     let ws_b = make_dir(dir.path(), "ws-b");
     let eb = reg.register(&ws_b).unwrap();
 
     {
         let db = open_db(&db_path);
-        let n = db.0.execute(
-            "UPDATE sessions SET workspace_id = ?1 WHERE workspace_id NOT IN (SELECT id FROM workspaces)",
-            rusqlite::params![eb.id],
-        ).unwrap();
-        assert_eq!(n, 1, "one orphan session should be reclaimed");
+        repos::sessions::restore_from_archive(&db.0, "s1", &eb.id, None).unwrap();
     }
 
     // Verify session now belongs to B.
