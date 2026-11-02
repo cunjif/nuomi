@@ -13,6 +13,7 @@ use super::nuomi_dir;
 use super::workspace_guard;
 use super::workspace_palette;
 use crate::store::repos::events;
+use crate::store::repos::sessions;
 use crate::store::repos::workspaces as repo;
 use crate::store::repos::workspaces::WorkspaceEntry;
 use crate::store::{migrations, Db, StoreError};
@@ -168,6 +169,11 @@ impl WorkspaceRegistry {
         let existing =
             repo::find_by_id(&conn, id)?.ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
         let was_active = existing.is_active;
+        // Archive the workspace's sessions (migration 0047) before deleting the
+        // workspace row — the snapshot subqueries need workspaces/work_directories
+        // rows still present. Sessions keep their workspace_id (no FK), so they
+        // survive the workspace deletion and remain visible in the archive dialog.
+        sessions::archive_all_for_workspace(&conn, id)?;
         repo::remove(&conn, id)?;
         let new_active_id = if was_active {
             let remaining = repo::list(&conn)?;

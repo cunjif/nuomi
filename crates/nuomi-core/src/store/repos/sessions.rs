@@ -29,7 +29,7 @@ pub fn insert(conn: &Connection, session: &Session) -> Result<(), StoreError> {
 
 pub fn get(conn: &Connection, id: &str) -> Result<Session, StoreError> {
     conn.query_row(
-        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at, archived_at, archived_workspace_path, archived_directory_path
          FROM sessions WHERE id = ?1 AND deleted_at IS NULL",
         params![id],
         row_to_session,
@@ -211,6 +211,70 @@ pub fn delete_all_for_workspace(
     Ok(count)
 }
 
+/// Archives all non-deleted, non-archived sessions for a workspace (migration
+/// 0047). Called by `WorkspaceRegistry::remove` before the workspace row is
+/// deleted. Snapshots the workspace's `root_path` and each session's bound
+/// work-directory `abs_path` so the session can later be restored by path
+/// matching. Returns the number of sessions newly archived.
+pub fn archive_all_for_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<usize, StoreError> {
+    let now = crate::domain::now_ms();
+    let n = conn.execute(
+        "UPDATE sessions
+         SET archived_at = ?2,
+             archived_workspace_path = (SELECT root_path FROM workspaces WHERE id = sessions.workspace_id),
+             archived_directory_path = (SELECT abs_path FROM work_directories WHERE id = sessions.work_directory_id)
+         WHERE workspace_id = ?1 AND deleted_at IS NULL AND archived_at IS NULL",
+        params![workspace_id, now],
+    )?;
+    Ok(n)
+}
+
+/// Lists archived sessions (migration 0047), most recently archived first.
+/// Excludes soft-deleted and steward sessions. Used by the archived-conversations
+/// dialog.
+pub fn list_archived(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at, archived_at, archived_workspace_path, archived_directory_path
+         FROM sessions WHERE archived_at IS NOT NULL AND deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM steward_sessions WHERE id = sessions.id)
+         ORDER BY archived_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], row_to_session)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Restores an archived session by rebinding it to a current workspace (and
+/// optionally a work directory). Clears the archive snapshot columns. Caller
+/// must verify path matching; this function performs the rebind atomically.
+pub fn restore_from_archive(
+    conn: &Connection,
+    session_id: &str,
+    new_workspace_id: &str,
+    new_work_directory_id: Option<&str>,
+) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE sessions
+         SET archived_at = NULL,
+             archived_workspace_path = NULL,
+             archived_directory_path = NULL,
+             workspace_id = ?2,
+             work_directory_id = ?3,
+             updated_at = ?4
+         WHERE id = ?1 AND archived_at IS NOT NULL AND deleted_at IS NULL",
+        params![session_id, new_workspace_id, new_work_directory_id, crate::domain::now_ms()],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "session",
+            id: session_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Soft-deletes all sessions across all workspaces. Returns the number of
 /// sessions newly marked deleted. Each session is cascaded via [`delete`].
 pub fn delete_all(conn: &Connection) -> Result<usize, StoreError> {
@@ -339,8 +403,8 @@ pub fn cache_scope(conn: &Connection, id: &str) -> Result<Option<String>, StoreE
 /// `steward_sessions`; genuinely background sessions are unaffected).
 pub fn list(conn: &Connection, workspace_id: &str, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
-         FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at, archived_at, archived_workspace_path, archived_directory_path
+         FROM sessions WHERE workspace_id = ?1 AND deleted_at IS NULL AND archived_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM steward_sessions WHERE id = sessions.id)
          ORDER BY updated_at DESC LIMIT ?2",
     )?;
@@ -362,8 +426,8 @@ pub fn list_by_workspace(
 /// Steward sessions are physically excluded (see [`list`]).
 pub fn list_all(conn: &Connection, limit: u32) -> Result<Vec<Session>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at
-         FROM sessions WHERE deleted_at IS NULL
+        "SELECT id, title, created_at, updated_at, kind, team_id, task_id, schedule_id, goal, main_agent_id, route_mode, whiteboard_route_mode, deleted_at, archived_at, archived_workspace_path, archived_directory_path
+         FROM sessions WHERE deleted_at IS NULL AND archived_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM steward_sessions WHERE id = sessions.id)
          ORDER BY updated_at DESC LIMIT ?1",
     )?;
@@ -567,6 +631,9 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         route_mode: row.get(10)?,
         whiteboard_route_mode: row.get(11)?,
         deleted_at: row.get(12)?,
+        archived_at: row.get(13)?,
+        archived_workspace_path: row.get(14)?,
+        archived_directory_path: row.get(15)?,
     })
 }
 

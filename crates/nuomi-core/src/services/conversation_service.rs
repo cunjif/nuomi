@@ -52,6 +52,9 @@ pub fn create_conversation(
         route_mode: None,
         whiteboard_route_mode: None,
         deleted_at: None,
+        archived_at: None,
+        archived_workspace_path: None,
+        archived_directory_path: None,
     };
     sessions::insert(conn, &session)?;
     sessions::set_workspace_id(conn, &session.id, workspace_id)?;

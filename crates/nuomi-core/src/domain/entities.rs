@@ -86,6 +86,13 @@ pub struct Session {
     pub whiteboard_route_mode: Option<String>,
     /// ADR 0014: 软删除时间戳（unix-ms）。NULL = 未删除；非 NULL = 已软删除。
     pub deleted_at: Option<i64>,
+    /// 会话归档时间戳（unix-ms，migration 0047）。删除工作区时其会话被归档：
+    /// NULL = 未归档；非 NULL = 已归档（从正常列表隐藏，在归档入口可见）。
+    pub archived_at: Option<i64>,
+    /// 归档时原工作区 root_path 快照（恢复时按路径匹配现有工作区）。
+    pub archived_workspace_path: Option<String>,
+    /// 归档时原工作目录 abs_path 快照（恢复时按路径匹配现有挂载目录）。
+    pub archived_directory_path: Option<String>,
 }
 
 impl Session {
@@ -105,6 +112,9 @@ impl Session {
             route_mode: None,
             whiteboard_route_mode: None,
             deleted_at: None,
+            archived_at: None,
+            archived_workspace_path: None,
+            archived_directory_path: None,
         }
     }
 }
