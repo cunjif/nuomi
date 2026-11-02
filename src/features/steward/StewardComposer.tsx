@@ -250,7 +250,7 @@ export function StewardComposer({
               title={t("composer.toolbar.attachment")}
               disabled={busy || sessionId === null}
             >
-              <Icon name="file" size={16} />
+              <Icon name="plus" size={16} />
             </button>
           </div>
           <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5">
