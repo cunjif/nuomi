@@ -2620,6 +2620,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "dirs 5.0.1",
+ "dunce",
  "futures",
  "hmac",
  "keyring",
@@ -2648,6 +2649,7 @@ name = "nuomi-shell"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dunce",
  "futures",
  "keyring",
  "nuomi-core",

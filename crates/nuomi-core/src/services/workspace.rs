@@ -49,7 +49,7 @@ impl WorkspaceService {
             ));
         }
         Ok(Self {
-            root: root.canonicalize()?,
+            root: dunce::canonicalize(&root)?,
         })
     }
 
@@ -249,7 +249,7 @@ fn has_windows_drive_prefix(rel: &str) -> bool {
 /// Canonicalizes the deepest existing ancestor of `path`, appending the
 /// non-existing remainder verbatim.
 fn canonicalize_ancestor(path: &Path) -> Result<PathBuf, WorkspaceError> {
-    if let Ok(canon) = path.canonicalize() {
+    if let Ok(canon) = dunce::canonicalize(path) {
         return Ok(canon);
     }
     let parent = path

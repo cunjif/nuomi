@@ -45,6 +45,11 @@ base64 = "0.22"
 # steward attachment text extraction (steward_workbench_v2 4.3)
 pdf-extract = "0.7"
 
+# Windows path canonicalization: strip the \\?\ verbatim prefix when the
+# path is safe (≤ MAX_PATH, no exotic chars) so displayed abs paths are
+# DOS-style. Falls back to verbatim form only when needed for long paths.
+dunce = "1"
+
 # misc
 # keyring v3 requires explicit native backend features; without them it
 # silently falls back to an in-memory mock (EntryOnly persistence) where

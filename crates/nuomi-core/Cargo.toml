@@ -36,6 +36,8 @@ regex = "1"
 # Steward attachment text extraction (steward_workbench_v2 4.3): PDF via
 # pdf-extract; Office (docx/xlsx/pptx) via zip + XML text nodes below.
 pdf-extract.workspace = true
+# Strip \\?\ verbatim prefix from canonicalized Windows paths (K-display fix).
+dunce.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -21,8 +21,12 @@ pub enum PathGuardError {
 /// Canonicalizes `path`: resolves symlinks, `..`, relative segments, and
 /// trailing separators to a normalized absolute path. Returns `InvalidPath`
 /// when the path does not exist or is not a directory.
+///
+/// Uses `dunce::canonicalize` so Windows paths shed the `\\?\` verbatim
+/// prefix when safe (≤ MAX_PATH, no exotic chars), keeping displayed abs
+/// paths DOS-style while still supporting long paths via fallback.
 pub fn canonicalize(path: &Path) -> Result<PathBuf, PathGuardError> {
-    let resolved = std::fs::canonicalize(path)
+    let resolved = dunce::canonicalize(path)
         .map_err(|_| PathGuardError::InvalidPath(path.to_string_lossy().to_string()))?;
     if !resolved.is_dir() {
         return Err(PathGuardError::InvalidPath(

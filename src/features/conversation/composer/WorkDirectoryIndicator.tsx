@@ -7,8 +7,8 @@ import { useOpenWorkspace } from "../../../lib/store/workspaceQueries";
  * Work-directory indicator shown at the composer's bottom-left, on the
  * same row as ContextUsageIndicator (chat_rich_bind 6.4): resolves the
  * session's bound `workDirectoryId` against the open workspace's
- * directories and renders the display name with the absolute path as
- * tooltip. Hidden when the session is unbound or the directory cannot be
+ * directories and renders the absolute path (also used as tooltip).
+ * Hidden when the session is unbound or the directory cannot be
  * resolved (e.g. cross-workspace legacy session under the "all" filter).
  */
 export function WorkDirectoryIndicator({
@@ -31,7 +31,7 @@ export function WorkDirectoryIndicator({
       aria-label={t("composer.workDirectory")}
     >
       <Icon name="file" size={12} className="shrink-0" />
-      <span className="truncate">{dir.displayName}</span>
+      <span className="truncate">{dir.absPath}</span>
     </span>
   );
 }

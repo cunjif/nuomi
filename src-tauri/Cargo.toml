@@ -35,6 +35,8 @@ keyring.workspace = true
 rusqlite.workspace = true
 base64 = "0.22"
 sha2 = "0.10"
+# Strip \\?\ verbatim prefix from canonicalized Windows paths (sandbox check).
+dunce.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

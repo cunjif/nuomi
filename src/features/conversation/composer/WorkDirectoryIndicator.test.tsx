@@ -35,7 +35,7 @@ function setup(open: WorkspaceEntryDto | null): void {
 }
 
 describe("WorkDirectoryIndicator", () => {
-  it("renders the bound directory display name with absPath tooltip", async () => {
+  it("renders the bound directory absolute path with absPath tooltip", async () => {
     setup(
       workspace([
         {
@@ -52,7 +52,7 @@ describe("WorkDirectoryIndicator", () => {
     renderWithProviders(<WorkDirectoryIndicator workDirectoryId="dir-a" />);
 
     const label = await screen.findByLabelText("工作目录");
-    expect(label.textContent).toContain("dir-a");
+    expect(label.textContent).toContain("/home/u/projects/dir-a");
     expect(label.getAttribute("title")).toBe("/home/u/projects/dir-a");
   });
 
