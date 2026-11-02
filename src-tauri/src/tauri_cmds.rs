@@ -1258,6 +1258,32 @@ pub async fn clear_conversations(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_archived_conversations(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<commands::ConversationDto>, IpcError> {
+    commands::impl_list_archived_conversations(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_archived_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<commands::RestoreArchivedResult, IpcError> {
+    commands::impl_restore_archived_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_archived_conversation(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), IpcError> {
+    commands::impl_delete_archived_conversation(&state, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn get_agent_detail(
     state: tauri::State<'_, AppState>,
     agent_kind: String,

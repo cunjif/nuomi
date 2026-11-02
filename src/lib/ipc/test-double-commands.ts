@@ -1473,6 +1473,15 @@ export function testDoubleCommands(): CommandSet {
       tdState.sessions = tdState.sessions.filter((s) => !toDelete.includes(s));
       return ok(count);
     },
+    async listArchivedConversations() {
+      return ok([]);
+    },
+    async restoreArchivedConversation(sessionId: string) {
+      return err("conversation.not_found", `session#${sessionId} not found`);
+    },
+    async deleteArchivedConversation(_sessionId: string) {
+      return ok(null);
+    },
     async getAgentDetail(agentKind, agentId) {
       const detail: AgentDetailDto = {
         kind: agentKind,

@@ -53,6 +53,7 @@ import {
   type StewardContextUsageSectionDto,
   type StewardPruneRecordDto,
   type StewardPromptOptimizeResultDto,
+  type RestoreArchivedResult,
 } from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
@@ -262,6 +263,11 @@ export const ipc = {
     unwrap(current.deleteConversation(sessionId)),
   clearConversations: (workspaceId: string | null) =>
     unwrap(current.clearConversations(workspaceId)),
+  listArchivedConversations: () => unwrap(current.listArchivedConversations()),
+  restoreArchivedConversation: (sessionId: string) =>
+    unwrap(current.restoreArchivedConversation(sessionId)),
+  deleteArchivedConversation: (sessionId: string) =>
+    unwrap(current.deleteArchivedConversation(sessionId)),
   getAgentDetail: (agentKind: string, agentId: string) =>
     unwrap(current.getAgentDetail(agentKind, agentId)),
   submitMessage: (
@@ -479,4 +485,5 @@ export type {
   TodoItemDto,
   WorkspaceEntryDto,
   RemoveWorkspaceResult,
+  RestoreArchivedResult,
 };

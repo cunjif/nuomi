@@ -1098,6 +1098,16 @@ pub struct ConversationDto {
     /// 真实值，其余从 `Session` 构造的路径默认 None（前端 refetch 会修正）。
     #[serde(default)]
     pub work_directory_id: Option<String>,
+    /// 归档时间戳（migration 0047）；None = 未归档。归档会话从正常列表隐藏，
+    /// 在「全部」过滤的归档入口中可见。
+    #[serde(default)]
+    pub archived_at: Option<i64>,
+    /// 归档时原工作区 root_path 快照（恢复时按路径匹配现有工作区）。
+    #[serde(default)]
+    pub archived_workspace_path: Option<String>,
+    /// 归档时原工作目录 abs_path 快照（恢复时按路径匹配现有挂载目录）。
+    #[serde(default)]
+    pub archived_directory_path: Option<String>,
 }
 
 impl From<Session> for ConversationDto {
@@ -1119,6 +1129,9 @@ impl From<Session> for ConversationDto {
             todo_list: Vec::new(),
             workspace_id: "__migrated__".to_string(),
             work_directory_id: None,
+            archived_at: s.archived_at,
+            archived_workspace_path: s.archived_workspace_path,
+            archived_directory_path: s.archived_directory_path,
         }
     }
 }
@@ -5734,6 +5747,133 @@ pub async fn impl_clear_conversations(
         state.session_cancels.cancel(sid);
     }
     Ok(sids.0)
+}
+
+/// Result of restoring an archived conversation (migration 0047).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreArchivedResult {
+    pub session_id: String,
+    pub workspace_id: String,
+    pub work_directory_id: Option<String>,
+}
+
+/// Lists archived conversations (migration 0047) — sessions whose workspace was
+/// deleted. Most recently archived first. Excludes soft-deleted and steward
+/// sessions. Returned DTOs carry `archivedAt`/`archivedWorkspacePath`/
+/// `archivedDirectoryPath` snapshots for the restore-by-path-matching UI.
+pub async fn impl_list_archived_conversations(
+    state: &AppState,
+) -> Result<Vec<ConversationDto>, IpcError> {
+    let path = state.db_path.clone();
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<ConversationDto>, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let sessions = repos::sessions::list_archived(&db.0, 200)?;
+        let mut out = Vec::with_capacity(sessions.len());
+        for session in &sessions {
+            let mut dto = ConversationDto::from(session.clone());
+            let participants = repos::sessions::list_participants(&db.0, &session.id)?;
+            let mut agent_refs = Vec::with_capacity(participants.len());
+            for (kind, id) in &participants {
+                let name = nuomi_core::services::name_agent_ref(&db.0, Some(&(*kind, id.clone())))?
+                    .map(|r| r.name)
+                    .unwrap_or_default();
+                agent_refs.push(AgentRefDto {
+                    kind: kind.as_str().to_string(),
+                    id: id.clone(),
+                    name,
+                });
+            }
+            dto.participant_agents = agent_refs;
+            out.push(dto);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(rows)
+}
+
+/// Restores an archived conversation by path-matching its snapshot to a current
+/// workspace (and optionally a mounted work directory). The workspace must
+/// exist with the same `root_path` as the snapshot; the directory is restored
+/// only if a mounted directory with the same `abs_path` exists in that workspace
+/// — otherwise the session is rebound to the workspace with no directory.
+pub async fn impl_restore_archived_conversation(
+    state: &AppState,
+    session_id: String,
+) -> Result<RestoreArchivedResult, IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<RestoreArchivedResult, IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        let conn = &db.0;
+        let session = repos::sessions::get(conn, &sid)?;
+        if session.archived_at.is_none() {
+            return Err(StoreError::Conflict {
+                entity: "session",
+                id: sid.clone(),
+                expected: "archived session".to_string(),
+            }
+            .into());
+        }
+        let Some(ws_path) = session.archived_workspace_path.as_deref() else {
+            return Err(StoreError::Conflict {
+                entity: "session",
+                id: sid.clone(),
+                expected: "archived workspace path snapshot".to_string(),
+            }
+            .into());
+        };
+        let ws = repos::workspaces::list(conn)?
+            .into_iter()
+            .find(|w| w.root_path == ws_path)
+            .ok_or_else(|| StoreError::Conflict {
+                entity: "workspace",
+                id: ws_path.to_string(),
+                expected: "current workspace with matching root_path".to_string(),
+            })?;
+        let new_dir_id = if let Some(dir_path) = session.archived_directory_path.as_deref() {
+            repos::work_directories::find_by_path(conn, dir_path)?
+                .filter(|d| d.workspace_id == ws.id && d.mounted)
+                .map(|d| d.id)
+        } else {
+            None
+        };
+        repos::sessions::restore_from_archive(conn, &sid, &ws.id, new_dir_id.as_deref())?;
+        Ok(RestoreArchivedResult {
+            session_id: sid,
+            workspace_id: ws.id,
+            work_directory_id: new_dir_id,
+        })
+    })
+    .await
+    .map_err(join_err)??;
+    Ok(result)
+}
+
+/// Permanently removes an archived conversation from the archive view (soft-
+/// deletes via `deleted_at`; the events append-only invariant is preserved).
+/// Cancels any in-flight turn and clears queued messages.
+pub async fn impl_delete_archived_conversation(
+    state: &AppState,
+    session_id: String,
+) -> Result<(), IpcError> {
+    let path = state.db_path.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        migrations::run(&db.0)?;
+        repos::sessions::delete(&db.0, &sid)?;
+        let _ = repos::message_queue::clear_queued(&db.0, &sid);
+        Ok(())
+    })
+    .await
+    .map_err(join_err)??;
+    state.session_cancels.cancel(&session_id);
+    Ok(())
 }
 
 // ----------------------------------------------- get_agent_detail
@@ -11068,10 +11208,10 @@ pub async fn impl_sandbox_run_workbench_target(
                     "no mounted work directories",
                 ));
             }
-            let target_canon = std::fs::canonicalize(&target_path)
+            let target_canon = dunce::canonicalize(&target_path)
                 .map_err(|e| IpcError::new("sandbox.dir_not_authorized", e.to_string()))?;
             let within = mounted.iter().any(|dir| {
-                std::fs::canonicalize(dir)
+                dunce::canonicalize(dir)
                     .ok()
                     .is_some_and(|c| target_canon.starts_with(&c))
             });

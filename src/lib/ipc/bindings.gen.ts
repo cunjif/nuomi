@@ -1118,6 +1118,30 @@ async clearConversations(workspaceId: string | null) : Promise<Result<number, Ip
     else return { status: "error", error: e  as any };
 }
 },
+async listArchivedConversations() : Promise<Result<ConversationDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_archived_conversations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async restoreArchivedConversation(sessionId: string) : Promise<Result<RestoreArchivedResult, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("restore_archived_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteArchivedConversation(sessionId: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_archived_conversation", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getAgentDetail(agentKind: string, agentId: string) : Promise<Result<AgentDetailDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_agent_detail", { agentKind, agentId }) };
@@ -1801,7 +1825,20 @@ export type ConversationDto = { id: string; title: string; kind: string; teamId:
  * 为 None（遗留会话回退到 cwd 语义）。仅 `get_conversation` 填充
  * 真实值，其余从 `Session` 构造的路径默认 None（前端 refetch 会修正）。
  */
-workDirectoryId?: string | null }
+workDirectoryId?: string | null; 
+/**
+ * 归档时间戳（migration 0047）；None = 未归档。归档会话从正常列表隐藏，
+ * 在「全部」过滤的归档入口中可见。
+ */
+archivedAt?: number | null; 
+/**
+ * 归档时原工作区 root_path 快照（恢复时按路径匹配现有工作区）。
+ */
+archivedWorkspacePath?: string | null; 
+/**
+ * 归档时原工作目录 abs_path 快照（恢复时按路径匹配现有挂载目录）。
+ */
+archivedDirectoryPath?: string | null }
 export type ConversationInput = { kind: string; title: string | null; agent: AgentRefInput | null; teamId: string | null; workspaceId: string; 
 /**
  * Optional work-directory binding (chat_rich_bind 6.4): the directory
@@ -2106,6 +2143,10 @@ export type ResolveAuthorizationInputDto = { authorizationId: string;
  */
 decision: string }
 export type ResolveOutcomeDto = { kind: string; rollbackHandle?: string | null; newTaskId?: string | null; detail?: string | null }
+/**
+ * Result of restoring an archived conversation (migration 0047).
+ */
+export type RestoreArchivedResult = { sessionId: string; workspaceId: string; workDirectoryId: string | null }
 export type RetrievalStrategyDto = "keyword" | "semantic" | "hybrid"
 /**
  * Self-binding of the role director (the model it uses to orchestrate).
