@@ -13,6 +13,7 @@ import type { ConversationKind } from "../../lib/conversation/kinds";
 import { NewConversationDialog } from "./new/NewConversationDialog";
 import { WorkspaceFilter } from "./WorkspaceFilter";
 import { WorkspaceBadge } from "./WorkspaceBadge";
+import { ArchivedConversationsDialog } from "./ArchivedConversationsDialog";
 
 function kindIcon(kind: string): string {
   switch (kind) {
@@ -48,6 +49,7 @@ export function ConversationsList(): ReactNode {
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const locale: RelativeTimeLocale = i18n.language === "en" ? "en" : "zh-CN";
 
   const conversationsQuery = useQuery({
@@ -60,6 +62,12 @@ export function ConversationsList(): ReactNode {
     queryKey: ["workspaces"],
     queryFn: () => ipc.listWorkspaces(),
     staleTime: 30_000,
+  });
+
+  const archivedCountQuery = useQuery({
+    queryKey: ["archivedConversations"],
+    queryFn: () => ipc.listArchivedConversations(),
+    staleTime: 10_000,
   });
 
   const workspaceLabelMap = new Map(
@@ -248,6 +256,19 @@ export function ConversationsList(): ReactNode {
         onRetry={() => void conversationsQuery.refetch()}
       >
         <ul className="flex flex-col gap-0.5">
+          {filter === "all" && !batchMode && (archivedCountQuery.data?.length ?? 0) > 0 && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setArchivedOpen(true)}
+                className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm text-ink-muted hover:bg-surface-overlay focus-visible:ring-2 focus-visible:ring-ink-accent"
+              >
+                <span aria-hidden="true" className="shrink-0 text-xs">📦</span>
+                <span className="min-w-0 flex-1 truncate">{t("conversation.archivedTitle")}</span>
+                <span className="shrink-0 text-xs tabular-nums">{archivedCountQuery.data?.length ?? 0}</span>
+              </button>
+            </li>
+          )}
           {conversations.map((conv) => (
             <li key={conv.id}>
               <div
@@ -341,6 +362,8 @@ export function ConversationsList(): ReactNode {
       >
         <p className="py-2 text-sm text-ink">{confirmMessage}</p>
       </Dialog>
+
+      <ArchivedConversationsDialog open={archivedOpen} onClose={() => setArchivedOpen(false)} />
     </section>
   );
 }
