@@ -361,6 +361,22 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0045_evolution_snapshots.sql"
         )),
     ),
+    (
+        46,
+        "0046_strip_verbatim_path_prefix",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0046_strip_verbatim_path_prefix.sql"
+        )),
+    ),
+    (
+        47,
+        "0047_session_archive",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0047_session_archive.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.
@@ -1625,5 +1641,42 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 1, "index {idx} must exist");
         }
+    }
+
+    // ---- migration 0046: strip Windows \\?\ and \\?\UNC\ verbatim prefixes
+
+    #[test]
+    fn migration_0046_strips_verbatim_path_prefixes() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Run up to 0045 so work_directories exists but 0046 has not run.
+        run_migrations_to(&conn, 45);
+        // Seed a workspace + three directories: verbatim drive, verbatim UNC, plain.
+        conn.execute(
+            "INSERT INTO workspaces (id, root_path, color_tag, created_at, is_active)
+             VALUES ('ws1', 'C:\\seed', 'paper-yellow', 0, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO work_directories (id, workspace_id, abs_path, display_name, mounted, added_at) VALUES
+               ('d1', 'ws1', '\\\\?\\C:\\Users\\james\\Codehub', 'Codehub', 1, 0),
+               ('d2', 'ws1', '\\\\?\\UNC\\server\\share\\dir', 'dir', 1, 0),
+               ('d3', 'ws1', 'C:\\Users\\james\\normal', 'normal', 1, 0);",
+        )
+        .unwrap();
+        // Apply 0046.
+        run_migrations_to(&conn, 46);
+        let drive: String = conn
+            .query_row("SELECT abs_path FROM work_directories WHERE id='d1'", [], |r| r.get(0))
+            .unwrap();
+        let unc: String = conn
+            .query_row("SELECT abs_path FROM work_directories WHERE id='d2'", [], |r| r.get(0))
+            .unwrap();
+        let plain: String = conn
+            .query_row("SELECT abs_path FROM work_directories WHERE id='d3'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(drive, "C:\\Users\\james\\Codehub");
+        assert_eq!(unc, "\\\\server\\share\\dir");
+        assert_eq!(plain, "C:\\Users\\james\\normal");
     }
 }
