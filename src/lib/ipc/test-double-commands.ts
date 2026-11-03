@@ -1918,10 +1918,15 @@ export function testDoubleCommands(): CommandSet {
         runtime: request.runtime,
         status: "succeeded",
         source: request.source,
+        submitter: "workbench",
         authorizedDirs: request.authorizedDirs,
         limits,
         stdout: "",
         stderr: "",
+        stdoutRef: null,
+        stderrRef: null,
+        stdoutTruncated: false,
+        stderrTruncated: false,
         artifactRef: null,
         artifactRetryable: false,
         exitInfo: "exit 0",
@@ -1955,10 +1960,15 @@ export function testDoubleCommands(): CommandSet {
         runtime: request.runtime,
         status: "succeeded",
         source: request.source,
+        submitter: "workbench",
         authorizedDirs: mounted.map((d) => d.absPath),
         limits,
         stdout: "",
         stderr: "",
+        stdoutRef: null,
+        stderrRef: null,
+        stdoutTruncated: false,
+        stderrTruncated: false,
         artifactRef: null,
         artifactRetryable: false,
         exitInfo: "exit 0",
@@ -1990,10 +2000,15 @@ export function testDoubleCommands(): CommandSet {
         runtime: request.runtime,
         status: "succeeded",
         source: request.isProject ? "" : `// ${request.targetPath}`,
+        submitter: "workbench",
         authorizedDirs: mounted.map((d) => d.absPath),
         limits,
         stdout: "",
         stderr: "",
+        stdoutRef: null,
+        stderrRef: null,
+        stdoutTruncated: false,
+        stderrTruncated: false,
         artifactRef: null,
         artifactRetryable: false,
         exitInfo: "exit 0",
@@ -2064,6 +2079,12 @@ export function testDoubleCommands(): CommandSet {
     },
     async getSandboxEndpointInfo() {
       return ok({ url: "http://127.0.0.1:8819", source: "default" as const });
+    },
+    async productList(_kind?: string | null, _workspaceId?: string | null, _sessionId?: string | null) {
+      return ok([]);
+    },
+    async productRead(_productId: number) {
+      return ok("");
     },
   };
   return cmds;

@@ -269,6 +269,9 @@ interface UiState {
   getActiveTempFile: () => TempFileEntry | null;
   /** Opens a file in the given workspace's editor bucket (ADR 0017). */
   openFile: (path: string, workspaceId: string) => void;
+  /** Opens a product (by id) as a read-only tab. Uses `product:<id>:<label>`
+   *  as the synthetic path so MonacoTab can detect it and call productRead. */
+  openProduct: (productId: number, label: string, workspaceId: string) => void;
   /** Closes a file in the given workspace's editor bucket. */
   closeFile: (path: string, workspaceId: string) => void;
   /** Sets the active file within the given workspace's bucket. */
@@ -508,8 +511,21 @@ export const useUiStore = create<UiState>((set, get) => ({
           ...s.editorByWorkspace,
           [workspaceId]: { ...bucket, openFiles, activeFile: path },
         },
-        // Opening a workspace file reveals the workbench area (nav rework:
-        // the editor is the workbench surface).
+        activeArea: "workbench",
+      };
+    }),
+  openProduct: (productId, label, workspaceId) =>
+    set((s) => {
+      const path = `product:${productId}:${label}`;
+      const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
+      const openFiles = bucket.openFiles.includes(path)
+        ? bucket.openFiles
+        : [...bucket.openFiles, path];
+      return {
+        editorByWorkspace: {
+          ...s.editorByWorkspace,
+          [workspaceId]: { ...bucket, openFiles, activeFile: path },
+        },
         activeArea: "workbench",
       };
     }),

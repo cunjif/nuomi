@@ -371,6 +371,7 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
             <LeafNode key={entry.name} parent="" name={entry.name} depth={0} />
           ),
         )}
+        <ProductsNode workspaceId={workspaceId} />
         {creating && creating.parent === "" && (
           <InlineNameInput
             depth={0}
@@ -512,6 +513,75 @@ function LeafNode({ parent, name, depth }: { parent: string; name: string; depth
     >
       {name}
     </button>
+  );
+}
+
+function ProductsNode({ workspaceId }: { workspaceId: string }): ReactNode {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const openProduct = useUiStore((s) => s.openProduct);
+  const productsQuery = useQuery({
+    queryKey: ["products", workspaceId],
+    queryFn: () => ipc.productList(null, workspaceId, null),
+    enabled: open,
+  });
+
+  const products = productsQuery.data ?? [];
+  const kindLabel = (kind: string): string => {
+    const map: Record<string, string> = {
+      tool_result: "Tool Result",
+      subagent_result: "Subagent",
+      search_result: "Search",
+      sandbox_output: "Sandbox Output",
+      sandbox_artifact: "Sandbox Artifact",
+      terminal_log: "Terminal Log",
+      evolution_snapshot: "Evolution",
+    };
+    return map[kind] ?? kind;
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="block w-full truncate rounded text-left text-sm text-ink-muted hover:bg-surface-overlay"
+        style={{ paddingLeft: 8 }}
+      >
+        <span aria-hidden="true" className="mr-1 inline-block w-3 text-ink-muted">
+          {open ? "▾" : "▸"}
+        </span>
+        {t("files.products", { defaultValue: "Products" })}
+      </button>
+      {open && (
+        <div>
+          {productsQuery.isLoading && (
+            <p className="text-xs text-ink-muted" style={{ paddingLeft: 24 }}>…</p>
+          )}
+          {productsQuery.isError && (
+            <p className="text-xs text-state-danger" style={{ paddingLeft: 24 }}>
+              {describeError(productsQuery.error)}
+            </p>
+          )}
+          {products.length === 0 && !productsQuery.isLoading && !productsQuery.isError && (
+            <p className="text-xs text-ink-muted" style={{ paddingLeft: 24 }}>—</p>
+          )}
+          {products.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => openProduct(p.id, `${kindLabel(p.kind)}/${p.key}`, workspaceId)}
+              className="block w-full truncate rounded text-left text-xs text-ink-muted hover:bg-surface-overlay"
+              style={{ paddingLeft: 24 }}
+              title={p.abs_path}
+            >
+              {kindLabel(p.kind)} / {p.key}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

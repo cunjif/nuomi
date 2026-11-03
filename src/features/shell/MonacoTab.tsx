@@ -73,6 +73,8 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   const crossRef = useUiStore((s) => s.editorByWorkspace[workspaceId]?.crossRefs[path] ?? null);
   const effectiveWsId = crossRef?.sourceWorkspaceId ?? workspaceId;
   const effectivePath = crossRef?.sourcePath ?? path;
+  const productMatch = path.startsWith("product:") ? path.match(/^product:(\d+):/) : null;
+  const productId = productMatch ? Number(productMatch[1]) : null;
   // Status-bar full path (ADR-0021): the file tab stores only a relative
   // path; prefix it with the hosting work directory's abs path so the
   // status row shows {work-directory-root}/{relative-path} instead of a
@@ -84,6 +86,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
     staleTime: 30_000,
   });
   const statusPath = useMemo(() => {
+    if (productId !== null) return path.split(":").slice(2).join(":") || path;
     const ws = (workspacesQuery.data ?? []).find((w) => w.id === effectiveWsId);
     const activeDir = (ws?.directories ?? []).find(
       (d) => d.isActive && d.available && d.mounted,
@@ -92,7 +95,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
     if (root === "") return effectivePath;
     const sep = root.includes("\\") ? "\\" : "/";
     return `${root}${sep}${effectivePath}`;
-  }, [workspacesQuery.data, effectiveWsId, effectivePath]);
+  }, [workspacesQuery.data, effectiveWsId, effectivePath, productId, path]);
   // Re-render on registry changes so preview/outline swaps are live.
   useEditorExtVersion();
   // HMR may wipe the registry module (wysiwygEditors emptied); re-activate
@@ -101,7 +104,10 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
   useEffect(() => {
     activateBuiltinEditorExtensions();
   }, []);
-  const fileQuery = useQuery({ queryKey: ["file", effectiveWsId, effectivePath], queryFn: () => ipc.readFile(effectivePath, effectiveWsId) });
+  const fileQuery = useQuery({
+    queryKey: productId !== null ? ["product", productId] : ["file", effectiveWsId, effectivePath],
+    queryFn: () => productId !== null ? ipc.productRead(productId) : ipc.readFile(effectivePath, effectiveWsId),
+  });
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? fileQuery.data ?? "";
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -360,6 +366,7 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           renderWhitespace: "selection",
           smoothScrolling: true,
           scrollBeyondLastLine: false,
+          readOnly: productId !== null,
         }}
       />
     </Suspense>

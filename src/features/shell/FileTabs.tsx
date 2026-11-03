@@ -42,7 +42,9 @@ export function FileTabs({ workspaceId }: { workspaceId: string }): ReactNode {
               title={dirty ? `${path} · ${t("tab.unsavedTitle")}` : path}
               className="flex max-w-40 items-center gap-1 truncate px-2 py-1 focus-visible:ring-2 focus-visible:ring-ink-accent"
             >
-              <span className="truncate">{path}</span>
+              <span className="truncate">
+                {path.startsWith("product:") ? path.split(":").slice(2).join(":") : path}
+              </span>
               {dirty && <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-state-warn" />}
             </button>
             {confirmingPath === path ? (

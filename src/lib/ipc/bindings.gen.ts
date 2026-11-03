@@ -1726,6 +1726,22 @@ async evolutionDryRunPreview(request: EvolutionDryRunPreviewRequest) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
+async productList(kind: string | null, workspaceId: string | null, sessionId: string | null) : Promise<Result<ProductRecordDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("product_list", { kind, workspaceId, sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async productRead(productId: number) : Promise<Result<string, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("product_read", { productId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Frontend heartbeat: called once after the React root mounts to signal that
  * the webview is alive. If this never arrives within the watchdog grace
@@ -2065,6 +2081,7 @@ export type PluginListResultDto = { plugins: PluginInfoDto[]; skipped: string[];
  * Declared permission surface of one plugin (panel display only, v1).
  */
 export type PluginPermissionsDto = { fsRead: string[]; fsWrite: string[]; network: string[]; shell: boolean }
+export type ProductRecordDto = { id: number; kind: string; producer: string; workspace_id: string | null; session_id: string | null; run_id: string | null; key: string; abs_path: string; size_bytes: number; sha256: string | null; created_at: number; expires_at: number | null }
 export type PromptOptimizeResultDto = { optimized: string }
 export type PromptVersionSummaryDto = { id: string; status: string }
 export type ProposalDto = { id: string; kind: string; source: string; plan: TeamPlanDraftDto; status: string; workspaceId: string; workspaceLabel: string | null; createdAt: number; resolvedAt: number | null }
@@ -2225,7 +2242,16 @@ isProject: boolean;
  */
 runtime: string; limits: SandboxLimitsDto | null }
 export type SandboxRuntimeDto = { id: string; name: string; isolation: string }
-export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; 
+export type SandboxTaskDto = { id: string; taskType: string; runtime: string; status: string; source: string; 
+/**
+ * Submitter / source identifier (ADR-0026 §1, spec 5.7.1-5).
+ */
+submitter: string | null; authorizedDirs: string[]; limits: SandboxLimitsDto; stdout: string; stderr: string; 
+/**
+ * Host-local path of the full stdout when `stdout_truncated` is true
+ * (ADR-0026 §4 / ADR-0022 §6).
+ */
+stdoutRef: string | null; stderrRef: string | null; stdoutTruncated: boolean; stderrTruncated: boolean; artifactRef: string | null; artifactRetryable: boolean; exitInfo: string | null; durationMs: number | null; 
 /**
  * Executor-reported terminal usage (spec 5.7.1-5); `None` when the
  * executor never reported.

@@ -40,6 +40,7 @@ import {
   type SandboxTaskDto,
   type EvolutionDryRunPreviewRequest,
   type EvolutionDryRunDto,
+  type ProductRecordDto,
   type TodoItemDto,
   type WorkspaceEntryDto,
   type CleanseRulesInput,
@@ -443,6 +444,9 @@ export const ipc = {
   sandboxRetryArtifact: (taskId: string) => unwrap(current.sandboxRetryArtifact(taskId)),
   sandboxListRuntimes: () => unwrap(current.sandboxListRuntimes()),
   evolutionDryRunPreview: (request: EvolutionDryRunPreviewRequest) => unwrap(current.evolutionDryRunPreview(request)),
+  productList: (kind?: string | null, workspaceId?: string | null, sessionId?: string | null) =>
+    unwrap(current.productList(kind ?? null, workspaceId ?? null, sessionId ?? null)),
+  productRead: (productId: number) => unwrap(current.productRead(productId)),
 };
 
 export type Ipc = typeof ipc;
@@ -482,6 +486,7 @@ export type {
   SandboxTaskDto,
   EvolutionDryRunPreviewRequest,
   EvolutionDryRunDto,
+  ProductRecordDto,
   TodoItemDto,
   WorkspaceEntryDto,
   RemoveWorkspaceResult,
