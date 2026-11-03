@@ -2021,3 +2021,23 @@ pub async fn evolution_dry_run_preview(
 ) -> Result<commands::EvolutionDryRunDto, IpcError> {
     commands::impl_evolution_dry_run_preview(&state, request).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn product_list(
+    state: tauri::State<'_, AppState>,
+    kind: Option<String>,
+    workspace_id: Option<String>,
+    session_id: Option<String>,
+) -> Result<Vec<commands::ProductRecordDto>, IpcError> {
+    commands::impl_product_list(&state, kind, workspace_id, session_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn product_read(
+    state: tauri::State<'_, AppState>,
+    product_id: i64,
+) -> Result<String, IpcError> {
+    commands::impl_product_read(&state, product_id).await
+}

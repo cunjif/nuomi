@@ -8393,6 +8393,7 @@ pub async fn impl_cross_workspace_search(
         let outcome = svc
             .search_all_open(&query, match_content)
             .map_err(|e| IpcError::new("internal", format!("{e}")))?;
+        svc.persist_search_result(&outcome, &query);
         Ok(CrossSearchOutcomeDto {
             groups: outcome
                 .groups
@@ -11020,10 +11021,18 @@ pub struct SandboxTaskDto {
     pub runtime: String,
     pub status: String,
     pub source: String,
+    /// Submitter / source identifier (ADR-0026 §1, spec 5.7.1-5).
+    pub submitter: Option<String>,
     pub authorized_dirs: Vec<String>,
     pub limits: SandboxLimitsDto,
     pub stdout: String,
     pub stderr: String,
+    /// Host-local path of the full stdout when `stdout_truncated` is true
+    /// (ADR-0026 §4 / ADR-0022 §6).
+    pub stdout_ref: Option<String>,
+    pub stderr_ref: Option<String>,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     pub artifact_ref: Option<String>,
     pub artifact_retryable: bool,
     pub exit_info: Option<String>,
@@ -11043,10 +11052,15 @@ impl From<nuomi_core::store::repos::sandbox_tasks::SandboxTaskRecord> for Sandbo
             runtime: r.runtime,
             status: r.status.as_str().to_string(),
             source: r.source,
+            submitter: r.submitter,
             authorized_dirs: r.authorized_dirs,
             limits: r.limits.into(),
             stdout: r.stdout,
             stderr: r.stderr,
+            stdout_ref: r.stdout_ref,
+            stderr_ref: r.stderr_ref,
+            stdout_truncated: r.stdout_truncated,
+            stderr_truncated: r.stderr_truncated,
             artifact_ref: r.artifact_ref,
             artifact_retryable: r.artifact_retryable,
             exit_info: r.exit_info,
@@ -11104,6 +11118,7 @@ pub async fn impl_sandbox_run_code(
     let limits = request.limits.map(Into::into).unwrap_or_default();
     let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
         task_type: nuomi_core::sandbox::types::SandboxTaskType::RunCode,
+        submitter: "workbench".to_string(),
         runtime: request.runtime,
         source: request.source,
         authorized_dirs: request.authorized_dirs,
@@ -11154,6 +11169,7 @@ pub async fn impl_sandbox_build_app(
     let limits = resolve_build_limits(request.limits);
     let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
         task_type: nuomi_core::sandbox::types::SandboxTaskType::BuildApp,
+        submitter: "workbench".to_string(),
         runtime: request.runtime,
         source: request.source,
         authorized_dirs,
@@ -11240,6 +11256,7 @@ pub async fn impl_sandbox_run_workbench_target(
     };
     let spec = nuomi_core::sandbox::types::SandboxTaskSpec {
         task_type,
+        submitter: "workbench".to_string(),
         runtime: request.runtime,
         source,
         authorized_dirs,
@@ -11456,11 +11473,6 @@ pub async fn impl_terminal_create(
     state: &AppState,
     cwd: Option<String>,
 ) -> Result<TerminalCreateResult, IpcError> {
-    let mgr = state.terminal_manager.read().unwrap();
-    let mgr = mgr
-        .as_ref()
-        .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
-
     let (resolved_path, cwd_source) = match cwd.as_deref() {
         Some(raw) if !raw.trim().is_empty() => {
             let path = std::path::Path::new(raw);
@@ -11483,7 +11495,74 @@ pub async fn impl_terminal_create(
         }
     };
 
-    let id = mgr.create(Some(resolved_path.as_path()))?;
+    let db_path = state.db_path.clone();
+    let ws_id = focused_workspace_id(&db_path);
+    let log_path = ws_id.as_ref().and_then(|_ws| {
+        let db = Db::open(&db_path).ok()?;
+        migrations::run(&db.0).ok()?;
+        let ws_entry = repos::workspaces::find_active(&db.0).ok().flatten()?;
+        let root = std::path::PathBuf::from(&ws_entry.root_path);
+        let producer = nuomi_core::services::product_dir::Producer::new(
+            nuomi_core::services::product_dir::ProducerModule::Terminal,
+            "pending",
+        );
+        Some(nuomi_core::services::product_dir::product_path(
+            &root,
+            nuomi_core::services::product_dir::ProductKind::TerminalLog,
+            &producer,
+            "output.log",
+        ))
+    });
+
+    let id = {
+        let guard = state.terminal_manager.read().unwrap();
+        let mgr = guard
+            .as_ref()
+            .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+        mgr.create(
+            Some(resolved_path.as_path()),
+            ws_id.clone(),
+            log_path.clone(),
+        )?
+    };
+
+    if let (Some(path), Some(ws)) = (log_path, ws_id) {
+        let db_path = state.db_path.clone();
+        let term_id = id.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+            let db = Db::open(&db_path)?;
+            migrations::run(&db.0)?;
+            let producer = nuomi_core::services::product_dir::Producer::new(
+                nuomi_core::services::product_dir::ProducerModule::Terminal,
+                &term_id,
+            );
+            let now = now_ms();
+            let ttl = nuomi_core::services::product_dir::default_ttl_ms(
+                nuomi_core::services::product_dir::ProductKind::TerminalLog,
+            );
+            repos::product_registry::insert(
+                &db.0,
+                &repos::product_registry::InsertParams {
+                    kind: nuomi_core::services::product_dir::ProductKind::TerminalLog,
+                    producer,
+                    workspace_id: Some(ws),
+                    session_id: None,
+                    run_id: None,
+                    key: "output.log".into(),
+                    abs_path: path.to_string_lossy().to_string(),
+                    size_bytes: 0,
+                    sha256: None,
+                    created_at: now,
+                    expires_at: ttl.map(|t| now + t),
+                    metadata: None,
+                },
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(join_err)??;
+    }
+
     Ok(TerminalCreateResult {
         id,
         cwd: resolved_path.to_string_lossy().to_string(),
@@ -11579,6 +11658,84 @@ pub async fn impl_evolution_dry_run_preview(
         summary: "dry-run preview skeleton — diff generation lands in Slice 4 (ADR-0025)"
             .to_string(),
     })
+}
+
+// ---------- product registry (Slice β: cross-module product sharing) ----------
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct ProductRecordDto {
+    pub id: i64,
+    pub kind: String,
+    pub producer: String,
+    pub workspace_id: Option<String>,
+    pub session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub key: String,
+    pub abs_path: String,
+    pub size_bytes: i64,
+    pub sha256: Option<String>,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+impl From<repos::product_registry::ProductRecord> for ProductRecordDto {
+    fn from(r: repos::product_registry::ProductRecord) -> Self {
+        Self {
+            id: r.id,
+            kind: r.kind.as_str().to_string(),
+            producer: r.producer.as_string(),
+            workspace_id: r.workspace_id,
+            session_id: r.session_id,
+            run_id: r.run_id,
+            key: r.key,
+            abs_path: r.abs_path,
+            size_bytes: r.size_bytes,
+            sha256: r.sha256,
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+        }
+    }
+}
+
+pub async fn impl_product_list(
+    state: &AppState,
+    kind: Option<String>,
+    workspace_id: Option<String>,
+    session_id: Option<String>,
+) -> Result<Vec<ProductRecordDto>, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<ProductRecordDto>, IpcError> {
+        let db = Db::open(&db_path)?;
+        migrations::run(&db.0)?;
+        let filter = repos::product_registry::ProductFilter {
+            kind: kind.as_deref().and_then(nuomi_core::services::product_dir::ProductKind::parse),
+            producer_module: None,
+            workspace_id,
+            session_id,
+            run_id: None,
+        };
+        let records = repos::product_registry::list(&db.0, &filter)?;
+        Ok(records.into_iter().map(Into::into).collect())
+    })
+    .await
+    .map_err(join_err)?
+}
+
+pub async fn impl_product_read(
+    state: &AppState,
+    product_id: i64,
+) -> Result<String, IpcError> {
+    let db_path = state.db_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, IpcError> {
+        let db = Db::open(&db_path)?;
+        migrations::run(&db.0)?;
+        let record = repos::product_registry::get(&db.0, product_id)?
+            .ok_or_else(|| IpcError::new("store.not_found", format!("product#{product_id} not found")))?;
+        std::fs::read_to_string(&record.abs_path)
+            .map_err(|e| IpcError::new("product.io", format!("failed to read product file: {e}")))
+    })
+    .await
+    .map_err(join_err)?
 }
 
 #[cfg(test)]

@@ -251,6 +251,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::terminal_resize,
         tauri_cmds::terminal_kill,
         tauri_cmds::evolution_dry_run_preview,
+        tauri_cmds::product_list,
+        tauri_cmds::product_read,
         tauri_cmds::__nuomi_heartbeat,
     ])
 }
