@@ -206,6 +206,11 @@ pub struct SandboxRuntimeInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxTaskSpec {
     pub task_type: SandboxTaskType,
+    /// Submitter / source identifier (ADR-0026 §1, spec 5.7.1-5):
+    /// `"workbench"` / `"selfeval"` / `"repl"` / future user id. Stored
+    /// on the `sandbox_tasks.submitter` column and carried in every
+    /// `sandbox.task_state_changed` audit event payload.
+    pub submitter: String,
     /// Executor runtime id (must appear in the plugin's runtime list).
     pub runtime: String,
     /// Code snippet, target file path (inside an authorized dir), or build
@@ -243,6 +248,17 @@ pub struct SandboxTaskResult {
     pub status: SandboxTaskStatus,
     pub stdout: String,
     pub stderr: String,
+    /// Host-local path of the full stdout when `stdout_truncated` is true
+    /// (ADR-0026 §4 / ADR-0022 §6: large outputs live under
+    /// `.nuomi/sandbox/<task_id>/stdout.log`; the DB row keeps the
+    /// inline prefix plus this ref). `None` when the inline `stdout` is
+    /// the complete output.
+    pub stdout_ref: Option<String>,
+    pub stderr_ref: Option<String>,
+    /// Whether the inline `stdout` was capped at `INLINE_OUTPUT_CAP` and
+    /// the full text was spilled to `stdout_ref`.
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     /// Exit code / signal / abort reason (exit_info column).
     pub exit_info: Option<String>,
     pub duration_ms: Option<u64>,
@@ -307,6 +323,51 @@ impl fmt::Display for SandboxError {
 }
 
 impl std::error::Error for SandboxError {}
+
+// ---- secret payload sniffing (ADR-0026 §2, spec 5.7.1-7) ---------------
+
+/// Inline output cap (ADR-0022 §6 / ADR-0026 §4): stdout/stderr up to this
+/// many bytes stay in the `sandbox_tasks` row; beyond it the full text is
+/// spilled to `.nuomi/sandbox/<task_id>/{stdout,stderr}.log` and the row
+/// keeps the prefix plus `stdout_ref` / `stderr_ref`.
+pub const INLINE_OUTPUT_CAP: usize = 64 * 1024;
+
+/// Compiled secret-detection patterns (ADR-0026 §2). Each entry is a
+/// `(label, regex)` pair; `check_secret_payload` returns the first hit.
+///
+/// The patterns are intentionally conservative to minimise false positives
+/// on legitimate code while catching common accidental secret leakage:
+/// - `keyring://` and `os.keyring` / `keyring.get` — explicit keyring access
+/// - `Bearer <20+ word chars>` — inlined API bearer token
+/// - `API_KEY=` / `SECRET=` / `TOKEN=` / `PASSWORD=` (case-insensitive) —
+///   secret env-var assignment
+/// - `AKIA[0-9A-Z]{16}` — AWS access key id format
+/// - `-----BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY-----` — PEM private key
+static SECRET_PATTERNS: &[(&str, &str)] = &[
+    ("keyring reference", r"keyring://"),
+    ("keyring api access", r"(?i)os\.keyring|keyring\.get"),
+    ("bearer token", r"Bearer\s+[A-Za-z0-9\-_]{20,}"),
+    ("secret env assignment", r"(?i)(API_KEY|SECRET|TOKEN|PASSWORD)\s*="),
+    ("aws access key id", r"AKIA[0-9A-Z]{16}"),
+    ("pem private key", r"-----BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY-----"),
+];
+
+/// Scans `text` for known secret-leak patterns (ADR-0026 §2). Returns the
+/// label of the first hit. Used by `submit_check` to reject submissions
+/// whose `source` or `authorized_dirs` carry secrets before they reach the
+/// executor — a kernel-side backstop that does not rely on the executor's
+/// isolation boundary.
+pub fn check_secret_payload(text: &str) -> Option<&'static str> {
+    for (label, pattern) in SECRET_PATTERNS {
+        if regex::Regex::new(pattern)
+            .expect("SECRET_PATTERNS must compile")
+            .is_match(text)
+        {
+            return Some(label);
+        }
+    }
+    None
+}
 
 // ---- JSON column round-trips (0037 interop, task 7.2 unit tests) --------
 
@@ -453,5 +514,67 @@ mod tests {
             SandboxError::Internal("x".into()).code(),
             "sandbox.internal"
         );
+    }
+
+    #[test]
+    fn secret_sniffer_hits_each_known_pattern() {
+        // keyring reference
+        assert_eq!(
+            check_secret_payload("import os; os.environ['K'] = 'keyring://system/nuomi'"),
+            Some("keyring reference")
+        );
+        // keyring api access
+        assert_eq!(
+            check_secret_payload("val = os.keyring.get_password('nuomi', 'api')"),
+            Some("keyring api access")
+        );
+        // bearer token (20+ word chars after "Bearer ")
+        assert_eq!(
+            check_secret_payload("Authorization: Bearer abcdefghijklmnopqrstuv"),
+            Some("bearer token")
+        );
+        // secret env assignment (case-insensitive)
+        assert_eq!(
+            check_secret_payload("api_key=sk-live-1234567890"),
+            Some("secret env assignment")
+        );
+        assert_eq!(
+            check_secret_payload("TOKEN=eyJhbGciOiJIUzI1NiJ9"),
+            Some("secret env assignment")
+        );
+        // aws access key id
+        assert_eq!(
+            check_secret_payload("aws_access_key_id = AKIAIOSFODNN7EXAMPLE"),
+            Some("aws access key id")
+        );
+        // pem private key
+        assert_eq!(
+            check_secret_payload("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK"),
+            Some("pem private key")
+        );
+    }
+
+    #[test]
+    fn secret_sniffer_passes_legitimate_code_and_build_targets() {
+        // Plain Python snippet.
+        assert_eq!(check_secret_payload("print('hello world')"), None);
+        // Build target description.
+        assert_eq!(check_secret_payload("cargo build --release -p nuomi-cli"), None);
+        // File path inside an authorized dir.
+        assert_eq!(
+            check_secret_payload("C:\\proj\\nuomi\\src\\main.rs"),
+            None
+        );
+        // Short bearer-like string below the 20-char threshold (false-positive guard).
+        assert_eq!(check_secret_payload("Bearer short"), None);
+        // Variable name containing "key" but not the assignment pattern.
+        assert_eq!(check_secret_payload("let keymap = Keymap::default();"), None);
+        // "API_KEY" as a read reference, not an assignment.
+        assert_eq!(check_secret_payload("std::env::var(\"API_KEY\")"), None);
+    }
+
+    #[test]
+    fn inline_output_cap_is_64kb() {
+        assert_eq!(INLINE_OUTPUT_CAP, 65_536);
     }
 }

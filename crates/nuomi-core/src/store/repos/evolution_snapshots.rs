@@ -145,6 +145,70 @@ pub fn insert(conn: &Connection, snap: &EvolutionSnapshot) -> Result<(), StoreEr
     Ok(())
 }
 
+/// Insert a snapshot and register it in the unified product directory.
+/// Writes the snapshot JSON to `<root>/.nuomi/products/evolution_snapshot/evolution/<id>.json`
+/// and indexes it in `product_registry` so other modules can discover it.
+pub fn insert_with_product(
+    conn: &Connection,
+    snap: &EvolutionSnapshot,
+    workspace_root: &std::path::Path,
+) -> Result<(), StoreError> {
+    insert(conn, snap)?;
+
+    use crate::services::product_dir::{
+        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+    };
+
+    let producer = Producer::new(ProducerModule::Evolution, &snap.id);
+    let path = product_path(
+        workspace_root,
+        ProductKind::EvolutionSnapshot,
+        &producer,
+        &format!("{}.json", snap.id),
+    );
+
+    let payload = serde_json::to_string(snap).unwrap_or_default();
+
+    if let Err(e) = ensure_parent(&path) {
+        tracing::warn!(error = %e, "evolution_snapshots: failed to create product parent");
+        return Ok(());
+    }
+    if let Err(e) = std::fs::write(&path, &payload) {
+        tracing::warn!(error = %e, "evolution_snapshots: failed to write product file");
+        return Ok(());
+    }
+
+    let size = payload.len() as i64;
+    let ttl = default_ttl_ms(ProductKind::EvolutionSnapshot);
+
+    if let Err(e) = crate::store::repos::product_registry::insert(
+        conn,
+        &crate::store::repos::product_registry::InsertParams {
+            kind: ProductKind::EvolutionSnapshot,
+            producer,
+            workspace_id: None,
+            session_id: None,
+            run_id: None,
+            key: snap.id.clone(),
+            abs_path: path.to_string_lossy().to_string(),
+            size_bytes: size,
+            sha256: None,
+            created_at: snap.created_at,
+            expires_at: ttl.map(|t| snap.created_at + t),
+            metadata: Some(serde_json::json!({
+                "tier": snap.tier.as_str(),
+                "trigger": snap.trigger_source.as_str(),
+                "from_version": snap.from_version,
+                "to_version": snap.to_version,
+            })),
+        },
+    ) {
+        tracing::warn!(error = %e, "evolution_snapshots: product_registry insert failed");
+    }
+
+    Ok(())
+}
+
 /// Get a snapshot by ID.
 pub fn get(conn: &Connection, id: &str) -> Result<EvolutionSnapshot, StoreError> {
     conn.query_row(

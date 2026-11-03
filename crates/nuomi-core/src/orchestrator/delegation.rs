@@ -136,6 +136,7 @@ struct Inner {
     executor: Arc<dyn DelegateExecutor>,
     max_depth: u32,
     tasks: Mutex<HashMap<TaskId, TaskEntry>>,
+    db_path: Option<std::path::PathBuf>,
 }
 
 /// Broker for background delegation tasks with depth-limited nesting,
@@ -152,6 +153,18 @@ impl DelegationBroker {
                 executor,
                 max_depth,
                 tasks: Mutex::new(HashMap::new()),
+                db_path: None,
+            }),
+        }
+    }
+
+    pub fn with_db_path(executor: Arc<dyn DelegateExecutor>, max_depth: u32, db_path: std::path::PathBuf) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                executor,
+                max_depth,
+                tasks: Mutex::new(HashMap::new()),
+                db_path: Some(db_path),
             }),
         }
     }
@@ -269,7 +282,7 @@ impl DelegationBroker {
             return;
         };
         if entry.status.borrow().is_terminal() {
-            return; // late completion after cancel is discarded
+            return;
         }
         let status = if outcome.is_ok() {
             TaskStatus::Succeeded
@@ -277,6 +290,11 @@ impl DelegationBroker {
             TaskStatus::Failed
         };
         let _ = entry.status.send(status);
+        if let Some(db_path) = &inner.db_path {
+            if let Ok(outcome_ref) = &outcome {
+                persist_subagent_result(db_path, task_id, outcome_ref);
+            }
+        }
         entry.result = Some(outcome);
     }
 
@@ -367,6 +385,82 @@ async fn wait_for_cancelled(rx: &mut watch::Receiver<TaskStatus>) {
             // Broker dropped; nothing will ever cancel this task again.
             return;
         }
+    }
+}
+
+fn persist_subagent_result(db_path: &std::path::Path, task_id: &str, outcome: &DelegationOutcome) {
+    use crate::services::product_dir::{
+        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+    };
+    use crate::store::{migrations, Db};
+    use crate::store::repos;
+
+    let db = match Db::open(&db_path.to_string_lossy()) {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!(error = %e, "persist_subagent_result: db open failed");
+            return;
+        }
+    };
+    if let Err(e) = migrations::run(&db.0) {
+        tracing::warn!(error = %e, "persist_subagent_result: migrations failed");
+        return;
+    }
+    let ws = match repos::workspaces::find_active(&db.0) {
+        Ok(Some(ws)) => ws,
+        _ => {
+            tracing::warn!("persist_subagent_result: no active workspace");
+            return;
+        }
+    };
+    let root = std::path::PathBuf::from(&ws.root_path);
+    let producer = Producer::new(ProducerModule::Steward, task_id);
+    let path = product_path(
+        &root,
+        ProductKind::SubagentResult,
+        &producer,
+        &format!("{task_id}.json"),
+    );
+
+    let payload = match serde_json::to_string(outcome) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "persist_subagent_result: serialize failed");
+            return;
+        }
+    };
+
+    if let Err(e) = ensure_parent(&path) {
+        tracing::warn!(error = %e, "persist_subagent_result: create parent failed");
+        return;
+    }
+    if let Err(e) = std::fs::write(&path, &payload) {
+        tracing::warn!(error = %e, "persist_subagent_result: write failed");
+        return;
+    }
+
+    let now = crate::domain::now_ms();
+    let ttl = default_ttl_ms(ProductKind::SubagentResult);
+    let size = payload.len() as i64;
+
+    if let Err(e) = repos::product_registry::insert(
+        &db.0,
+        &repos::product_registry::InsertParams {
+            kind: ProductKind::SubagentResult,
+            producer,
+            workspace_id: Some(ws.id),
+            session_id: None,
+            run_id: None,
+            key: task_id.to_string(),
+            abs_path: path.to_string_lossy().to_string(),
+            size_bytes: size,
+            sha256: None,
+            created_at: now,
+            expires_at: ttl.map(|t| now + t),
+            metadata: Some(serde_json::json!({ "summary": outcome.summary })),
+        },
+    ) {
+        tracing::warn!(error = %e, "persist_subagent_result: registry insert failed");
     }
 }
 

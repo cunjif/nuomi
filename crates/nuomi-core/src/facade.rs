@@ -936,17 +936,19 @@ impl NuomiKernel {
                         )?);
                     }
                     MessageRole::Tool => {
+                        let call_id = m.tool_call_id.clone().unwrap_or_default();
                         appended.push(repos::events::append(
                             conn,
                             "session",
                             &sid,
                             "tool_result",
                             &json!({
-                                "call_id": m.tool_call_id.clone().unwrap_or_default(),
+                                "call_id": call_id,
                                 "content": m.content,
                             }),
                             now,
                         )?);
+                        persist_tool_result_product(conn, &sid, &call_id, &m.content, now);
                     }
                     MessageRole::System => {}
                 }
@@ -974,6 +976,65 @@ impl NuomiKernel {
         })
         .await
         .map_err(join_err)?
+    }
+}
+
+/// Persists a tool_result message content to the unified product directory
+/// and registers it in `product_registry` so other modules (workbench,
+/// terminal, steward, evolution) can discover and consume it.
+///
+/// Best-effort: failures are logged and never block transcript persistence.
+fn persist_tool_result_product(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    call_id: &str,
+    content: &str,
+    now_ms: i64,
+) {
+    use crate::services::product_dir::{
+        default_ttl_ms, ensure_parent, file_sha256, product_path, ProductKind, Producer,
+        ProducerModule,
+    };
+
+    let ws = match repos::workspaces::find_active(conn) {
+        Ok(Some(ws)) => ws,
+        _ => return,
+    };
+    let root = std::path::PathBuf::from(&ws.root_path);
+    let producer = Producer::new(ProducerModule::Loop, session_id);
+    let path = product_path(&root, ProductKind::ToolResult, &producer, call_id);
+
+    if let Err(e) = ensure_parent(&path) {
+        tracing::warn!(error = %e, "product_dir: failed to create parent for tool_result");
+        return;
+    }
+    if let Err(e) = std::fs::write(&path, content) {
+        tracing::warn!(error = %e, "product_dir: failed to write tool_result file");
+        return;
+    }
+
+    let size = content.len() as i64;
+    let sha = file_sha256(&path).ok();
+    let ttl = default_ttl_ms(ProductKind::ToolResult);
+
+    if let Err(e) = repos::product_registry::insert(
+        conn,
+        &repos::product_registry::InsertParams {
+            kind: ProductKind::ToolResult,
+            producer,
+            workspace_id: Some(ws.id),
+            session_id: Some(session_id.to_string()),
+            run_id: None,
+            key: call_id.to_string(),
+            abs_path: path.to_string_lossy().to_string(),
+            size_bytes: size,
+            sha256: sha,
+            created_at: now_ms,
+            expires_at: ttl.map(|t| now_ms + t),
+            metadata: None,
+        },
+    ) {
+        tracing::warn!(error = %e, "product_registry: failed to insert tool_result");
     }
 }
 

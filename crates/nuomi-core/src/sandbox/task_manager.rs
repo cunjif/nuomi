@@ -26,7 +26,8 @@ use crate::harness::{Event, EventBus};
 use crate::sandbox::ephemeral::EphemeralManager;
 use crate::sandbox::executor::{SandboxExecutor, SandboxOutputChunk, SandboxTaskSnapshot};
 use crate::sandbox::types::{
-    SandboxError, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskSpec, SandboxTaskStatus,
+    INLINE_OUTPUT_CAP, SandboxError, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskSpec,
+    SandboxTaskStatus,
 };
 use crate::store::repos::sandbox_tasks::{self, SandboxTaskRecord};
 use crate::store::repos::{events, work_directories, workspaces};
@@ -174,6 +175,22 @@ impl SandboxTaskManager {
             ));
         }
         spec.limits.validate()?;
+        // ADR-0026 §2 (spec 5.7.1-7): kernel-side secret backstop. Scan
+        // the submission payload for known secret-leak patterns before
+        // anything reaches the executor — a backstop that does not rely
+        // on the executor's isolation boundary.
+        if let Some(label) = crate::sandbox::types::check_secret_payload(&spec.source) {
+            return Err(SandboxError::LimitInvalid(format!(
+                "submission source matches secret pattern: {label}"
+            )));
+        }
+        for dir in &spec.authorized_dirs {
+            if let Some(label) = crate::sandbox::types::check_secret_payload(dir) {
+                return Err(SandboxError::LimitInvalid(format!(
+                    "authorized dir matches secret pattern: {label}: {dir}"
+                )));
+            }
+        }
         let workspace = workspaces::find_active(conn)
             .map_err(store_err)?
             .ok_or_else(|| {
@@ -251,10 +268,15 @@ impl SandboxTaskManager {
             runtime: spec.runtime.clone(),
             status: SandboxTaskStatus::Queued,
             source: spec.source.clone(),
+            submitter: Some(spec.submitter.clone()),
             authorized_dirs: spec.authorized_dirs.clone(),
             limits: spec.limits.clone(),
             stdout: String::new(),
             stderr: String::new(),
+            stdout_ref: None,
+            stderr_ref: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             artifact_ref: None,
             artifact_retryable: false,
             exit_info: None,
@@ -274,6 +296,7 @@ impl SandboxTaskManager {
                 usage: None,
                 exit_info: None,
                 duration_ms: None,
+                submitter: record.submitter.as_deref(),
             },
         )?;
 
@@ -305,6 +328,7 @@ impl SandboxTaskManager {
                     usage: None,
                     exit_info: Some(&exit_info),
                     duration_ms: None,
+                    submitter: record.submitter.as_deref(),
                 },
             )?;
             sandbox_tasks::mark_terminal(
@@ -393,6 +417,7 @@ impl SandboxTaskManager {
                             usage: snapshot.usage.as_ref(),
                             exit_info: None,
                             duration_ms: None,
+                            submitter: record.submitter.as_deref(),
                         },
                     )?;
                     record.status = SandboxTaskStatus::Running;
@@ -414,6 +439,7 @@ impl SandboxTaskManager {
                         usage: snapshot.usage.as_ref(),
                         exit_info: snapshot.exit_info.as_deref(),
                         duration_ms: snapshot.duration_ms,
+                        submitter: record.submitter.as_deref(),
                     },
                 )?;
                 // Return the persisted truth (finished_at et al.), not a
@@ -541,7 +567,12 @@ impl SandboxTaskManager {
     }
 
     /// Persists non-empty deltas onto the row (keeping produced output on
-    /// abort paths — spec: 超时/资源超限中止并保留已产生输出).
+    /// abort paths — spec: 超时/资源超限中止并保留已产生输出), then spills
+    /// to the artifact directory when inline output exceeds
+    /// `INLINE_OUTPUT_CAP` (ADR-0026 §4 / ADR-0022 §6). Once a stream has
+    /// been spilled, subsequent deltas for that stream are dropped — the
+    /// full text already lives in the artifact dir and the inline prefix
+    /// is a fixed-size summary.
     fn apply_outputs(
         &self,
         conn: &Connection,
@@ -549,6 +580,16 @@ impl SandboxTaskManager {
         stdout_delta: &str,
         stderr_delta: &str,
     ) -> Result<(), SandboxError> {
+        let stdout_delta = if record.stdout_truncated {
+            ""
+        } else {
+            stdout_delta
+        };
+        let stderr_delta = if record.stderr_truncated {
+            ""
+        } else {
+            stderr_delta
+        };
         if stdout_delta.is_empty() && stderr_delta.is_empty() {
             return Ok(());
         }
@@ -556,6 +597,113 @@ impl SandboxTaskManager {
             .map_err(store_err)?;
         record.stdout.push_str(stdout_delta);
         record.stderr.push_str(stderr_delta);
+        self.spill_if_over_cap(conn, record)?;
+        Ok(())
+    }
+
+    /// Spills inline stdout/stderr to `{temp_dir}/nuomi-sandbox/<task_id>/`
+    /// when either stream exceeds `INLINE_OUTPUT_CAP` (ADR-0026 §4). The
+    /// full text is written to `stdout.log` / `stderr.log`, the row is
+    /// updated with the truncated prefix + ref + truncation flag in one
+    /// `set_spilled_output` call. Best-effort: a write failure keeps the
+    /// inline full text (no truncation, no ref) and logs a warning — the
+    /// task lifecycle is never broken by a spill failure. Once spilled,
+    /// subsequent deltas append to the truncated prefix and the flag
+    /// stays set (the full text is already on disk).
+    fn spill_if_over_cap(
+        &self,
+        conn: &Connection,
+        record: &mut SandboxTaskRecord,
+    ) -> Result<(), SandboxError> {
+        let stdout_over = record.stdout.len() > INLINE_OUTPUT_CAP && !record.stdout_truncated;
+        let stderr_over = record.stderr.len() > INLINE_OUTPUT_CAP && !record.stderr_truncated;
+        if !stdout_over && !stderr_over {
+            return Ok(());
+        }
+        let dir = std::env::temp_dir().join("nuomi-sandbox").join(&record.id);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(
+                task_id = %record.id,
+                error = %e,
+                "sandbox output spill: create_dir failed; keeping inline"
+            );
+            return Ok(());
+        }
+
+        let ws_root = workspace_root(conn);
+        let mut stdout_ref = record.stdout_ref.clone();
+        let mut stderr_ref = record.stderr_ref.clone();
+        let mut stdout_truncated = record.stdout_truncated;
+        let mut stderr_truncated = record.stderr_truncated;
+        if stdout_over {
+            let path = dir.join("stdout.log");
+            match std::fs::write(&path, record.stdout.as_bytes()) {
+                Ok(()) => {
+                    stdout_ref = Some(path.to_string_lossy().into_owned());
+                    record.stdout.truncate(INLINE_OUTPUT_CAP);
+                    stdout_truncated = true;
+                    if let Some(root) = &ws_root {
+                        register_sandbox_output(
+                            conn,
+                            root,
+                            &record.id,
+                            "stdout",
+                            &path,
+                            record.stdout.len() as i64,
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        task_id = %record.id,
+                        error = %e,
+                        "sandbox stdout spill write failed; keeping inline"
+                    );
+                }
+            }
+        }
+        if stderr_over {
+            let path = dir.join("stderr.log");
+            match std::fs::write(&path, record.stderr.as_bytes()) {
+                Ok(()) => {
+                    stderr_ref = Some(path.to_string_lossy().into_owned());
+                    record.stderr.truncate(INLINE_OUTPUT_CAP);
+                    stderr_truncated = true;
+                    if let Some(root) = &ws_root {
+                        register_sandbox_output(
+                            conn,
+                            root,
+                            &record.id,
+                            "stderr",
+                            &path,
+                            record.stderr.len() as i64,
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        task_id = %record.id,
+                        error = %e,
+                        "sandbox stderr spill write failed; keeping inline"
+                    );
+                }
+            }
+        }
+        sandbox_tasks::set_spilled_output(
+            conn,
+            &record.id,
+            &record.stdout,
+            &record.stderr,
+            stdout_ref.as_deref(),
+            stderr_ref.as_deref(),
+            stdout_truncated,
+            stderr_truncated,
+        )
+        .map_err(store_err)?;
+        record.stdout_ref = stdout_ref;
+        record.stderr_ref = stderr_ref;
+        record.stdout_truncated = stdout_truncated;
+        record.stderr_truncated = stderr_truncated;
         Ok(())
     }
 
@@ -639,8 +787,13 @@ impl SandboxTaskManager {
                     .or_else(|| Some(artifact.name.clone()));
                 sandbox_tasks::set_artifact(conn, &record.id, reference.as_deref(), false)
                     .map_err(store_err)?;
-                record.artifact_ref = reference;
+                record.artifact_ref = reference.clone();
                 record.artifact_retryable = false;
+                if let Some(root) = workspace_root(conn) {
+                    if let Some(ref_path) = &reference {
+                        register_sandbox_artifact(conn, &root, &record.id, ref_path);
+                    }
+                }
             }
             Err(err) => {
                 tracing::warn!(
@@ -663,7 +816,7 @@ impl SandboxTaskManager {
         &self,
         conn: &Connection,
         mut record: SandboxTaskRecord,
-        _snapshot: &SandboxTaskSnapshot,
+        snapshot: &SandboxTaskSnapshot,
     ) -> Result<SandboxTaskRecord, SandboxError> {
         let (stdout_delta, stderr_delta) = match self.fetch_deltas(&record).await {
             Ok(deltas) => deltas,
@@ -686,9 +839,13 @@ impl SandboxTaskManager {
                 status: SandboxTaskStatus::TimedOut,
                 stdout_cursor: record.stdout.len() as u64,
                 stderr_cursor: record.stderr.len() as u64,
-                usage: None,
+                // ADR-0026 §3 (spec 5.7.3-3): carry the executor-reported
+                // usage from the poll that triggered the watchdog — the
+                // snapshot parameter was previously ignored (`_snapshot`).
+                usage: snapshot.usage.as_ref(),
                 exit_info: Some(&exit_info),
                 duration_ms: Some(duration_ms),
+                submitter: record.submitter.as_deref(),
             },
         )?;
         // Persisted truth (finished_at stamped inside the transition).
@@ -744,7 +901,9 @@ fn verify_chunk(
 
 /// One audited state transition's event payload pieces: task status, the
 /// output cursors as of the transition, and the executor-reported usage /
-/// exit / duration snapshot (ADR-0022 §4).
+/// exit / duration snapshot (ADR-0022 §4). `submitter` carries the
+/// submission source (ADR-0026 §1) on every transition so the audit log
+/// is self-describing without a join.
 struct Transition<'a> {
     status: SandboxTaskStatus,
     stdout_cursor: u64,
@@ -752,6 +911,7 @@ struct Transition<'a> {
     usage: Option<&'a SandboxResourceUsage>,
     exit_info: Option<&'a str>,
     duration_ms: Option<u64>,
+    submitter: Option<&'a str>,
 }
 
 fn transition_payload(task_id: &str, transition: &Transition<'_>) -> serde_json::Value {
@@ -763,11 +923,138 @@ fn transition_payload(task_id: &str, transition: &Transition<'_>) -> serde_json:
         "usage": transition.usage,
         "exit_info": transition.exit_info,
         "duration_ms": transition.duration_ms,
+        "submitter": transition.submitter,
     })
 }
 
 fn store_err(err: StoreError) -> SandboxError {
     SandboxError::Internal(err.to_string())
+}
+
+fn workspace_root(conn: &Connection) -> Option<PathBuf> {
+    let ws = workspaces::find_active(conn).ok().flatten()?;
+    Some(PathBuf::from(ws.root_path))
+}
+
+fn register_sandbox_output(
+    conn: &Connection,
+    workspace_root: &std::path::Path,
+    task_id: &str,
+    stream: &str,
+    source_path: &std::path::Path,
+    size: i64,
+) {
+    use crate::services::product_dir::{
+        default_ttl_ms, product_path, ProductKind, Producer, ProducerModule,
+    };
+    use crate::store::repos::product_registry;
+
+    let producer = Producer::new(ProducerModule::Sandbox, task_id);
+    let key = format!("{stream}.log");
+    let product_path = product_path(
+        workspace_root,
+        ProductKind::SandboxOutput,
+        &producer,
+        &key,
+    );
+
+    if let Err(e) = crate::services::product_dir::ensure_parent(&product_path) {
+        tracing::warn!(error = %e, "sandbox: failed to create product parent for {stream}");
+        return;
+    }
+    if let Err(e) = std::fs::copy(source_path, &product_path) {
+        tracing::warn!(error = %e, "sandbox: failed to copy {stream} to product dir");
+        return;
+    }
+
+    let now = now_ms();
+    let ttl = default_ttl_ms(ProductKind::SandboxOutput);
+
+    if let Err(e) = product_registry::insert(
+        conn,
+        &product_registry::InsertParams {
+            kind: ProductKind::SandboxOutput,
+            producer,
+            workspace_id: None,
+            session_id: None,
+            run_id: None,
+            key: format!("{task_id}/{stream}"),
+            abs_path: product_path.to_string_lossy().to_string(),
+            size_bytes: size,
+            sha256: None,
+            created_at: now,
+            expires_at: ttl.map(|t| now + t),
+            metadata: Some(serde_json::json!({ "task_id": task_id, "stream": stream })),
+        },
+    ) {
+        tracing::warn!(error = %e, "sandbox: product_registry insert failed for {stream}");
+    }
+}
+
+fn register_sandbox_artifact(
+    conn: &Connection,
+    workspace_root: &std::path::Path,
+    task_id: &str,
+    artifact_ref: &str,
+) {
+    use crate::services::product_dir::{
+        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+    };
+    use crate::store::repos::product_registry;
+
+    let producer = Producer::new(ProducerModule::Sandbox, task_id);
+    let artifact_name = std::path::Path::new(artifact_ref)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| artifact_ref.to_string());
+    let product_path = product_path(
+        workspace_root,
+        ProductKind::SandboxArtifact,
+        &producer,
+        &artifact_name,
+    );
+
+    if let Err(e) = ensure_parent(&product_path) {
+        tracing::warn!(error = %e, "sandbox: failed to create product parent for artifact");
+        return;
+    }
+    let source_path = std::path::Path::new(artifact_ref);
+    if source_path.is_file() {
+        if let Err(e) = std::fs::copy(source_path, &product_path) {
+            tracing::warn!(error = %e, "sandbox: failed to copy artifact to product dir");
+            return;
+        }
+    } else {
+        tracing::warn!(
+            "sandbox: artifact source path not a file, skipping copy: {}",
+            artifact_ref
+        );
+        return;
+    }
+
+    let now = now_ms();
+    let ttl = default_ttl_ms(ProductKind::SandboxArtifact);
+    let size = std::fs::metadata(&product_path).map(|m| m.len() as i64).unwrap_or(0);
+
+    if let Err(e) = product_registry::insert(
+        conn,
+        &product_registry::InsertParams {
+            kind: ProductKind::SandboxArtifact,
+            producer,
+            workspace_id: None,
+            session_id: None,
+            run_id: None,
+            key: format!("{task_id}/{artifact_name}"),
+            abs_path: product_path.to_string_lossy().to_string(),
+            size_bytes: size,
+            sha256: None,
+            created_at: now,
+            expires_at: ttl.map(|t| now + t),
+            metadata: Some(serde_json::json!({ "task_id": task_id, "artifact_name": artifact_name })),
+        },
+    ) {
+        tracing::warn!(error = %e, "sandbox: product_registry insert failed for artifact");
+    }
 }
 
 #[cfg(test)]
@@ -814,6 +1101,7 @@ mod tests {
     fn spec_for(runtime: &str, dirs: &[&str]) -> SandboxTaskSpec {
         SandboxTaskSpec {
             task_type: SandboxTaskType::RunCode,
+            submitter: "test".to_string(),
             runtime: runtime.to_string(),
             source: "print('hi')".to_string(),
             authorized_dirs: dirs.iter().map(|d| d.to_string()).collect(),
@@ -1447,6 +1735,215 @@ mod tests {
         assert!(manager.list_recent(&conn, 10).unwrap().is_empty());
     }
 
+    // ---- ADR-0026 §1: submitter audit (spec 5.7.1-5) -------------------
+
+    #[tokio::test]
+    async fn submit_records_submitter_on_row_and_in_audit_event() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+
+        let mut spec = spec_for("python", &["C:\\proj\\alpha"]);
+        spec.submitter = "workbench".to_string();
+        let record = manager.submit(&conn, &spec).await.unwrap();
+        assert_eq!(record.submitter.as_deref(), Some("workbench"));
+
+        let events = events::list_by_aggregate(&conn, AGGREGATE_TYPE, &record.id, None).unwrap();
+        assert_eq!(events[0].payload["submitter"], "workbench");
+    }
+
+    #[tokio::test]
+    async fn terminal_transition_carries_submitter_in_audit() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+
+        let mut spec = spec_for("python", &["C:\\proj\\alpha"]);
+        spec.submitter = "selfeval".to_string();
+        let record = manager.submit(&conn, &spec).await.unwrap();
+        manager.run_to_completion(&conn, &record.id).await.unwrap();
+
+        let events = events::list_by_aggregate(&conn, AGGREGATE_TYPE, &record.id, None).unwrap();
+        // Every transition carries the same submitter.
+        for event in &events {
+            assert_eq!(event.payload["submitter"], "selfeval");
+        }
+        assert!(events.len() >= 2, "queued + terminal transitions");
+    }
+
+    // ---- ADR-0026 §2: secret payload sniffing (spec 5.7.1-7) ------------
+
+    #[test]
+    fn submit_check_rejects_source_with_keyring_reference() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let mut spec = spec_for("python", &[]);
+        spec.source = "import os; os.environ['K'] = 'keyring://system/nuomi'".to_string();
+        assert!(matches!(
+            manager.submit_check(&conn, &spec),
+            Err(SandboxError::LimitInvalid(_))
+        ));
+    }
+
+    #[test]
+    fn submit_check_rejects_source_with_bearer_token() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let mut spec = spec_for("python", &[]);
+        spec.source = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz".to_string();
+        assert!(matches!(
+            manager.submit_check(&conn, &spec),
+            Err(SandboxError::LimitInvalid(_))
+        ));
+    }
+
+    #[test]
+    fn submit_check_rejects_source_with_pem_private_key() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let mut spec = spec_for("python", &[]);
+        spec.source = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK".to_string();
+        assert!(matches!(
+            manager.submit_check(&conn, &spec),
+            Err(SandboxError::LimitInvalid(_))
+        ));
+    }
+
+    #[test]
+    fn submit_check_passes_legitimate_build_target() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let manager = SandboxTaskManager::new(Arc::new(FakeSandboxExecutor::new()));
+        let mut spec = spec_for("python", &["C:\\proj\\alpha"]);
+        spec.source = "cargo build --release -p nuomi-cli".to_string();
+        assert!(manager.submit_check(&conn, &spec).is_ok());
+    }
+
+    // ---- ADR-0026 §3: watchdog usage (spec 5.7.3-3) --------------------
+
+    #[tokio::test]
+    async fn watchdog_carries_executor_reported_usage_in_audit() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+
+        let mut overdue = spec_record("t-watch-usage", 10_000);
+        overdue.limits = SandboxLimits {
+            timeout_secs: 1,
+            ..SandboxLimits::default()
+        };
+        sandbox_tasks::insert(&conn, &overdue).unwrap();
+
+        // Script poll to report running with usage — the watchdog should
+        // carry this usage into the timed_out audit event.
+        let mut running = SandboxTaskSnapshot::running();
+        running.usage = Some(SandboxResourceUsage {
+            cpu_time_ms: Some(500),
+            peak_memory_mb: Some(128),
+        });
+        fake.set_poll_script("t-watch-usage", vec![running]);
+        fake.set_outputs("t-watch-usage", "partial", "");
+        fake.submit("t-watch-usage", &spec_for("python", &[]))
+            .await
+            .unwrap();
+
+        let done = manager.step(&conn, "t-watch-usage").await.unwrap();
+        assert_eq!(done.status, SandboxTaskStatus::TimedOut);
+
+        let events = events::list_by_aggregate(&conn, AGGREGATE_TYPE, "t-watch-usage", None)
+            .unwrap();
+        let timed_out_event = events
+            .iter()
+            .find(|e| e.payload["status"] == "timed_out")
+            .expect("timed_out audit event");
+        let usage = timed_out_event.payload["usage"].as_object().unwrap();
+        assert_eq!(usage["cpu_time_ms"], 500);
+        assert_eq!(usage["peak_memory_mb"], 128);
+    }
+
+    // ---- ADR-0026 §4: large output spill (ADR-0022 §6) -----------------
+
+    #[tokio::test]
+    async fn large_stdout_spills_to_artifact_dir_and_truncates_inline() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+
+        let record = manager
+            .submit(&conn, &spec_for("python", &["C:\\proj\\alpha"]))
+            .await
+            .unwrap();
+
+        // 80 KB stdout — exceeds the 64 KB inline cap.
+        let big = "x".repeat(80 * 1024);
+        fake.set_outputs(&record.id, &big, "");
+        fake.set_poll_script(
+            &record.id,
+            vec![
+                SandboxTaskSnapshot::running(),
+                SandboxTaskSnapshot::terminal(
+                    SandboxTaskStatus::Succeeded,
+                    Some("exit 0".to_string()),
+                    Some(1_000),
+                ),
+            ],
+        );
+
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        assert_eq!(done.status, SandboxTaskStatus::Succeeded);
+        assert!(done.stdout_truncated, "inline stdout should be truncated");
+        assert_eq!(
+            done.stdout.len(),
+            INLINE_OUTPUT_CAP,
+            "inline stdout should be capped at INLINE_OUTPUT_CAP"
+        );
+        let stdout_ref = done.stdout_ref.as_ref().expect("spill ref should be set");
+        assert!(stdout_ref.contains("stdout.log"));
+        let spilled = std::fs::read_to_string(stdout_ref).unwrap();
+        assert_eq!(spilled.len(), 80 * 1024, "spilled file has the full output");
+        assert!(!done.stderr_truncated);
+    }
+
+    #[tokio::test]
+    async fn small_output_stays_inline_without_spill() {
+        let conn = db();
+        seed_active_workspace(&conn);
+        let fake = Arc::new(FakeSandboxExecutor::new());
+        let manager = SandboxTaskManager::new(fake.clone());
+
+        let record = manager
+            .submit(&conn, &spec_for("python", &["C:\\proj\\alpha"]))
+            .await
+            .unwrap();
+
+        // 1 KB stdout — well under the cap.
+        let small = "y".repeat(1024);
+        fake.set_outputs(&record.id, &small, "");
+        fake.set_poll_script(
+            &record.id,
+            vec![
+                SandboxTaskSnapshot::running(),
+                SandboxTaskSnapshot::terminal(
+                    SandboxTaskStatus::Succeeded,
+                    Some("exit 0".to_string()),
+                    Some(1_000),
+                ),
+            ],
+        );
+
+        let done = manager.run_to_completion(&conn, &record.id).await.unwrap();
+        assert!(!done.stdout_truncated);
+        assert!(done.stdout_ref.is_none());
+        assert_eq!(done.stdout, small);
+    }
+
     /// Builds a queued row for direct repo insertion (watchdog test).
     fn spec_record(id: &str, age_ms: i64) -> SandboxTaskRecord {
         SandboxTaskRecord {
@@ -1455,10 +1952,15 @@ mod tests {
             runtime: "python".to_string(),
             status: SandboxTaskStatus::Queued,
             source: "print('hi')".to_string(),
+            submitter: Some("test".to_string()),
             authorized_dirs: vec![],
             limits: SandboxLimits::default(),
             stdout: String::new(),
             stderr: String::new(),
+            stdout_ref: None,
+            stderr_ref: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             artifact_ref: None,
             artifact_retryable: false,
             exit_info: None,

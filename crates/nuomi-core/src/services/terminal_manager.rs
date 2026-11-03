@@ -49,6 +49,10 @@ struct TerminalHandle {
     writer: Box<dyn std::io::Write + Send>,
     child: Box<dyn portable_pty::Child + Send>,
     reader_thread: Option<std::thread::JoinHandle<()>>,
+    #[allow(dead_code)]
+    workspace_id: Option<String>,
+    #[allow(dead_code)]
+    log_path: Option<PathBuf>,
 }
 
 impl Drop for TerminalHandle {
@@ -81,8 +85,14 @@ impl TerminalManager {
 
     /// Spawns a new interactive shell in a PTY at the given cwd (optional).
     /// Returns the terminal id. The reader thread starts immediately and
-    /// pumps output through the emitter.
-    pub fn create(&self, cwd: Option<&Path>) -> Result<String, TerminalError> {
+    /// pumps output through the emitter. When `log_path` is provided, output
+    /// is also appended to that file for persistence and cross-module sharing.
+    pub fn create(
+        &self,
+        cwd: Option<&Path>,
+        workspace_id: Option<String>,
+        log_path: Option<PathBuf>,
+    ) -> Result<String, TerminalError> {
         let (program, args) = default_shell();
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -120,15 +130,31 @@ impl TerminalManager {
         let id = Uuid::now_v7().to_string();
         let emitter = self.emitter.clone();
         let emit_id = id.clone();
+        let log_path_clone = log_path.clone();
         let reader_thread = std::thread::Builder::new()
             .name("nuomi-terminal-reader".to_string())
             .spawn(move || {
                 let mut reader = reader;
                 let mut buf = [0u8; 8192];
+                let mut log_file = log_path_clone.as_ref().and_then(|p| {
+                    if let Some(parent) = p.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(p)
+                        .ok()
+                });
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
-                        Ok(n) => emitter.emit_output(&emit_id, &buf[..n]),
+                        Ok(n) => {
+                            emitter.emit_output(&emit_id, &buf[..n]);
+                            if let Some(ref mut file) = log_file {
+                                let _ = file.write_all(&buf[..n]);
+                            }
+                        }
                     }
                 }
             })
@@ -143,6 +169,8 @@ impl TerminalManager {
                 writer,
                 child,
                 reader_thread: Some(reader_thread),
+                workspace_id,
+                log_path,
             },
         );
         Ok(id)
@@ -259,11 +287,9 @@ mod tests {
     fn create_and_kill() {
         let emitter = Arc::new(TestEmitter::new());
         let mgr = TerminalManager::new(emitter.clone());
-        let id = mgr.create(None).expect("spawn shell");
+        let id = mgr.create(None, None, None).expect("spawn shell");
         assert!(!id.is_empty());
-        // kill should succeed
         mgr.kill(&id).expect("kill");
-        // second kill should fail (NotFound)
         assert!(mgr.kill(&id).is_err());
     }
 
@@ -287,8 +313,8 @@ mod tests {
     fn kill_all_clears_everything() {
         let emitter = Arc::new(TestEmitter::new());
         let mgr = TerminalManager::new(emitter);
-        let id1 = mgr.create(None).expect("spawn");
-        let id2 = mgr.create(None).expect("spawn");
+        let id1 = mgr.create(None, None, None).expect("spawn");
+        let id2 = mgr.create(None, None, None).expect("spawn");
         mgr.kill_all();
         assert!(mgr.write(&id1, b"x").is_err());
         assert!(mgr.write(&id2, b"x").is_err());

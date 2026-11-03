@@ -13,6 +13,7 @@ pub mod git_service;
 pub mod idle_proposal;
 pub mod nuomi_dir;
 pub mod presets;
+pub mod product_dir;
 pub mod reference_pre_check;
 pub mod role_director;
 pub mod scheduler_service;
@@ -70,7 +71,7 @@ pub use idle_proposal::{
     DEFAULT_TIMEOUT_MINUTES as IDLE_DEFAULT_TIMEOUT_MINUTES, IDLE_BACKLOG_KEY, IDLE_COOLDOWN_KEY,
     IDLE_ENABLED_KEY, IDLE_TIMEOUT_KEY, MAX_BACKLOG_TASKS, SOURCE as IDLE_PROPOSAL_SOURCE,
 };
-pub use nuomi_dir::{codebase_memory_dir, ensure_nuomi_dir, NuomiDirError, NUOMI_DIR_NAME};
+pub use nuomi_dir::{codebase_memory_dir, ensure_nuomi_dir, products_dir, NuomiDirError, NUOMI_DIR_NAME};
 pub use presets::{seed_builtin_roles, SeedReport, PRESET_ROLES};
 pub use reference_pre_check::{
     check_provider_refs, check_role_refs, delete_and_nullify_provider_refs,

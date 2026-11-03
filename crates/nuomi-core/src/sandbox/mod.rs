@@ -20,6 +20,7 @@ pub use executor::{SandboxArtifact, SandboxExecutor, SandboxOutputChunk, Sandbox
 pub use fake::{FakeExecutorCall, FakeSandboxExecutor};
 pub use task_manager::{SandboxTaskManager, SubmitCheck, AGGREGATE_TYPE, EVENT_KIND};
 pub use types::{
-    dirs_from_json, dirs_to_json, SandboxError, SandboxLimits, SandboxResourceUsage,
-    SandboxRuntimeInfo, SandboxTaskResult, SandboxTaskSpec, SandboxTaskStatus, SandboxTaskType,
+    check_secret_payload, dirs_from_json, dirs_to_json, INLINE_OUTPUT_CAP, SandboxError,
+    SandboxLimits, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskResult, SandboxTaskSpec,
+    SandboxTaskStatus, SandboxTaskType,
 };

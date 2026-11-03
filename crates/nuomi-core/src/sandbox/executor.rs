@@ -176,6 +176,7 @@ mod tests {
     fn spec(runtime: &str) -> SandboxTaskSpec {
         SandboxTaskSpec {
             task_type: SandboxTaskType::RunCode,
+            submitter: "test".to_string(),
             runtime: runtime.to_string(),
             source: "print('hi')".to_string(),
             authorized_dirs: vec!["C:\\proj\\alpha".to_string()],

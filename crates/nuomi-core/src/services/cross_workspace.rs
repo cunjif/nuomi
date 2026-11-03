@@ -8,9 +8,13 @@
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::workspace_registry_v2::compat_roots;
+use crate::services::product_dir::{
+    default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+};
 use crate::store::repos::workspace_open_state;
 use crate::store::repos::workspaces;
 use crate::store::{migrations, Db, StoreError};
@@ -30,7 +34,7 @@ pub enum CrossWorkspaceError {
 }
 
 /// A search result grouped by workspace.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossSearchResultGroup {
     pub workspace_id: String,
     pub workspace_name: String,
@@ -38,21 +42,21 @@ pub struct CrossSearchResultGroup {
 }
 
 /// A single file match within a workspace.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMatch {
     pub relative_path: String,
     pub match_type: MatchType,
 }
 
 /// Type of search match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchType {
     FileName,
     FileContent,
 }
 
 /// Result of a cross-workspace search.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossSearchOutcome {
     pub groups: Vec<CrossSearchResultGroup>,
     pub skipped_workspace_ids: Vec<String>,
@@ -147,6 +151,81 @@ impl CrossWorkspaceService {
             groups,
             skipped_workspace_ids: skipped,
         })
+    }
+
+    /// Persists a search result as a JSON file under the unified product
+    /// directory and registers it in `product_registry`. Best-effort: errors
+    /// are logged and swallowed so search results still reach the caller.
+    pub fn persist_search_result(
+        &self,
+        outcome: &CrossSearchOutcome,
+        query: &str,
+    ) {
+        let conn = match self.conn() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "persist_search_result: conn failed");
+                return;
+            }
+        };
+        let ws = match workspaces::find_active(&conn) {
+            Ok(Some(ws)) => ws,
+            _ => {
+                tracing::warn!("persist_search_result: no active workspace");
+                return;
+            }
+        };
+        let root = PathBuf::from(&ws.root_path);
+
+        let query_hash = simple_hash(query);
+        let producer = Producer::new(ProducerModule::CrossWorkspace, &query_hash);
+        let path = product_path(
+            &root,
+            ProductKind::SearchResult,
+            &producer,
+            &format!("{query_hash}.json"),
+        );
+
+        let payload = match serde_json::to_string(outcome) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "persist_search_result: serialize failed");
+                return;
+            }
+        };
+
+        if let Err(e) = ensure_parent(&path) {
+            tracing::warn!(error = %e, "persist_search_result: create parent failed");
+            return;
+        }
+        if let Err(e) = std::fs::write(&path, &payload) {
+            tracing::warn!(error = %e, "persist_search_result: write failed");
+            return;
+        }
+
+        let now = crate::domain::now_ms();
+        let ttl = default_ttl_ms(ProductKind::SearchResult);
+        let size = payload.len() as i64;
+
+        if let Err(e) = crate::store::repos::product_registry::insert(
+            &conn,
+            &crate::store::repos::product_registry::InsertParams {
+                kind: ProductKind::SearchResult,
+                producer,
+                workspace_id: Some(ws.id),
+                session_id: None,
+                run_id: None,
+                key: query_hash.clone(),
+                abs_path: path.to_string_lossy().to_string(),
+                size_bytes: size,
+                sha256: None,
+                created_at: now,
+                expires_at: ttl.map(|t| now + t),
+                metadata: Some(serde_json::json!({ "query": query })),
+            },
+        ) {
+            tracing::warn!(error = %e, "persist_search_result: registry insert failed");
+        }
     }
 
     /// Creates a read-only file reference: reads a file snapshot from the source
@@ -328,6 +407,14 @@ fn is_text_file(path: &Path) -> bool {
                 | "sql"
         )
     )
+}
+
+fn simple_hash(s: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

@@ -377,6 +377,22 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0047_session_archive.sql"
         )),
     ),
+    (
+        48,
+        "0048_sandbox_audit_columns",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0048_sandbox_audit_columns.sql"
+        )),
+    ),
+    (
+        49,
+        "0049_product_registry",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0049_product_registry.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

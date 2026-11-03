@@ -385,6 +385,7 @@ mod tests {
     fn spec() -> SandboxTaskSpec {
         SandboxTaskSpec {
             task_type: crate::sandbox::types::SandboxTaskType::RunCode,
+            submitter: "test".to_string(),
             runtime: "python".to_string(),
             source: "print('hi')".to_string(),
             authorized_dirs: vec!["C:\\proj\\alpha".to_string()],

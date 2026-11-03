@@ -37,6 +37,12 @@ pub fn codebase_memory_dir(root: &Path) -> PathBuf {
     root.join(NUOMI_DIR_NAME).join("codebase-memory")
 }
 
+/// Returns the path `<root>/.nuomi/products/` without creating it.
+/// Callers create on demand via `std::fs::create_dir_all`.
+pub fn products_dir(root: &Path) -> PathBuf {
+    root.join(NUOMI_DIR_NAME).join("products")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +74,14 @@ mod tests {
         let p = codebase_memory_dir(root);
         assert_eq!(p, Path::new("C:\\ws\\.nuomi\\codebase-memory"));
         // Not created.
+        assert!(!p.exists());
+    }
+
+    #[test]
+    fn products_dir_path_is_correct() {
+        let root = Path::new("C:\\ws");
+        let p = products_dir(root);
+        assert_eq!(p, Path::new("C:\\ws\\.nuomi\\products"));
         assert!(!p.exists());
     }
 }

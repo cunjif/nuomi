@@ -16,7 +16,7 @@ use crate::sandbox::types::{
 };
 use crate::store::StoreError;
 
-/// A `sandbox_tasks` row (mirrors migrations 0037 + 0038).
+/// A `sandbox_tasks` row (mirrors migrations 0037 + 0038 + 0048).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxTaskRecord {
     pub id: String,
@@ -24,12 +24,21 @@ pub struct SandboxTaskRecord {
     pub runtime: String,
     pub status: SandboxTaskStatus,
     pub source: String,
+    /// Submitter / source identifier (ADR-0026 §1, spec 5.7.1-5).
+    /// `None` for rows created before migration 0048.
+    pub submitter: Option<String>,
     /// Stored as the `authorized_dirs` JSON array column.
     pub authorized_dirs: Vec<String>,
     /// Stored as the `limits` JSON object column.
     pub limits: SandboxLimits,
     pub stdout: String,
     pub stderr: String,
+    /// Host-local path of the full stdout when `stdout_truncated` is true
+    /// (ADR-0026 §4 / ADR-0022 §6). `None` when inline `stdout` is complete.
+    pub stdout_ref: Option<String>,
+    pub stderr_ref: Option<String>,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     pub artifact_ref: Option<String>,
     pub artifact_retryable: bool,
     pub exit_info: Option<String>,
@@ -49,20 +58,26 @@ const ENTITY: &str = "sandbox_task";
 pub fn insert(conn: &Connection, record: &SandboxTaskRecord) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO sandbox_tasks
-           (id, task_type, runtime, status, source, authorized_dirs, limits,
-            stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-            duration_ms, usage, created_at, finished_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+           (id, task_type, runtime, status, source, submitter, authorized_dirs, limits,
+            stdout, stderr, stdout_ref, stderr_ref, stdout_truncated, stderr_truncated,
+            artifact_ref, artifact_retryable, exit_info, duration_ms, usage,
+            created_at, finished_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             record.id,
             record.task_type.as_str(),
             record.runtime,
             record.status.as_str(),
             record.source,
+            record.submitter,
             serde_json::to_string(&record.authorized_dirs)?,
             serde_json::to_string(&record.limits)?,
             record.stdout,
             record.stderr,
+            record.stdout_ref,
+            record.stderr_ref,
+            record.stdout_truncated,
+            record.stderr_truncated,
             record.artifact_ref,
             record.artifact_retryable,
             record.exit_info,
@@ -82,9 +97,10 @@ pub fn insert(conn: &Connection, record: &SandboxTaskRecord) -> Result<(), Store
 /// Finds a task by id.
 pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<SandboxTaskRecord>, StoreError> {
     conn.query_row(
-        "SELECT id, task_type, runtime, status, source, authorized_dirs, limits,
-                stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-                duration_ms, usage, created_at, finished_at
+        "SELECT id, task_type, runtime, status, source, submitter, authorized_dirs, limits,
+                stdout, stderr, stdout_ref, stderr_ref, stdout_truncated, stderr_truncated,
+                artifact_ref, artifact_retryable, exit_info, duration_ms, usage,
+                created_at, finished_at
          FROM sandbox_tasks WHERE id = ?1",
         params![id],
         row_to_record,
@@ -96,9 +112,10 @@ pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<SandboxTaskRecor
 /// Lists recent tasks, newest first (index idx_sandbox_tasks_created).
 pub fn list_recent(conn: &Connection, limit: u32) -> Result<Vec<SandboxTaskRecord>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, task_type, runtime, status, source, authorized_dirs, limits,
-                stdout, stderr, artifact_ref, artifact_retryable, exit_info,
-                duration_ms, usage, created_at, finished_at
+        "SELECT id, task_type, runtime, status, source, submitter, authorized_dirs, limits,
+                stdout, stderr, stdout_ref, stderr_ref, stdout_truncated, stderr_truncated,
+                artifact_ref, artifact_retryable, exit_info, duration_ms, usage,
+                created_at, finished_at
          FROM sandbox_tasks ORDER BY created_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_record)?;
@@ -192,43 +209,84 @@ pub fn set_artifact(
     Ok(())
 }
 
+/// Spills oversized inline output to the artifact directory and records
+/// the truncation (ADR-0026 §4 / ADR-0022 §6). Called by the task manager
+/// when inline stdout/stderr exceeds `INLINE_OUTPUT_CAP`: the full text
+/// has been written to `stdout_ref` / `stderr_ref` on disk, and this
+/// updates the row with the truncated prefix, the ref path, and the
+/// truncation flag in one statement.
+#[allow(clippy::too_many_arguments)]
+pub fn set_spilled_output(
+    conn: &Connection,
+    id: &str,
+    stdout: &str,
+    stderr: &str,
+    stdout_ref: Option<&str>,
+    stderr_ref: Option<&str>,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE sandbox_tasks
+         SET stdout = ?2, stderr = ?3,
+             stdout_ref = ?4, stderr_ref = ?5,
+             stdout_truncated = ?6, stderr_truncated = ?7
+         WHERE id = ?1",
+        params![id, stdout, stderr, stdout_ref, stderr_ref, stdout_truncated, stderr_truncated],
+    )?;
+    Ok(())
+}
+
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SandboxTaskRecord> {
+    // Column order mirrors the SELECT in find_by_id / list_recent:
+    // 0 id, 1 task_type, 2 runtime, 3 status, 4 source, 5 submitter,
+    // 6 authorized_dirs, 7 limits, 8 stdout, 9 stderr,
+    // 10 stdout_ref, 11 stderr_ref, 12 stdout_truncated, 13 stderr_truncated,
+    // 14 artifact_ref, 15 artifact_retryable, 16 exit_info, 17 duration_ms,
+    // 18 usage, 19 created_at, 20 finished_at.
     let task_type_raw: String = row.get(1)?;
     let status_raw: String = row.get(3)?;
-    let dirs_raw: String = row.get(5)?;
-    let limits_raw: String = row.get(6)?;
-    let retryable: i64 = row.get(10)?;
-    let usage_raw: Option<String> = row.get(13)?;
+    let dirs_raw: String = row.get(6)?;
+    let limits_raw: String = row.get(7)?;
+    let stdout_truncated: i64 = row.get(12)?;
+    let stderr_truncated: i64 = row.get(13)?;
+    let retryable: i64 = row.get(15)?;
+    let usage_raw: Option<String> = row.get(18)?;
     Ok(SandboxTaskRecord {
         id: row.get(0)?,
         task_type: parse_enum(1, &task_type_raw, SandboxTaskType::parse)?,
         runtime: row.get(2)?,
         status: parse_enum(3, &status_raw, SandboxTaskStatus::parse)?,
         source: row.get(4)?,
+        submitter: row.get(5)?,
         authorized_dirs: dirs_from_json(&dirs_raw).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
-        })?,
-        limits: SandboxLimits::from_json(&limits_raw).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
         })?,
-        stdout: row.get(7)?,
-        stderr: row.get(8)?,
-        artifact_ref: row.get(9)?,
+        limits: SandboxLimits::from_json(&limits_raw).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+        })?,
+        stdout: row.get(8)?,
+        stderr: row.get(9)?,
+        stdout_ref: row.get(10)?,
+        stderr_ref: row.get(11)?,
+        stdout_truncated: stdout_truncated != 0,
+        stderr_truncated: stderr_truncated != 0,
+        artifact_ref: row.get(14)?,
         artifact_retryable: retryable != 0,
-        exit_info: row.get(11)?,
-        duration_ms: row.get(12)?,
+        exit_info: row.get(16)?,
+        duration_ms: row.get(17)?,
         usage: usage_raw
             .map(|raw| serde_json::from_str(&raw))
             .transpose()
             .map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    13,
+                    18,
                     rusqlite::types::Type::Text,
                     format!("corrupt sandbox usage JSON: {e}").into(),
                 )
             })?,
-        created_at: row.get(14)?,
-        finished_at: row.get(15)?,
+        created_at: row.get(19)?,
+        finished_at: row.get(20)?,
     })
 }
 
@@ -262,6 +320,7 @@ mod tests {
             runtime: "python".to_string(),
             status: SandboxTaskStatus::Queued,
             source: "cargo build --release".to_string(),
+            submitter: Some("test".to_string()),
             authorized_dirs: vec!["C:\\proj\\nuomi".to_string()],
             limits: SandboxLimits {
                 timeout_secs: 300,
@@ -271,6 +330,10 @@ mod tests {
             },
             stdout: String::new(),
             stderr: String::new(),
+            stdout_ref: None,
+            stderr_ref: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             artifact_ref: None,
             artifact_retryable: false,
             exit_info: None,
@@ -449,6 +512,55 @@ mod tests {
         let row = find_by_id(&conn, "t1").unwrap().unwrap();
         assert!(row.artifact_retryable);
         assert!(row.artifact_ref.is_none());
+    }
+
+    #[test]
+    fn set_spilled_output_records_truncated_prefix_and_ref() {
+        let conn = db();
+        insert(&conn, &queued_record("t1", 1)).unwrap();
+        append_output(&conn, "t1", &"x".repeat(70_000), "").unwrap();
+        set_spilled_output(
+            &conn,
+            "t1",
+            &"x".repeat(65_536),
+            "",
+            Some("C:\\nuomi\\.nuomi\\sandbox\\t1\\stdout.log"),
+            None,
+            true,
+            false,
+        )
+        .unwrap();
+        let row = find_by_id(&conn, "t1").unwrap().unwrap();
+        assert_eq!(row.stdout.len(), 65_536);
+        assert!(row.stdout_truncated);
+        assert!(!row.stderr_truncated);
+        assert_eq!(
+            row.stdout_ref.as_deref(),
+            Some("C:\\nuomi\\.nuomi\\sandbox\\t1\\stdout.log")
+        );
+
+        // Clearing the spill is idempotent.
+        set_spilled_output(&conn, "t1", "full", "", None, None, false, false).unwrap();
+        let row = find_by_id(&conn, "t1").unwrap().unwrap();
+        assert_eq!(row.stdout, "full");
+        assert!(row.stdout_ref.is_none());
+        assert!(!row.stdout_truncated);
+    }
+
+    #[test]
+    fn submitter_roundtrips_through_insert_and_find() {
+        let conn = db();
+        let mut record = queued_record("t-sub", 1);
+        record.submitter = Some("workbench".to_string());
+        insert(&conn, &record).unwrap();
+        assert_eq!(
+            find_by_id(&conn, "t-sub")
+                .unwrap()
+                .unwrap()
+                .submitter
+                .as_deref(),
+            Some("workbench")
+        );
     }
 
     #[test]

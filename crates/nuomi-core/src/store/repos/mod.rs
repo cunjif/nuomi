@@ -13,6 +13,7 @@ pub mod journal;
 pub mod memory;
 pub mod message_queue;
 pub mod prompts;
+pub mod product_registry;
 pub mod proposals;
 pub mod providers;
 pub mod roles;
