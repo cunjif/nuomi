@@ -55,6 +55,8 @@ import {
   type StewardPruneRecordDto,
   type StewardPromptOptimizeResultDto,
   type RestoreArchivedResult,
+  type LspServerConfigDto,
+  type LspServerStatusDto,
 } from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
@@ -203,6 +205,7 @@ export const ipc = {
   deleteAgentProfile: (profileId: string) =>
     unwrap(current.deleteAgentProfile(profileId)),
   checkCliAgent: (profileId: string) => unwrap(current.checkCliAgent(profileId)),
+  checkCommandAvailable: (command: string) => unwrap(current.checkCommandAvailable(command)),
   listRoles: () => unwrap(current.listRoles()),
   upsertRole: (role: Parameters<Commands["upsertRole"]>[0]) => unwrap(current.upsertRole(role)),
   deleteRole: (roleId: string, force: boolean = false) =>
@@ -447,6 +450,33 @@ export const ipc = {
   productList: (kind?: string | null, workspaceId?: string | null, sessionId?: string | null) =>
     unwrap(current.productList(kind ?? null, workspaceId ?? null, sessionId ?? null)),
   productRead: (productId: number) => unwrap(current.productRead(productId)),
+  lspGetConfigs: () => unwrap(current.lspGetConfigs()),
+  lspSetConfig: (config: LspServerConfigDto) => unwrap(current.lspSetConfig(config)),
+  lspGetStatuses: () => unwrap(current.lspGetStatuses()),
+  lspStart: (language: string, rootUri: string) => unwrap(current.lspStart(language, rootUri)),
+  lspStop: (language: string) => unwrap(current.lspStop(language)),
+  lspCompletion: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspCompletion(language, rootUri, uri, line, character)),
+  lspHover: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspHover(language, rootUri, uri, line, character)),
+  lspDefinition: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspDefinition(language, rootUri, uri, line, character)),
+  lspReferences: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspReferences(language, rootUri, uri, line, character)),
+  lspSignatureHelp: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspSignatureHelp(language, rootUri, uri, line, character)),
+  lspFormatting: (language: string, rootUri: string, uri: string) =>
+    unwrap(current.lspFormatting(language, rootUri, uri)),
+  lspDocumentSymbols: (language: string, rootUri: string, uri: string) =>
+    unwrap(current.lspDocumentSymbols(language, rootUri, uri)),
+  lspDidOpen: (language: string, rootUri: string, uri: string, languageId: string, text: string) =>
+    unwrap(current.lspDidOpen(language, rootUri, uri, languageId, text)),
+  lspDidChange: (language: string, rootUri: string, uri: string, version: number, text: string) =>
+    unwrap(current.lspDidChange(language, rootUri, uri, version, text)),
+  lspDidClose: (language: string, rootUri: string, uri: string) =>
+    unwrap(current.lspDidClose(language, rootUri, uri)),
+  lspDidSave: (language: string, rootUri: string, uri: string, text: string) =>
+    unwrap(current.lspDidSave(language, rootUri, uri, text)),
 };
 
 export type Ipc = typeof ipc;
@@ -491,4 +521,6 @@ export type {
   WorkspaceEntryDto,
   RemoveWorkspaceResult,
   RestoreArchivedResult,
+  LspServerConfigDto,
+  LspServerStatusDto,
 };

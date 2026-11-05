@@ -50,6 +50,9 @@ pdf-extract = "0.7"
 # DOS-style. Falls back to verbatim form only when needed for long paths.
 dunce = "1"
 
+# LSP code intelligence (ADR-0027): LSP protocol types for the Rust LSP client.
+lsp-types = "0.95"
+
 # misc
 # keyring v3 requires explicit native backend features; without them it
 # silently falls back to an in-memory mock (EntryOnly persistence) where

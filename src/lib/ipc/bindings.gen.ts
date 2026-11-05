@@ -782,6 +782,14 @@ async checkCliAgent(profileId: string) : Promise<Result<CliAgentCheckDto, IpcErr
     else return { status: "error", error: e  as any };
 }
 },
+async checkCommandAvailable(command: string) : Promise<Result<CommandAvailableDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_command_available", { command }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listRoles() : Promise<Result<RoleDto[], IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_roles") };
@@ -1742,6 +1750,134 @@ async productRead(productId: number) : Promise<Result<string, IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async lspGetConfigs() : Promise<Result<LspServerConfigDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_get_configs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspSetConfig(config: LspServerConfigDto) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_set_config", { config }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspGetStatuses() : Promise<Result<LspServerStatusDto[], IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_get_statuses") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspStart(language: string, rootUri: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_start", { language, rootUri }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspStop(language: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_stop", { language }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspCompletion(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_completion", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspHover(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_hover", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDefinition(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_definition", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspReferences(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_references", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspSignatureHelp(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_signature_help", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspFormatting(language: string, rootUri: string, uri: string) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_formatting", { language, rootUri, uri }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDocumentSymbols(language: string, rootUri: string, uri: string) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_document_symbols", { language, rootUri, uri }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDidOpen(language: string, rootUri: string, uri: string, languageId: string, text: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_did_open", { language, rootUri, uri, languageId, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDidChange(language: string, rootUri: string, uri: string, version: number, text: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_did_change", { language, rootUri, uri, version, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDidClose(language: string, rootUri: string, uri: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_did_close", { language, rootUri, uri }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspDidSave(language: string, rootUri: string, uri: string, text: string) : Promise<Result<null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_did_save", { language, rootUri, uri, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Frontend heartbeat: called once after the React root mounts to signal that
  * the webview is alive. If this never arrives within the watchdog grace
@@ -1816,6 +1952,7 @@ export type CleanseRulesInput = { redactPatterns: RedactPatternInput[]; aggregat
 export type CleanseScopeInput = { timeRange: [number, number]; includeKinds?: string[]; includeMemoryKinds?: string[] }
 export type CliAgentCheckDto = { ok: boolean; versionLine: string | null; error: string | null }
 export type CliFlavorDto = "claude_code" | "codex" | "plain"
+export type CommandAvailableDto = { ok: boolean; path: string | null; error: string | null }
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ConfigChangeResultDto = { proposalId: string; snapshotId: string; targetType: string; targetId: string }
 export type ConfigProposalDto = { proposalId: string; targetType: string; targetId: string; diffPreview: string; createdAt: number }
@@ -2028,6 +2165,8 @@ providerId: string | null; protocol: ProviderProtocolDto; baseUrl: string; apiKe
  * Overrides the stored per-provider proxy when non-empty.
  */
 proxy: string | null }
+export type LspServerConfigDto = { language: string; command: string; args?: string[]; enabled?: boolean; env?: ([string, string])[]; working_dir?: string | null; init_timeout_secs?: number }
+export type LspServerStatusDto = { language: string; status: string }
 export type MemoryEntryDto = { id: string; content: string; sourceSessionId: string | null; tags: string[]; kind: string; userProfile: boolean; createdAt: number; updatedAt: number; roleId: string | null }
 export type MemoryPolicyDto = { retentionDays: number; retrieval: RetrievalStrategyDto }
 export type MemorySummaryDto = { id: string; content: string; tags: string[]; kind: string; userProfile: boolean; roleId: string | null; sourceSessionId: string | null; createdAt: number; updatedAt: number }

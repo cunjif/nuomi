@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nuomi_core::facade::{NuomiConfig, NuomiKernel, ProviderSource};
+use nuomi_core::lsp::LspManager;
 use nuomi_core::providers::{OsKeyring, SecretStore};
 use nuomi_core::services::{
     workspace_layout::WorkspaceLayoutService, workspace_migration,
@@ -166,6 +167,8 @@ pub struct AppState {
     /// events). `None` until then; commands return `NotFound` if called early.
     pub terminal_manager:
         Arc<std::sync::RwLock<Option<nuomi_core::services::terminal_manager::TerminalManager>>>,
+    /// LSP manager (ADR-0027). Manages Language Server processes per language.
+    pub lsp_manager: Arc<LspManager>,
 }
 
 impl AppState {
@@ -333,6 +336,7 @@ impl AppState {
             integrations_reload_tx,
             integrations_reload,
             terminal_manager: Arc::new(std::sync::RwLock::new(None)),
+            lsp_manager: Arc::new(LspManager::new()),
         })
     }
 

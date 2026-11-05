@@ -152,13 +152,13 @@ pub struct ProductHandle {
 /// Default TTL per kind (unix-ms from creation). `None` means no expiry.
 pub fn default_ttl_ms(kind: ProductKind) -> Option<i64> {
     match kind {
-        ProductKind::ToolResult => Some(7 * 24 * 3600 * 1000),       // 7 days
-        ProductKind::SubagentResult => Some(7 * 24 * 3600 * 1000),   // 7 days
-        ProductKind::SearchResult => Some(3600 * 1000),              // 1 hour
-        ProductKind::SandboxOutput => Some(7 * 24 * 3600 * 1000),    // 7 days
-        ProductKind::SandboxArtifact => Some(7 * 24 * 3600 * 1000),  // 7 days
-        ProductKind::TerminalLog => Some(24 * 3600 * 1000),          // 24 hours
-        ProductKind::EvolutionSnapshot => None,                       // no expiry
+        ProductKind::ToolResult => Some(7 * 24 * 3600 * 1000), // 7 days
+        ProductKind::SubagentResult => Some(7 * 24 * 3600 * 1000), // 7 days
+        ProductKind::SearchResult => Some(3600 * 1000),        // 1 hour
+        ProductKind::SandboxOutput => Some(7 * 24 * 3600 * 1000), // 7 days
+        ProductKind::SandboxArtifact => Some(7 * 24 * 3600 * 1000), // 7 days
+        ProductKind::TerminalLog => Some(24 * 3600 * 1000),    // 24 hours
+        ProductKind::EvolutionSnapshot => None,                // no expiry
     }
 }
 
@@ -167,12 +167,7 @@ pub fn default_ttl_ms(kind: ProductKind) -> Option<i64> {
 ///
 /// Does NOT create the directory — callers must `create_dir_all` on the
 /// parent before writing.
-pub fn product_path(
-    root: &Path,
-    kind: ProductKind,
-    producer: &Producer,
-    key: &str,
-) -> PathBuf {
+pub fn product_path(root: &Path, kind: ProductKind, producer: &Producer, key: &str) -> PathBuf {
     root.join(crate::services::nuomi_dir::NUOMI_DIR_NAME)
         .join(PRODUCTS_DIR_NAME)
         .join(kind.dir_name())
@@ -253,10 +248,7 @@ mod tests {
     fn default_ttl_values() {
         assert!(default_ttl_ms(ProductKind::ToolResult).is_some());
         assert!(default_ttl_ms(ProductKind::EvolutionSnapshot).is_none());
-        assert_eq!(
-            default_ttl_ms(ProductKind::SearchResult),
-            Some(3600 * 1000)
-        );
+        assert_eq!(default_ttl_ms(ProductKind::SearchResult), Some(3600 * 1000));
     }
 
     #[test]

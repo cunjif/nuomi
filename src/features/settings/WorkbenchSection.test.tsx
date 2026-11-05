@@ -22,7 +22,7 @@ describe("WorkbenchSection — feature toggles", () => {
   it("renders three toggle entries, all enabled by default", async () => {
     renderWithProviders(<WorkbenchSection />);
 
-    expect(await screen.findByText("In-editor compile & run")).toBeInTheDocument();
+    expect(await screen.findByText("In-editor run buttons")).toBeInTheDocument();
     expect(screen.getByText("Drag external files to temp workspace")).toBeInTheDocument();
     expect(screen.getByText("Enhanced hover annotations")).toBeInTheDocument();
 
@@ -36,8 +36,8 @@ describe("WorkbenchSection — feature toggles", () => {
 
     expect(isEditorExtensionEnabled("workbench.runPanel")).toBe(true);
 
-    // Click the "In-editor compile & run" toggle button.
-    const toggleBtn = screen.getAllByRole("button", { name: "In-editor compile & run" })[0]!;
+    // Click the "In-editor run buttons" toggle button.
+    const toggleBtn = screen.getAllByRole("button", { name: "In-editor run buttons" })[0]!;
     fireEvent.click(toggleBtn);
 
     expect(isEditorExtensionEnabled("workbench.runPanel")).toBe(false);

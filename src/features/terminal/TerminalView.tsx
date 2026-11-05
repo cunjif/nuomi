@@ -19,9 +19,11 @@ interface TerminalOutputEvent {
 export function TerminalView({
   terminalId,
   cwd,
+  initialCommand,
 }: {
   terminalId: string;
   cwd?: string;
+  initialCommand?: string;
 }): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -66,6 +68,10 @@ export function TerminalView({
         term.onResize(({ cols, rows }) => {
           if (backendId) void ipc.terminalResize(backendId, cols, rows);
         });
+        // Execute initial command if provided (e.g. from run/build button).
+        if (initialCommand && backendId) {
+          void ipc.terminalWrite(backendId, initialCommand + "\r");
+        }
       } catch {
         term.writeln("\x1b[31mFailed to start terminal\x1b[0m");
       }
@@ -89,7 +95,7 @@ export function TerminalView({
       term.dispose();
       termRef.current = null;
     };
-  }, [terminalId, cwd]);
+  }, [terminalId, cwd, initialCommand]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

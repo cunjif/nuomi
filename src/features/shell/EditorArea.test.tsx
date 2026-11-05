@@ -178,13 +178,13 @@ describe("EditorArea — workbench enhancement integration", () => {
     expect(await screen.findByRole("button", { name: "运行代码" })).toBeInTheDocument();
   });
 
-  it("mounts RunPanelOverlay at the editor column bottom", async () => {
+  it("mounts RunStatusBar at the editor column bottom when workbench.runPanel is enabled", async () => {
     tdSeedFiles({ "main.py": "print('hi')" });
     openInStore("main.py");
     renderPanel();
 
-    // The run panel title is visible (collapsed or expanded).
-    expect(await screen.findByText("运行结果")).toBeInTheDocument();
+    // The run-code button appears in the editor toolbar.
+    expect(await screen.findByRole("button", { name: "运行代码" })).toBeInTheDocument();
   });
 
   it("renders EditableTempFileTab when tempFileTabs is non-empty", async () => {

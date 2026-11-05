@@ -6,10 +6,12 @@ import { CliAgentsSection } from "./CliAgentsSection";
 import { EvolutionSettingsPanel } from "./EvolutionSettingsPanel";
 import { IdleProposalSection } from "./IdleProposalSection";
 import { IntegrationsSection } from "./IntegrationsSection";
+import { LspSection } from "./LspSection";
 import { MemorySection } from "./MemorySection";
 import { ProvidersSection } from "./ProvidersSection";
 import { RolesSection } from "./RolesSection";
 import { SandboxSection } from "./SandboxSection";
+import { SdkSection } from "./SdkSection";
 import { WorkbenchSection } from "./WorkbenchSection";
 
 /**
@@ -27,6 +29,8 @@ const TABS = [
   { key: "memory", labelKey: "settings.memory.heading" },
   { key: "access", labelKey: "settings.tab.evolution" },
   { key: "sandbox", labelKey: "settings.tab.sandbox" },
+  { key: "sdk", labelKey: "settings.sdk.heading" },
+  { key: "lsp", labelKey: "settings.lsp.heading" },
   { key: "workbench", labelKey: "workbench.settings.heading" },
 ] as const;
 
@@ -53,6 +57,10 @@ function TabPanel({ tab }: { tab: TabKey }): ReactNode {
       );
     case "sandbox":
       return <SandboxSection />;
+    case "sdk":
+      return <SdkSection />;
+    case "lsp":
+      return <LspSection />;
     case "workbench":
       return <WorkbenchSection />;
   }

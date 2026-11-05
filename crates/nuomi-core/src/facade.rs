@@ -992,8 +992,8 @@ fn persist_tool_result_product(
     now_ms: i64,
 ) {
     use crate::services::product_dir::{
-        default_ttl_ms, ensure_parent, file_sha256, product_path, ProductKind, Producer,
-        ProducerModule,
+        default_ttl_ms, ensure_parent, file_sha256, product_path, Producer, ProducerModule,
+        ProductKind,
     };
 
     let ws = match repos::workspaces::find_active(conn) {

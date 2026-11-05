@@ -49,7 +49,12 @@ export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNod
         {/* Terminal column: xterm.js owns its own viewport. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
           {activeTerminal !== null ? (
-            <TerminalView key={activeTerminal.id} terminalId={activeTerminal.id} cwd={activeTerminal.cwd} />
+            <TerminalView
+              key={activeTerminal.id}
+              terminalId={activeTerminal.id}
+              cwd={activeTerminal.cwd}
+              initialCommand={activeTerminal.initialCommand}
+            />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-sm text-ink-muted">
               <p>{t("terminal.empty")}</p>

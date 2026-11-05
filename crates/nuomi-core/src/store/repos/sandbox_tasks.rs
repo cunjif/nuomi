@@ -232,7 +232,15 @@ pub fn set_spilled_output(
              stdout_ref = ?4, stderr_ref = ?5,
              stdout_truncated = ?6, stderr_truncated = ?7
          WHERE id = ?1",
-        params![id, stdout, stderr, stdout_ref, stderr_ref, stdout_truncated, stderr_truncated],
+        params![
+            id,
+            stdout,
+            stderr,
+            stdout_ref,
+            stderr_ref,
+            stdout_truncated,
+            stderr_truncated
+        ],
     )?;
     Ok(())
 }

@@ -988,6 +988,9 @@ export function testDoubleCommands(): CommandSet {
     async checkCliAgent(_profileId) {
       return ok({ ok: true, versionLine: "fake-cli 1.0.0", error: null });
     },
+    async checkCommandAvailable(_command: string) {
+      return ok({ ok: true, path: "/usr/bin/fake", error: null });
+    },
     async listRoles() {
       return ok([...tdState.roles]);
     },
@@ -2085,6 +2088,54 @@ export function testDoubleCommands(): CommandSet {
     },
     async productRead(_productId: number) {
       return ok("");
+    },
+    async lspGetConfigs() {
+      return ok([]);
+    },
+    async lspSetConfig(_config: unknown) {
+      return ok(null);
+    },
+    async lspGetStatuses() {
+      return ok([]);
+    },
+    async lspStart(_language: string, _rootUri: string) {
+      return ok(null);
+    },
+    async lspStop(_language: string) {
+      return ok(null);
+    },
+    async lspCompletion(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspHover(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspDefinition(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspReferences(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspSignatureHelp(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspFormatting(_language: string, _rootUri: string, _uri: string) {
+      return ok(null);
+    },
+    async lspDocumentSymbols(_language: string, _rootUri: string, _uri: string) {
+      return ok(null);
+    },
+    async lspDidOpen(_language: string, _rootUri: string, _uri: string, _languageId: string, _text: string) {
+      return ok(null);
+    },
+    async lspDidChange(_language: string, _rootUri: string, _uri: string, _version: number, _text: string) {
+      return ok(null);
+    },
+    async lspDidClose(_language: string, _rootUri: string, _uri: string) {
+      return ok(null);
+    },
+    async lspDidSave(_language: string, _rootUri: string, _uri: string, _text: string) {
+      return ok(null);
     },
   };
   return cmds;

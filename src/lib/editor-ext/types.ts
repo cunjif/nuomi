@@ -128,6 +128,14 @@ export interface EditorExtContext {
     language: string,
     provider: Monaco.languages.DocumentFormattingEditProvider,
   ): void;
+  registerCompletionItemProvider(
+    language: string,
+    provider: Monaco.languages.CompletionItemProvider,
+  ): void;
+  registerSignatureHelpProvider(
+    language: string,
+    provider: Monaco.languages.SignatureHelpProvider,
+  ): void;
   /**
    * Callback invoked once a real editor instance mounts (Alt+F1 style
    * editor.addCommand/addAction bindings live here, not in contribute —

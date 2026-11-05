@@ -13,8 +13,7 @@ import {
 } from "../../lib/editor-ext";
 
 const FLAGS = [
-  { id: "workbench.runPanel", labelKey: "workbench.settings.runPanel", descKey: "workbench.settings.runPanelDesc" },
-  { id: "workbench.tempWorkspace", labelKey: "workbench.settings.tempWorkspace", descKey: "workbench.settings.tempWorkspaceDesc" },
+  { id: "workbench.runPanel", labelKey: "workbench.settings.runPanel", descKey: "workbench.settings.runPanelDesc" },  { id: "workbench.tempWorkspace", labelKey: "workbench.settings.tempWorkspace", descKey: "workbench.settings.tempWorkspaceDesc" },
   { id: "workbench.enhancedHover", labelKey: "workbench.settings.enhancedHover", descKey: "workbench.settings.enhancedHoverDesc" },
 ] as const;
 

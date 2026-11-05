@@ -3682,6 +3682,50 @@ fn failed_check(message: String) -> CliAgentCheckDto {
     }
 }
 
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandAvailableDto {
+    pub ok: bool,
+    pub path: Option<String>,
+    pub error: Option<String>,
+}
+
+pub async fn impl_check_command_available(
+    command: String,
+) -> Result<CommandAvailableDto, IpcError> {
+    let cmd = command.clone();
+    tokio::task::spawn_blocking(move || -> Result<CommandAvailableDto, IpcError> {
+        let candidates = nuomi_core::adapters::spawn_candidates(&cmd);
+        for candidate in &candidates {
+            let mut probe = std::process::Command::new(candidate);
+            probe.arg("--version");
+            probe.stdin(Stdio::null());
+            probe.stdout(Stdio::null());
+            probe.stderr(Stdio::null());
+            match probe.spawn() {
+                Ok(mut child) => match child.wait() {
+                    Ok(status) if status.success() => {
+                        return Ok(CommandAvailableDto {
+                            ok: true,
+                            path: Some(candidate.clone()),
+                            error: None,
+                        });
+                    }
+                    _ => continue,
+                },
+                Err(_) => continue,
+            }
+        }
+        Ok(CommandAvailableDto {
+            ok: false,
+            path: None,
+            error: Some(format!("{command} not found in PATH")),
+        })
+    })
+    .await
+    .map_err(|e| IpcError::new("command_check_failed", e.to_string()))?
+}
+
 /// Drains probe pipes so a chatty `--version` cannot deadlock `wait()`;
 /// returns the first non-empty stdout line plus the truncated stderr.
 async fn collect_probe_output(
@@ -11516,9 +11560,9 @@ pub async fn impl_terminal_create(
 
     let id = {
         let guard = state.terminal_manager.read().unwrap();
-        let mgr = guard
-            .as_ref()
-            .ok_or_else(|| IpcError::new("terminal.not_ready", "terminal manager not initialized"))?;
+        let mgr = guard.as_ref().ok_or_else(|| {
+            IpcError::new("terminal.not_ready", "terminal manager not initialized")
+        })?;
         mgr.create(
             Some(resolved_path.as_path()),
             ws_id.clone(),
@@ -11708,7 +11752,9 @@ pub async fn impl_product_list(
         let db = Db::open(&db_path)?;
         migrations::run(&db.0)?;
         let filter = repos::product_registry::ProductFilter {
-            kind: kind.as_deref().and_then(nuomi_core::services::product_dir::ProductKind::parse),
+            kind: kind
+                .as_deref()
+                .and_then(nuomi_core::services::product_dir::ProductKind::parse),
             producer_module: None,
             workspace_id,
             session_id,
@@ -11721,16 +11767,14 @@ pub async fn impl_product_list(
     .map_err(join_err)?
 }
 
-pub async fn impl_product_read(
-    state: &AppState,
-    product_id: i64,
-) -> Result<String, IpcError> {
+pub async fn impl_product_read(state: &AppState, product_id: i64) -> Result<String, IpcError> {
     let db_path = state.db_path.clone();
     tokio::task::spawn_blocking(move || -> Result<String, IpcError> {
         let db = Db::open(&db_path)?;
         migrations::run(&db.0)?;
-        let record = repos::product_registry::get(&db.0, product_id)?
-            .ok_or_else(|| IpcError::new("store.not_found", format!("product#{product_id} not found")))?;
+        let record = repos::product_registry::get(&db.0, product_id)?.ok_or_else(|| {
+            IpcError::new("store.not_found", format!("product#{product_id} not found"))
+        })?;
         std::fs::read_to_string(&record.abs_path)
             .map_err(|e| IpcError::new("product.io", format!("failed to read product file: {e}")))
     })

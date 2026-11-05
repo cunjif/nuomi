@@ -20,7 +20,7 @@ import { EditableTempFileTab } from "./temp-workspace/EditableTempFileTab";
 import { WorkspaceBottomBar } from "./WorkspaceBottomBar";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
 import { RunEntryButtons } from "./run/RunEntryButtons";
-import { RunPanelOverlay } from "./run/RunPanelOverlay";
+import { RunStatusBar } from "./run/RunStatusBar";
 import { useUiStore } from "../../lib/store/uiStore";
 
 // Register + contribute the builtin editor extensions once at module load so
@@ -128,7 +128,7 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
           {getOverlays().map(({ overlay }) => (
             <overlay.Component key={overlay.id} />
           ))}
-          {isEditorExtensionEnabled("workbench.runPanel") && <RunPanelOverlay workspaceId={workspaceId} />}
+          {isEditorExtensionEnabled("workbench.runPanel") && <RunStatusBar />}
         </div>
         {/* Explorer sidebar (right, per 用户截图): workspace actions + root
         label on top, then ONE scroll container for the whole tree. */}

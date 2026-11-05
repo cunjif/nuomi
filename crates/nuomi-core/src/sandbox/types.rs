@@ -347,9 +347,15 @@ static SECRET_PATTERNS: &[(&str, &str)] = &[
     ("keyring reference", r"keyring://"),
     ("keyring api access", r"(?i)os\.keyring|keyring\.get"),
     ("bearer token", r"Bearer\s+[A-Za-z0-9\-_]{20,}"),
-    ("secret env assignment", r"(?i)(API_KEY|SECRET|TOKEN|PASSWORD)\s*="),
+    (
+        "secret env assignment",
+        r"(?i)(API_KEY|SECRET|TOKEN|PASSWORD)\s*=",
+    ),
     ("aws access key id", r"AKIA[0-9A-Z]{16}"),
-    ("pem private key", r"-----BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY-----"),
+    (
+        "pem private key",
+        r"-----BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY-----",
+    ),
 ];
 
 /// Scans `text` for known secret-leak patterns (ADR-0026 §2). Returns the
@@ -559,16 +565,19 @@ mod tests {
         // Plain Python snippet.
         assert_eq!(check_secret_payload("print('hello world')"), None);
         // Build target description.
-        assert_eq!(check_secret_payload("cargo build --release -p nuomi-cli"), None);
-        // File path inside an authorized dir.
         assert_eq!(
-            check_secret_payload("C:\\proj\\nuomi\\src\\main.rs"),
+            check_secret_payload("cargo build --release -p nuomi-cli"),
             None
         );
+        // File path inside an authorized dir.
+        assert_eq!(check_secret_payload("C:\\proj\\nuomi\\src\\main.rs"), None);
         // Short bearer-like string below the 20-char threshold (false-positive guard).
         assert_eq!(check_secret_payload("Bearer short"), None);
         // Variable name containing "key" but not the assignment pattern.
-        assert_eq!(check_secret_payload("let keymap = Keymap::default();"), None);
+        assert_eq!(
+            check_secret_payload("let keymap = Keymap::default();"),
+            None
+        );
         // "API_KEY" as a read reference, not an assignment.
         assert_eq!(check_secret_payload("std::env::var(\"API_KEY\")"), None);
     }

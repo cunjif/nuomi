@@ -37,6 +37,9 @@ pub enum CoreError {
 
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::services::SchedulerError),
+
+    #[error("lsp error: {0}")]
+    Lsp(#[from] crate::lsp::LspError),
 }
 
 /// Convenience result alias used across the crate.

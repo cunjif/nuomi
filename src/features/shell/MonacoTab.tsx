@@ -293,6 +293,11 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
         beforeMount={defineNuomiThemes}
         onMount={(editor, monaco) => {
           editorRef.current = editor;
+          const model = editor.getModel();
+          if (model !== null && model.getLanguageId() !== language) {
+            console.warn(`[MonacoTab] Language mismatch: model="${model.getLanguageId()}" expected="${language}" for path="${path}" — forcing correct language`);
+            monaco.editor.setModelLanguage(model, language);
+          }
           attachMonacoProviders(monaco, editor);
           // Landing flash: briefly highlight the target line of a workspace
           // index jump so the eye catches it (VSCode-like).

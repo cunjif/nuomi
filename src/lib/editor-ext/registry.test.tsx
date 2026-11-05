@@ -226,6 +226,41 @@ describe("editor extension registry — editor-ready binding", () => {
   });
 });
 
+describe("editor extension registry — completion & signatureHelp providers", () => {
+  it("queues and flushes completion providers", () => {
+    const registered: Array<{ language: string; provider: unknown }> = [];
+    const fakeMonaco = {
+      languages: {
+        registerCompletionItemProvider: (language: string, provider: unknown) => {
+          registered.push({ language, provider });
+        },
+        registerSignatureHelpProvider: (language: string, provider: unknown) => {
+          registered.push({ language, provider });
+        },
+      },
+    } as unknown as typeof Monaco;
+
+    registerEditorExtension({
+      id: "builtin.lsp-test",
+      titleI18nKey: "editor.ext.lsp-test",
+      contribute: (ctx) => {
+        ctx.registerCompletionItemProvider("python", {
+          provideCompletionItems: () => ({ suggestions: [] }),
+        });
+        ctx.registerSignatureHelpProvider("python", {
+          provideSignatureHelp: () => null,
+        });
+      },
+    });
+    ensureEditorExtensionsActivated(fakeMonaco, null);
+    attachMonacoProviders(fakeMonaco, null);
+
+    expect(registered).toHaveLength(2);
+    expect(registered[0]?.language).toBe("python");
+    expect(registered[1]?.language).toBe("python");
+  });
+});
+
 describe("editor extension registry — version store", () => {
   it("bumps the version on registration and toggles (useSyncExternalStore source)", () => {
     const before = useEditorExtVersionSnapshot();

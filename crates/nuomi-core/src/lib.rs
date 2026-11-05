@@ -20,6 +20,7 @@ pub mod exchange;
 pub mod facade;
 pub mod harness;
 pub mod integrations;
+pub mod lsp;
 pub mod orchestrator;
 pub mod plugins;
 pub mod providers;

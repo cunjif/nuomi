@@ -65,6 +65,7 @@ impl From<CoreError> for IpcError {
             CoreError::WorkspaceMigration(err) => map_migration_error(&err),
             CoreError::Git(err) => map_git(&err),
             CoreError::Scheduler(err) => Self::new("scheduler.failed", err.to_string()),
+            CoreError::Lsp(err) => Self::new("lsp.failed", err.to_string()),
         }
     }
 }
@@ -254,6 +255,25 @@ impl From<nuomi_core::services::terminal_manager::TerminalError> for IpcError {
     }
 }
 
+impl From<nuomi_core::lsp::LspError> for IpcError {
+    fn from(e: nuomi_core::lsp::LspError) -> Self {
+        use nuomi_core::lsp::LspError as E;
+        let code = match &e {
+            E::NotStarted(_) => "lsp.not_started",
+            E::AlreadyStarted(_) => "lsp.already_started",
+            E::ProcessSpawn(_) => "lsp.process_spawn",
+            E::ProcessExited(_) => "lsp.process_exited",
+            E::Transport(_) => "lsp.transport",
+            E::Protocol(_) => "lsp.protocol",
+            E::Timeout(_) => "lsp.timeout",
+            E::ServerError { .. } => "lsp.server_error",
+            E::NotAvailable(_) => "lsp.not_available",
+            E::InitializeFailed(_) => "lsp.initialize_failed",
+        };
+        Self::new(code, e.to_string())
+    }
+}
+
 /// Stable code constants (frontend i18n keys reference these).
 pub mod codes {
     pub const STORE_NOT_FOUND: &str = "store.not_found";
@@ -277,6 +297,7 @@ pub mod codes {
     pub const GIT_COMMAND_NOT_ALLOWED: &str = "git.command_not_allowed";
     pub const GIT_NOT_A_REPOSITORY: &str = "git.not_a_repository";
     pub const SCHEDULER_FAILED: &str = "scheduler.failed";
+    pub const LSP_FAILED: &str = "lsp.failed";
 }
 
 #[cfg(test)]

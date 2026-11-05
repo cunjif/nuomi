@@ -34,7 +34,7 @@ function setActiveFile(path: string): void {
 }
 
 describe("useActiveFileRunSource", () => {
-  it("returns matched runtime + file content for an active python file", async () => {
+  it("returns matched command + file content for an active python file", async () => {
     injectIpcCommands(testDoubleCommands());
     tdReset();
     tdSeedFiles({ "main.py": "print('hi')" });
@@ -42,22 +42,24 @@ describe("useActiveFileRunSource", () => {
 
     const { result } = renderHook(() => useActiveFileRunSource(), { wrapper });
     await waitFor(() => expect(result.current.source).toBe("print('hi')"));
-    expect(result.current.runtime).toBe("python");
+    expect(result.current.command).toBe('python "main.py"');
     expect(result.current.language).toBe("python");
+    expect(result.current.filePath).toBe("main.py");
   });
 
-  it("returns runtime null and empty source when there is no active file", async () => {
+  it("returns command null and empty source when there is no active file", async () => {
     injectIpcCommands(testDoubleCommands());
     tdReset();
     useUiStore.setState({ activeWorkspaceId: null, editorByWorkspace: {} });
 
     const { result } = renderHook(() => useActiveFileRunSource(), { wrapper });
-    await waitFor(() => expect(result.current.runtime).toBeNull());
+    await waitFor(() => expect(result.current.command).toBeNull());
     expect(result.current.source).toBe("");
     expect(result.current.language).toBe("plaintext");
+    expect(result.current.filePath).toBeNull();
   });
 
-  it("returns runtime null when the language has no matching runtime", async () => {
+  it("returns command null when the language has no matching command", async () => {
     injectIpcCommands(testDoubleCommands());
     tdReset();
     tdSeedFiles({ "README.md": "# title" });
@@ -65,7 +67,7 @@ describe("useActiveFileRunSource", () => {
 
     const { result } = renderHook(() => useActiveFileRunSource(), { wrapper });
     await waitFor(() => expect(result.current.source).toBe("# title"));
-    expect(result.current.runtime).toBeNull();
+    expect(result.current.command).toBeNull();
     expect(result.current.language).toBe("markdown");
   });
 });

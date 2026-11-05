@@ -12,6 +12,7 @@ import { previewPdfExtension } from "./builtin/preview-pdf";
 import { previewOfficeExtension } from "./builtin/preview-office";
 import { hoverDocsExtension } from "./builtin/hover-docs";
 import { codebaseIndexExtension } from "./builtin/codebase-index";
+import { lspBridgeExtension } from "./builtin/lsp-bridge";
 
 /** Shipped-with-the-app extensions (individually disableable in the manager). */
 export const builtinEditorExtensions: readonly EditorExtension[] = [
@@ -22,6 +23,7 @@ export const builtinEditorExtensions: readonly EditorExtension[] = [
   previewOfficeExtension,
   hoverDocsExtension,
   codebaseIndexExtension,
+  lspBridgeExtension,
 ];
 
 /**

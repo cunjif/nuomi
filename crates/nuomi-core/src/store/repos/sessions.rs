@@ -264,7 +264,12 @@ pub fn restore_from_archive(
              work_directory_id = ?3,
              updated_at = ?4
          WHERE id = ?1 AND archived_at IS NOT NULL AND deleted_at IS NULL",
-        params![session_id, new_workspace_id, new_work_directory_id, crate::domain::now_ms()],
+        params![
+            session_id,
+            new_workspace_id,
+            new_work_directory_id,
+            crate::domain::now_ms()
+        ],
     )?;
     if n == 0 {
         return Err(StoreError::NotFound {

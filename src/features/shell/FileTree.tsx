@@ -7,15 +7,16 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
-import { useUiStore } from "../../lib/store/uiStore";
+import { useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
 import { useOpenWorkspace } from "../../lib/store/workspaceQueries";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/ContextMenu";
 import { languageForPath } from "./editorLanguage";
-import { languageToRuntime } from "./run/languageToRuntime";
+import { languageToRunCommand, detectBuildCommand } from "./run/languageToRuntime";
+import { SDK_CONFIGS_KEY, parseSdkConfigs } from "./run/sdkConfigs";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import {
   batchDelete,
@@ -57,6 +58,7 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const { data: openWorkspace } = useOpenWorkspace();
   const hasDirectories = (openWorkspace?.directories ?? []).some((d) => d.mounted);
   const rootQuery = useQuery({ queryKey: ["dir", workspaceId, ""], queryFn: () => ipc.listDir("", workspaceId), enabled: hasDirectories });
+  const sdkQuery = useQuery({ queryKey: ["app-setting", SDK_CONFIGS_KEY], queryFn: () => ipc.appSettingGet(SDK_CONFIGS_KEY) });
 
   const handleAddDir = async (): Promise<void> => {
     const selected = await pickFolder({ directory: true, multiple: false });
@@ -81,31 +83,22 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const createDirMut = useCreateDir();
   const renameMut = useRename();
 
-  const runtimesQuery = useQuery({
-    queryKey: ["sandbox", "runtimes"],
-    queryFn: () => ipc.sandboxListRuntimes(),
-  });
-  const runtimes = runtimesQuery.data ?? [];
-  const sandboxRunMut = useMutation({
-    mutationFn: (vars: { targetPath: string; isProject: boolean }) =>
-      ipc.sandboxRunWorkbenchTarget({
-        targetPath: vars.targetPath,
-        isProject: vars.isProject,
-        runtime:
-          (vars.isProject
-            ? runtimes[0]?.id
-            : languageToRuntime(languageForPath(vars.targetPath), runtimes)) ??
-          runtimes[0]?.id ??
-          "python",
-        limits: null,
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["sandbox"] });
-    },
-    onError: (err) => {
-      setError(describeError(err));
-    },
-  });
+  const setActiveArea = useUiStore((s) => s.setActiveArea);
+  const addTerminal = useUiStore((s) => s.addTerminal);
+
+  function createRunTerminal(cmd: string, title: string): void {
+    if (workspaceId === null) return;
+    const id = `term-${Date.now()}`;
+    const instance: TerminalInstance = {
+      id,
+      title,
+      createdAt: Date.now(),
+      cwdSource: "workspace",
+      initialCommand: cmd,
+    };
+    addTerminal(workspaceId, instance);
+    setActiveArea("terminal");
+  }
 
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -293,26 +286,28 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
         void navigator.clipboard?.writeText(text).catch(() => {});
       },
     });
-    const sandboxDisabled =
-      runtimes.length === 0 || runtimesQuery.isError || sandboxRunMut.isPending || singleSelected === null;
+    const rootFiles = (rootQuery.data ?? []).map((e) => e.name);
+    const sdkConfigs = parseSdkConfigs(sdkQuery.data ?? null);
+    const runCommand = singleSelected !== null && !menuIsDir
+      ? languageToRunCommand(languageForPath(singleSelected as string), singleSelected as string, sdkConfigs)
+      : null;
+    const buildCmd = detectBuildCommand(rootFiles, sdkConfigs);
     items.push({ type: "separator" });
     if (!menuIsDir) {
       items.push({
         type: "item",
         id: "runInSandbox",
         label: t("files.runInSandbox"),
-        disabled: sandboxDisabled,
-        onSelect: () =>
-          singleSelected && sandboxRunMut.mutate({ targetPath: singleSelected, isProject: false }),
+        disabled: runCommand === null,
+        onSelect: () => runCommand !== null && createRunTerminal(runCommand, t("files.runInSandbox")),
       });
     } else {
       items.push({
         type: "item",
         id: "runProjectInSandbox",
         label: t("files.runProjectInSandbox"),
-        disabled: sandboxDisabled,
-        onSelect: () =>
-          singleSelected && sandboxRunMut.mutate({ targetPath: singleSelected, isProject: true }),
+        disabled: buildCmd === null,
+        onSelect: () => buildCmd !== null && createRunTerminal(buildCmd, t("files.runProjectInSandbox")),
       });
     }
     return items;

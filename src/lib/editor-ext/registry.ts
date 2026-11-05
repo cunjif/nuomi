@@ -24,7 +24,7 @@ import { ipc } from "../ipc/client";
 interface QueuedMonacoProvider {
   extId: string;
   language: string;
-  kind: "hover" | "definition" | "reference" | "formatting";
+  kind: "hover" | "definition" | "reference" | "formatting" | "completion" | "signatureHelp";
   // Monaco provider interfaces are structural; kept loose here because the
   // queue is flushed against the real Monaco namespace only.
   provider: unknown;
@@ -326,6 +326,12 @@ function makeContext(extId: string, monaco: typeof Monaco | null, editor: Monaco
     registerDocumentFormattingEditProvider(language, provider) {
       monacoQueue.push({ extId, language, kind: "formatting", provider });
     },
+    registerCompletionItemProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "completion", provider });
+    },
+    registerSignatureHelpProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "signatureHelp", provider });
+    },
     registerEditorReady(cb) {
       readyQueue.push({ extId, cb, bound: new WeakSet() });
     },
@@ -367,12 +373,21 @@ export function attachMonacoProviders(
   editor: Monaco.editor.IStandaloneCodeEditor | null,
 ): void {
   const pending = monacoQueue.slice(flushedCount);
+  const hoverLangs: string[] = [];
   for (const q of pending) {
     if (!isExtEnabled(q.extId)) continue;
-    if (q.kind === "hover") monaco.languages.registerHoverProvider(q.language, q.provider as Monaco.languages.HoverProvider);
+    if (q.kind === "hover") {
+      monaco.languages.registerHoverProvider(q.language, q.provider as Monaco.languages.HoverProvider);
+      hoverLangs.push(q.language);
+    }
     else if (q.kind === "definition") monaco.languages.registerDefinitionProvider(q.language, q.provider as Monaco.languages.DefinitionProvider);
     else if (q.kind === "reference") monaco.languages.registerReferenceProvider(q.language, q.provider as Monaco.languages.ReferenceProvider);
+    else if (q.kind === "completion") monaco.languages.registerCompletionItemProvider(q.language, q.provider as Monaco.languages.CompletionItemProvider);
+    else if (q.kind === "signatureHelp") monaco.languages.registerSignatureHelpProvider(q.language, q.provider as Monaco.languages.SignatureHelpProvider);
     else monaco.languages.registerDocumentFormattingEditProvider(q.language, q.provider as Monaco.languages.DocumentFormattingEditProvider);
+  }
+  if (hoverLangs.length > 0) {
+    console.debug(`[editor-ext] Hover providers registered for: ${hoverLangs.join(", ")}`);
   }
   flushedCount = monacoQueue.length;
   // Editor-ready callbacks bind per instance (F12/Alt+F1 live on the

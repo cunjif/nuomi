@@ -132,6 +132,8 @@ export interface TerminalInstance {
   /** Working directory fixed at creation time; absent on legacy instances. */
   cwd?: string;
   cwdSource?: "workspace" | "home" | "explicit";
+  /** Command to execute once the terminal PTY is ready (e.g. "python main.py"). */
+  initialCommand?: string;
 }
 
 /**

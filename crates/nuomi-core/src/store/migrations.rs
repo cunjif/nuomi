@@ -1683,13 +1683,25 @@ mod tests {
         // Apply 0046.
         run_migrations_to(&conn, 46);
         let drive: String = conn
-            .query_row("SELECT abs_path FROM work_directories WHERE id='d1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT abs_path FROM work_directories WHERE id='d1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let unc: String = conn
-            .query_row("SELECT abs_path FROM work_directories WHERE id='d2'", [], |r| r.get(0))
+            .query_row(
+                "SELECT abs_path FROM work_directories WHERE id='d2'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let plain: String = conn
-            .query_row("SELECT abs_path FROM work_directories WHERE id='d3'", [], |r| r.get(0))
+            .query_row(
+                "SELECT abs_path FROM work_directories WHERE id='d3'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(drive, "C:\\Users\\james\\Codehub");
         assert_eq!(unc, "\\\\server\\share\\dir");

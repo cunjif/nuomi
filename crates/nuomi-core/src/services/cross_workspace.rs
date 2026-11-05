@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use super::workspace_registry_v2::compat_roots;
 use crate::services::product_dir::{
-    default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+    default_ttl_ms, ensure_parent, product_path, Producer, ProducerModule, ProductKind,
 };
 use crate::store::repos::workspace_open_state;
 use crate::store::repos::workspaces;
@@ -156,11 +156,7 @@ impl CrossWorkspaceService {
     /// Persists a search result as a JSON file under the unified product
     /// directory and registers it in `product_registry`. Best-effort: errors
     /// are logged and swallowed so search results still reach the caller.
-    pub fn persist_search_result(
-        &self,
-        outcome: &CrossSearchOutcome,
-        query: &str,
-    ) {
+    pub fn persist_search_result(&self, outcome: &CrossSearchOutcome, query: &str) {
         let conn = match self.conn() {
             Ok(c) => c,
             Err(e) => {

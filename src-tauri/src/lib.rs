@@ -9,6 +9,7 @@
 pub mod commands;
 mod events;
 mod ipc_error;
+pub mod lsp_commands;
 pub mod notifier;
 pub mod schedule_dispatcher;
 pub mod shell_resilience;
@@ -16,6 +17,8 @@ pub mod state;
 mod tauri_cmds;
 
 pub use ipc_error::{codes, IpcError};
+
+use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 use tauri_specta::{collect_commands, Builder};
@@ -133,6 +136,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::upsert_agent_profile,
         tauri_cmds::delete_agent_profile,
         tauri_cmds::check_cli_agent,
+        tauri_cmds::check_command_available,
         tauri_cmds::list_roles,
         tauri_cmds::upsert_role,
         tauri_cmds::delete_role,
@@ -253,6 +257,22 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::evolution_dry_run_preview,
         tauri_cmds::product_list,
         tauri_cmds::product_read,
+        tauri_cmds::lsp_get_configs,
+        tauri_cmds::lsp_set_config,
+        tauri_cmds::lsp_get_statuses,
+        tauri_cmds::lsp_start,
+        tauri_cmds::lsp_stop,
+        tauri_cmds::lsp_completion,
+        tauri_cmds::lsp_hover,
+        tauri_cmds::lsp_definition,
+        tauri_cmds::lsp_references,
+        tauri_cmds::lsp_signature_help,
+        tauri_cmds::lsp_formatting,
+        tauri_cmds::lsp_document_symbols,
+        tauri_cmds::lsp_did_open,
+        tauri_cmds::lsp_did_change,
+        tauri_cmds::lsp_did_close,
+        tauri_cmds::lsp_did_save,
         tauri_cmds::__nuomi_heartbeat,
     ])
 }
@@ -508,6 +528,30 @@ async fn boot_and_wire(
                 ready_ms = started.elapsed().as_millis() as u64,
                 "kernel ready (window shown independently of boot)"
             );
+
+            // LSP diagnostic forwarder (ADR-0027 L5): drains server notifications
+            // from all running LS processes and emits them as Tauri events for the
+            // frontend to consume (textDocument/publishDiagnostics → Monaco markers).
+            let lsp_app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = lsp_app.state::<AppState>();
+                let manager = Arc::clone(&state.lsp_manager);
+                loop {
+                    let notifications = manager.drain_notifications().await;
+                    for (lang, notif) in notifications {
+                        let event_name = format!("lsp://{}", notif.method);
+                        let payload = serde_json::json!({
+                            "language": lang.as_str(),
+                            "method": notif.method,
+                            "params": notif.params,
+                        });
+                        if let Err(e) = lsp_app.emit(&event_name, &payload) {
+                            tracing::warn!(error = %e, event = %event_name, "LSP event emit failed");
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
         }
         Err(e) => {
             tracing::error!(

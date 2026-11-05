@@ -156,7 +156,7 @@ pub fn insert_with_product(
     insert(conn, snap)?;
 
     use crate::services::product_dir::{
-        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+        default_ttl_ms, ensure_parent, product_path, Producer, ProducerModule, ProductKind,
     };
 
     let producer = Producer::new(ProducerModule::Evolution, &snap.id);

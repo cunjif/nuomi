@@ -2,6 +2,7 @@
 
 use crate::commands;
 use crate::ipc_error::IpcError;
+use crate::lsp_commands;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -952,6 +953,14 @@ pub async fn check_cli_agent(
     profile_id: String,
 ) -> Result<commands::CliAgentCheckDto, IpcError> {
     commands::impl_check_cli_agent(&state, profile_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn check_command_available(
+    command: String,
+) -> Result<commands::CommandAvailableDto, IpcError> {
+    commands::impl_check_command_available(command).await
 }
 
 #[tauri::command]
@@ -2040,4 +2049,183 @@ pub async fn product_read(
     product_id: i64,
 ) -> Result<String, IpcError> {
     commands::impl_product_read(&state, product_id).await
+}
+
+// ---------- LSP (ADR-0027) ----------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_get_configs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<lsp_commands::LspServerConfigDto>, IpcError> {
+    lsp_commands::impl_lsp_get_configs(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_set_config(
+    state: tauri::State<'_, AppState>,
+    config: lsp_commands::LspServerConfigDto,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_set_config(&state, config).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_get_statuses(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<lsp_commands::LspServerStatusDto>, IpcError> {
+    lsp_commands::impl_lsp_get_statuses(&state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_start(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_start(&state, language, root_uri).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_stop(state: tauri::State<'_, AppState>, language: String) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_stop(&state, language).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_completion(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_completion(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_hover(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_hover(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_definition(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_definition(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_references(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_references(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_signature_help(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_signature_help(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_formatting(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_formatting(&state, language, root_uri, uri).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_document_symbols(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_document_symbols(&state, language, root_uri, uri).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_did_open(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    language_id: String,
+    text: String,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_did_open(&state, language, root_uri, uri, language_id, text).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_did_change(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    version: i32,
+    text: String,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_did_change(&state, language, root_uri, uri, version, text).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_did_close(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_did_close(&state, language, root_uri, uri).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_did_save(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    text: String,
+) -> Result<(), IpcError> {
+    lsp_commands::impl_lsp_did_save(&state, language, root_uri, uri, text).await
 }

@@ -26,8 +26,8 @@ use crate::harness::{Event, EventBus};
 use crate::sandbox::ephemeral::EphemeralManager;
 use crate::sandbox::executor::{SandboxExecutor, SandboxOutputChunk, SandboxTaskSnapshot};
 use crate::sandbox::types::{
-    INLINE_OUTPUT_CAP, SandboxError, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskSpec,
-    SandboxTaskStatus,
+    SandboxError, SandboxResourceUsage, SandboxRuntimeInfo, SandboxTaskSpec, SandboxTaskStatus,
+    INLINE_OUTPUT_CAP,
 };
 use crate::store::repos::sandbox_tasks::{self, SandboxTaskRecord};
 use crate::store::repos::{events, work_directories, workspaces};
@@ -945,18 +945,13 @@ fn register_sandbox_output(
     size: i64,
 ) {
     use crate::services::product_dir::{
-        default_ttl_ms, product_path, ProductKind, Producer, ProducerModule,
+        default_ttl_ms, product_path, Producer, ProducerModule, ProductKind,
     };
     use crate::store::repos::product_registry;
 
     let producer = Producer::new(ProducerModule::Sandbox, task_id);
     let key = format!("{stream}.log");
-    let product_path = product_path(
-        workspace_root,
-        ProductKind::SandboxOutput,
-        &producer,
-        &key,
-    );
+    let product_path = product_path(workspace_root, ProductKind::SandboxOutput, &producer, &key);
 
     if let Err(e) = crate::services::product_dir::ensure_parent(&product_path) {
         tracing::warn!(error = %e, "sandbox: failed to create product parent for {stream}");
@@ -998,7 +993,7 @@ fn register_sandbox_artifact(
     artifact_ref: &str,
 ) {
     use crate::services::product_dir::{
-        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+        default_ttl_ms, ensure_parent, product_path, Producer, ProducerModule, ProductKind,
     };
     use crate::store::repos::product_registry;
 
@@ -1034,7 +1029,9 @@ fn register_sandbox_artifact(
 
     let now = now_ms();
     let ttl = default_ttl_ms(ProductKind::SandboxArtifact);
-    let size = std::fs::metadata(&product_path).map(|m| m.len() as i64).unwrap_or(0);
+    let size = std::fs::metadata(&product_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
 
     if let Err(e) = product_registry::insert(
         conn,
@@ -1050,7 +1047,9 @@ fn register_sandbox_artifact(
             sha256: None,
             created_at: now,
             expires_at: ttl.map(|t| now + t),
-            metadata: Some(serde_json::json!({ "task_id": task_id, "artifact_name": artifact_name })),
+            metadata: Some(
+                serde_json::json!({ "task_id": task_id, "artifact_name": artifact_name }),
+            ),
         },
     ) {
         tracing::warn!(error = %e, "sandbox: product_registry insert failed for artifact");
@@ -1856,8 +1855,8 @@ mod tests {
         let done = manager.step(&conn, "t-watch-usage").await.unwrap();
         assert_eq!(done.status, SandboxTaskStatus::TimedOut);
 
-        let events = events::list_by_aggregate(&conn, AGGREGATE_TYPE, "t-watch-usage", None)
-            .unwrap();
+        let events =
+            events::list_by_aggregate(&conn, AGGREGATE_TYPE, "t-watch-usage", None).unwrap();
         let timed_out_event = events
             .iter()
             .find(|e| e.payload["status"] == "timed_out")

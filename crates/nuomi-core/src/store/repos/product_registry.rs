@@ -7,7 +7,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::services::product_dir::{ProductKind, Producer, ProducerModule};
+use crate::services::product_dir::{Producer, ProducerModule, ProductKind};
 use crate::store::StoreError;
 
 /// A `product_registry` row.
@@ -38,8 +38,6 @@ pub struct ProductFilter {
     pub run_id: Option<String>,
 }
 
-
-
 /// Inserts a product record. Returns the auto-incremented row id.
 pub fn insert(conn: &Connection, record: &InsertParams) -> Result<i64, StoreError> {
     conn.query_row(
@@ -60,7 +58,10 @@ pub fn insert(conn: &Connection, record: &InsertParams) -> Result<i64, StoreErro
             record.sha256,
             record.created_at,
             record.expires_at,
-            record.metadata.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default()),
+            record
+                .metadata
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default()),
         ],
         |row| row.get(0),
     )
@@ -152,11 +153,8 @@ pub fn gc_expired(conn: &Connection, now_ms: i64) -> Result<usize, StoreError> {
 
 /// Deletes a product by row id.
 pub fn delete(conn: &Connection, id: i64) -> Result<(), StoreError> {
-    conn.execute(
-        "DELETE FROM product_registry WHERE id = ?1",
-        params![id],
-    )
-    .map_err(StoreError::from)?;
+    conn.execute("DELETE FROM product_registry WHERE id = ?1", params![id])
+        .map_err(StoreError::from)?;
     Ok(())
 }
 
@@ -267,36 +265,42 @@ mod tests {
     fn list_by_kind() {
         let conn = open_db();
         for i in 0..3 {
-            insert(&conn, &InsertParams {
-                kind: ProductKind::ToolResult,
-                producer: Producer::new(ProducerModule::Loop, format!("run-{i}")),
+            insert(
+                &conn,
+                &InsertParams {
+                    kind: ProductKind::ToolResult,
+                    producer: Producer::new(ProducerModule::Loop, format!("run-{i}")),
+                    workspace_id: None,
+                    session_id: None,
+                    run_id: None,
+                    key: format!("call-{i}"),
+                    abs_path: format!("/tmp/call-{i}"),
+                    size_bytes: 100,
+                    sha256: None,
+                    created_at: 1000 + i,
+                    expires_at: None,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        }
+        insert(
+            &conn,
+            &InsertParams {
+                kind: ProductKind::SandboxOutput,
+                producer: Producer::new(ProducerModule::Sandbox, "task-1"),
                 workspace_id: None,
                 session_id: None,
                 run_id: None,
-                key: format!("call-{i}"),
-                abs_path: format!("/tmp/call-{i}"),
-                size_bytes: 100,
+                key: "stdout.log".into(),
+                abs_path: "/tmp/stdout.log".into(),
+                size_bytes: 200,
                 sha256: None,
-                created_at: 1000 + i,
+                created_at: 2000,
                 expires_at: None,
                 metadata: None,
-            })
-            .unwrap();
-        }
-        insert(&conn, &InsertParams {
-            kind: ProductKind::SandboxOutput,
-            producer: Producer::new(ProducerModule::Sandbox, "task-1"),
-            workspace_id: None,
-            session_id: None,
-            run_id: None,
-            key: "stdout.log".into(),
-            abs_path: "/tmp/stdout.log".into(),
-            size_bytes: 200,
-            sha256: None,
-            created_at: 2000,
-            expires_at: None,
-            metadata: None,
-        })
+            },
+        )
         .unwrap();
 
         let filter = ProductFilter {
@@ -311,35 +315,41 @@ mod tests {
     #[test]
     fn gc_expired_deletes_past_expiry() {
         let conn = open_db();
-        insert(&conn, &InsertParams {
-            kind: ProductKind::SearchResult,
-            producer: Producer::new(ProducerModule::CrossWorkspace, "q-1"),
-            workspace_id: None,
-            session_id: None,
-            run_id: None,
-            key: "hash-1".into(),
-            abs_path: "/tmp/search-1".into(),
-            size_bytes: 50,
-            sha256: None,
-            created_at: 1000,
-            expires_at: Some(500), // already expired
-            metadata: None,
-        })
+        insert(
+            &conn,
+            &InsertParams {
+                kind: ProductKind::SearchResult,
+                producer: Producer::new(ProducerModule::CrossWorkspace, "q-1"),
+                workspace_id: None,
+                session_id: None,
+                run_id: None,
+                key: "hash-1".into(),
+                abs_path: "/tmp/search-1".into(),
+                size_bytes: 50,
+                sha256: None,
+                created_at: 1000,
+                expires_at: Some(500), // already expired
+                metadata: None,
+            },
+        )
         .unwrap();
-        insert(&conn, &InsertParams {
-            kind: ProductKind::SearchResult,
-            producer: Producer::new(ProducerModule::CrossWorkspace, "q-2"),
-            workspace_id: None,
-            session_id: None,
-            run_id: None,
-            key: "hash-2".into(),
-            abs_path: "/tmp/search-2".into(),
-            size_bytes: 50,
-            sha256: None,
-            created_at: 1000,
-            expires_at: Some(5000), // not yet expired
-            metadata: None,
-        })
+        insert(
+            &conn,
+            &InsertParams {
+                kind: ProductKind::SearchResult,
+                producer: Producer::new(ProducerModule::CrossWorkspace, "q-2"),
+                workspace_id: None,
+                session_id: None,
+                run_id: None,
+                key: "hash-2".into(),
+                abs_path: "/tmp/search-2".into(),
+                size_bytes: 50,
+                sha256: None,
+                created_at: 1000,
+                expires_at: Some(5000), // not yet expired
+                metadata: None,
+            },
+        )
         .unwrap();
 
         let deleted = gc_expired(&conn, 1000).unwrap();
@@ -352,20 +362,23 @@ mod tests {
     #[test]
     fn find_by_key_test() {
         let conn = open_db();
-        insert(&conn, &InsertParams {
-            kind: ProductKind::TerminalLog,
-            producer: Producer::new(ProducerModule::Terminal, "term-1"),
-            workspace_id: Some("ws-1".into()),
-            session_id: None,
-            run_id: None,
-            key: "output.jsonl".into(),
-            abs_path: "/tmp/term-1/output.jsonl".into(),
-            size_bytes: 500,
-            sha256: None,
-            created_at: 1000,
-            expires_at: None,
-            metadata: None,
-        })
+        insert(
+            &conn,
+            &InsertParams {
+                kind: ProductKind::TerminalLog,
+                producer: Producer::new(ProducerModule::Terminal, "term-1"),
+                workspace_id: Some("ws-1".into()),
+                session_id: None,
+                run_id: None,
+                key: "output.jsonl".into(),
+                abs_path: "/tmp/term-1/output.jsonl".into(),
+                size_bytes: 500,
+                sha256: None,
+                created_at: 1000,
+                expires_at: None,
+                metadata: None,
+            },
+        )
         .unwrap();
 
         let found = find_by_key(

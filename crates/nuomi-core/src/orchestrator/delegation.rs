@@ -158,7 +158,11 @@ impl DelegationBroker {
         }
     }
 
-    pub fn with_db_path(executor: Arc<dyn DelegateExecutor>, max_depth: u32, db_path: std::path::PathBuf) -> Self {
+    pub fn with_db_path(
+        executor: Arc<dyn DelegateExecutor>,
+        max_depth: u32,
+        db_path: std::path::PathBuf,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 executor,
@@ -390,10 +394,10 @@ async fn wait_for_cancelled(rx: &mut watch::Receiver<TaskStatus>) {
 
 fn persist_subagent_result(db_path: &std::path::Path, task_id: &str, outcome: &DelegationOutcome) {
     use crate::services::product_dir::{
-        default_ttl_ms, ensure_parent, product_path, ProductKind, Producer, ProducerModule,
+        default_ttl_ms, ensure_parent, product_path, Producer, ProducerModule, ProductKind,
     };
-    use crate::store::{migrations, Db};
     use crate::store::repos;
+    use crate::store::{migrations, Db};
 
     let db = match Db::open(&db_path.to_string_lossy()) {
         Ok(db) => db,

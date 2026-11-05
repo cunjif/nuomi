@@ -25,7 +25,7 @@ function setActiveFile(path: string): void {
 }
 
 describe("RunEntryButtons", () => {
-  it("renders clickable run/build buttons when runtimes are available", async () => {
+  it("renders clickable run/build buttons when a runnable file is active", async () => {
     tdSeedFiles({ "main.py": "print('hi')" });
     setActiveFile("main.py");
     renderWithProviders(
@@ -36,43 +36,11 @@ describe("RunEntryButtons", () => {
     );
 
     const runBtn = await screen.findByRole("button", { name: "运行代码" });
-    const buildBtn = screen.getByRole("button", { name: "构建应用" });
     await waitFor(() => expect(runBtn).not.toBeDisabled());
-    expect(buildBtn).not.toBeDisabled();
-    expect(screen.queryByTestId("sandbox-unreachable-hint")).toBeNull();
   });
 
-  it("disables buttons and shows hint when runtimes list is empty", async () => {
+  it("disables run button when no active file", async () => {
     useUiStore.setState({ activeWorkspaceId: null, editorByWorkspace: {} });
-    // Override the test-double to return an empty runtime list.
-    const { injectIpcCommands } = await import("../../../lib/ipc/client");
-    const { testDoubleCommands } = await import("../../../lib/ipc/test-double");
-    const base = testDoubleCommands();
-    injectIpcCommands({ ...base, sandboxListRuntimes: async () => ({ status: "ok", data: [] as never[] }) });
-
-    renderWithProviders(
-      <>
-        <RunEntryButtons />
-        <Toaster />
-      </>,
-    );
-
-    const runBtn = await screen.findByRole("button", { name: "运行代码" });
-    await waitFor(() => expect(runBtn).toBeDisabled());
-    expect(screen.getByRole("button", { name: "构建应用" })).toBeDisabled();
-  });
-
-  it("disables buttons when the sandbox probe times out", async () => {
-    useUiStore.setState({ activeWorkspaceId: null, editorByWorkspace: {} });
-    const { injectIpcCommands } = await import("../../../lib/ipc/client");
-    const { testDoubleCommands } = await import("../../../lib/ipc/test-double");
-    const base = testDoubleCommands();
-    // Never resolves → probe times out.
-    injectIpcCommands({
-      ...base,
-      sandboxListRuntimes: () => new Promise(() => undefined),
-    });
-
     renderWithProviders(
       <>
         <RunEntryButtons />
@@ -82,9 +50,19 @@ describe("RunEntryButtons", () => {
 
     const runBtn = await screen.findByRole("button", { name: "运行代码" });
     expect(runBtn).toBeDisabled();
-    await waitFor(
-      () => expect(screen.getByTestId("sandbox-unreachable-hint")).toBeDefined(),
-      { timeout: 4000 },
+  });
+
+  it("disables run button for unsupported languages", async () => {
+    tdSeedFiles({ "README.md": "# title" });
+    setActiveFile("README.md");
+    renderWithProviders(
+      <>
+        <RunEntryButtons />
+        <Toaster />
+      </>,
     );
+
+    const runBtn = await screen.findByRole("button", { name: "运行代码" });
+    await waitFor(() => expect(runBtn).toBeDisabled());
   });
 });
