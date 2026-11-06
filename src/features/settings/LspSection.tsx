@@ -2,7 +2,10 @@
  * LSP (Language Server Protocol) configuration section for the Settings page.
  * Lets users configure the Language Server command and arguments for each
  * supported language, toggle LSP on/off per language, and view/start/stop
- * server status. Configurations are persisted via the lsp_set_config IPC command.
+ * server status. Configurations are persisted via the lsp_set_config IPC
+ * command. Auto-detection (ADR-0028) probes PATH and SDK locations on first
+ * use; the source label shows whether the effective config is user-edited,
+ * auto-detected, or the hardcoded default.
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -49,17 +52,47 @@ const STATUS_I18N_KEY: Record<StatusKind, string> = {
   disabled: "settings.lsp.statusDisabled",
 };
 
+type SourceKind = "user" | "autodetected" | "default" | "none";
+
+const SOURCE_LABEL_CLASS: Record<SourceKind, string> = {
+  user: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  autodetected: "bg-green-500/15 text-green-600 dark:text-green-400",
+  default: "bg-ink-muted/15 text-ink-muted",
+  none: "bg-ink-muted/10 text-ink-muted/50",
+};
+
+const SOURCE_I18N_KEY: Record<SourceKind, string> = {
+  user: "settings.lsp.sourceUser",
+  autodetected: "settings.lsp.sourceAutoDetected",
+  default: "settings.lsp.sourceDefault",
+  none: "settings.lsp.sourceNone",
+};
+
 export function LspSection(): ReactNode {
   const { t } = useTranslation();
   const [configs, setConfigs] = useState<LspServerConfigDto[]>([]);
   const [statuses, setStatuses] = useState<LspServerStatusDto[]>([]);
+  const [sources, setSources] = useState<Record<string, SourceKind>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState<string | null>(null);
 
   const loadConfigs = useCallback(async () => {
     try {
       const result = await ipc.lspGetConfigs();
       setConfigs(result);
+      const sourceMap: Record<string, SourceKind> = {};
+      await Promise.all(
+        result.map(async (cfg) => {
+          try {
+            const src = await ipc.lspConfigSource(cfg.language);
+            sourceMap[cfg.language] = (src.source as SourceKind) ?? "default";
+          } catch {
+            sourceMap[cfg.language] = "default";
+          }
+        }),
+      );
+      setSources(sourceMap);
     } catch {
       setConfigs([]);
     } finally {
@@ -122,6 +155,28 @@ export function LspSection(): ReactNode {
     }
   }, [loadStatuses]);
 
+  const redetect = useCallback(
+    async (language: string): Promise<void> => {
+      setDetecting(language);
+      try {
+        const detected = await ipc.lspRedetect(language);
+        if (detected !== null) {
+          setConfigs((prev) =>
+            prev.map((c) => (c.language === language ? detected : c)),
+          );
+          setSources((prev) => ({ ...prev, [language]: "autodetected" }));
+        } else {
+          setSources((prev) => ({ ...prev, [language]: "default" }));
+        }
+      } catch {
+        // ignore — user can retry
+      } finally {
+        setDetecting(null);
+      }
+    },
+    [],
+  );
+
   if (loading) {
     return (
       <div className="p-4">
@@ -139,8 +194,10 @@ export function LspSection(): ReactNode {
         {configs.map((cfg) => {
           const label = LANGUAGE_LABELS[cfg.language] ?? cfg.language;
           const isSaving = saving === cfg.language;
+          const isDetecting = detecting === cfg.language;
           const status = statuses.find((s) => s.language === cfg.language)?.status ?? "not_started";
           const kind = classifyStatus(status);
+          const source: SourceKind = sources[cfg.language] ?? "default";
           return (
             <div
               key={cfg.language}
@@ -150,6 +207,12 @@ export function LspSection(): ReactNode {
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-ink">{label}</span>
                   <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${SOURCE_LABEL_CLASS[source]}`}
+                    title={t(SOURCE_I18N_KEY[source])}
+                  >
+                    {t(SOURCE_I18N_KEY[source])}
+                  </span>
+                  <span
                     className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT_CLASS[kind]}`}
                     title={t(STATUS_I18N_KEY[kind])}
                   />
@@ -157,8 +220,19 @@ export function LspSection(): ReactNode {
                   {isSaving && (
                     <span className="text-xs text-ink-muted">{t("settings.lsp.saving")}</span>
                   )}
+                  {isDetecting && (
+                    <span className="text-xs text-ink-muted">{t("settings.lsp.detecting")}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void redetect(cfg.language)}
+                    disabled={isDetecting}
+                    className="rounded border border-ink-muted/40 px-2 py-0.5 text-xs text-ink-muted hover:bg-ink-muted/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {t("settings.lsp.redetect")}
+                  </button>
                   {kind === "ready" || kind === "initializing" ? (
                     <button
                       type="button"

@@ -867,6 +867,12 @@
       "start": "启动",
       "stop": "停止",
       "refresh": "刷新",
+      "redetect": "重新检测",
+      "detecting": "检测中…",
+      "sourceUser": "用户",
+      "sourceAutoDetected": "自动",
+      "sourceDefault": "默认",
+      "sourceNone": "无",
       "editorTooltip": "LSP: {{status}}",
       "editorNoLsp": "无 LSP"
     },

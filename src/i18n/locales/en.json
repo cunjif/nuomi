@@ -867,6 +867,12 @@
       "start": "Start",
       "stop": "Stop",
       "refresh": "Refresh",
+      "redetect": "Re-detect",
+      "detecting": "Detecting…",
+      "sourceUser": "User",
+      "sourceAutoDetected": "Auto",
+      "sourceDefault": "Default",
+      "sourceNone": "None",
       "editorTooltip": "LSP: {{status}}",
       "editorNoLsp": "No LSP"
     },

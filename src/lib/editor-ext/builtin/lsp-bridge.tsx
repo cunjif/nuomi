@@ -43,9 +43,9 @@ function toFileUri(root: string): string {
   return `file:///${root.replaceAll("\\", "/")}`;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
-    promise,
+    promise.catch(() => null),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
   ]);
 }
@@ -315,7 +315,7 @@ function bindFileSync(editor: Monaco.editor.IStandaloneCodeEditor): void {
     if (disposed || r === "") return;
     root = r;
     const fileUri = toFileUri(root);
-    void ipc.lspDidOpen(language, fileUri, model.uri.toString(), language, model.getValue());
+    void ipc.lspDidOpen(language, fileUri, model.uri.toString(), language, model.getValue()).catch(() => {});
   });
 
   editor.onDidChangeModelContent(() => {
@@ -324,7 +324,7 @@ function bindFileSync(editor: Monaco.editor.IStandaloneCodeEditor): void {
     debounceTimer = setTimeout(() => {
       debounceTimer = undefined;
       if (disposed || root === "") return;
-      void ipc.lspDidChange(language, toFileUri(root), model.uri.toString(), model.getVersionId(), model.getValue());
+      void ipc.lspDidChange(language, toFileUri(root), model.uri.toString(), model.getVersionId(), model.getValue()).catch(() => {});
     }, DID_CHANGE_DEBOUNCE_MS);
   });
 
@@ -332,7 +332,7 @@ function bindFileSync(editor: Monaco.editor.IStandaloneCodeEditor): void {
     disposed = true;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     if (root === "") return;
-    void ipc.lspDidClose(language, toFileUri(root), model.uri.toString());
+    void ipc.lspDidClose(language, toFileUri(root), model.uri.toString()).catch(() => {});
   });
 }
 
