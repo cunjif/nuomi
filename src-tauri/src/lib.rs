@@ -260,6 +260,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::lsp_get_configs,
         tauri_cmds::lsp_set_config,
         tauri_cmds::lsp_get_statuses,
+        tauri_cmds::lsp_redetect,
+        tauri_cmds::lsp_config_source,
         tauri_cmds::lsp_start,
         tauri_cmds::lsp_stop,
         tauri_cmds::lsp_completion,

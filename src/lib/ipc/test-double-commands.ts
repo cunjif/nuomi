@@ -2098,6 +2098,12 @@ export function testDoubleCommands(): CommandSet {
     async lspGetStatuses() {
       return ok([]);
     },
+    async lspRedetect(_language: string) {
+      return ok(null);
+    },
+    async lspConfigSource(_language: string) {
+      return ok({ language: _language, source: "default" });
+    },
     async lspStart(_language: string, _rootUri: string) {
       return ok(null);
     },

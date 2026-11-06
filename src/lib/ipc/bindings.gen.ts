@@ -1774,6 +1774,22 @@ async lspGetStatuses() : Promise<Result<LspServerStatusDto[], IpcError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async lspRedetect(language: string) : Promise<Result<LspServerConfigDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_redetect", { language }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspConfigSource(language: string) : Promise<Result<ConfigSourceDto, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_config_source", { language }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async lspStart(language: string, rootUri: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("lsp_start", { language, rootUri }) };
@@ -1956,6 +1972,7 @@ export type CommandAvailableDto = { ok: boolean; path: string | null; error: str
 export type CommitAgentOptionDto = { kind: string; id: string; name: string; isDefault: boolean }
 export type ConfigChangeResultDto = { proposalId: string; snapshotId: string; targetType: string; targetId: string }
 export type ConfigProposalDto = { proposalId: string; targetType: string; targetId: string; diffPreview: string; createdAt: number }
+export type ConfigSourceDto = { language: string; source: string }
 export type ConfigTargetInput = { targetType: string; targetId: string }
 export type ContextInjectionDto = { id: string; sessionId: string; type: string; refId: string | null; text: string | null; status: string; createdAt: number }
 export type ContextInjectionInput = { type: string; refId: string | null; text: string | null }

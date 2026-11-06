@@ -325,6 +325,9 @@ impl AppState {
         );
         Ok(Self {
             kernel: Arc::new(kernel),
+            lsp_manager: Arc::new(LspManager::with_db(PathBuf::from(
+                db_path.to_string(),
+            ))),
             db_path,
             workspace_root: std::sync::Arc::new(std::sync::RwLock::new(workspace_root)),
             workspace_env_configured,
@@ -336,7 +339,6 @@ impl AppState {
             integrations_reload_tx,
             integrations_reload,
             terminal_manager: Arc::new(std::sync::RwLock::new(None)),
-            lsp_manager: Arc::new(LspManager::new()),
         })
     }
 

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use nuomi_core::lsp::{
     types::{LspLanguageId, LspServerConfig, LspServerStatus},
-    LspClient,
+    ConfigSource, LspClient,
 };
 
 use crate::ipc_error::IpcError;
@@ -108,6 +108,49 @@ pub async fn impl_lsp_set_config(
 pub async fn impl_lsp_get_statuses(state: &AppState) -> Result<Vec<LspServerStatusDto>, IpcError> {
     let statuses = state.lsp_manager.all_statuses().await;
     Ok(statuses.into_iter().map(Into::into).collect())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ConfigSourceDto {
+    pub language: String,
+    pub source: String,
+}
+
+impl From<(LspLanguageId, ConfigSource)> for ConfigSourceDto {
+    fn from((lang, source): (LspLanguageId, ConfigSource)) -> Self {
+        let source = match source {
+            ConfigSource::User => "user",
+            ConfigSource::AutoDetected => "autodetected",
+            ConfigSource::Default => "default",
+            ConfigSource::None => "none",
+        };
+        Self {
+            language: lang.as_str().to_string(),
+            source: source.to_string(),
+        }
+    }
+}
+
+/// Force re-detection for a language, returning the newly detected config.
+pub async fn impl_lsp_redetect(
+    state: &AppState,
+    language: String,
+) -> Result<Option<LspServerConfigDto>, IpcError> {
+    let lang = LspLanguageId::new(language);
+    Ok(state
+        .lsp_manager
+        .redetect(&lang)
+        .await
+        .map(Into::into))
+}
+
+/// Get the config source for a language (user / autodetected / default / none).
+pub async fn impl_lsp_config_source(
+    state: &AppState,
+    language: String,
+) -> Result<ConfigSourceDto, IpcError> {
+    let lang = LspLanguageId::new(language);
+    Ok((lang.clone(), state.lsp_manager.config_source(&lang).await).into())
 }
 
 // ---------- lifecycle commands ----------

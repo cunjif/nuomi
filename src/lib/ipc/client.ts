@@ -57,6 +57,7 @@ import {
   type RestoreArchivedResult,
   type LspServerConfigDto,
   type LspServerStatusDto,
+  type ConfigSourceDto,
 } from "./bindings.gen";
 
 /** Structured IPC failure — `code` is stable and maps to i18n keys. */
@@ -453,6 +454,8 @@ export const ipc = {
   lspGetConfigs: () => unwrap(current.lspGetConfigs()),
   lspSetConfig: (config: LspServerConfigDto) => unwrap(current.lspSetConfig(config)),
   lspGetStatuses: () => unwrap(current.lspGetStatuses()),
+  lspRedetect: (language: string) => unwrap(current.lspRedetect(language)),
+  lspConfigSource: (language: string) => unwrap(current.lspConfigSource(language)),
   lspStart: (language: string, rootUri: string) => unwrap(current.lspStart(language, rootUri)),
   lspStop: (language: string) => unwrap(current.lspStop(language)),
   lspCompletion: (language: string, rootUri: string, uri: string, line: number, character: number) =>
@@ -523,4 +526,5 @@ export type {
   RestoreArchivedResult,
   LspServerConfigDto,
   LspServerStatusDto,
+  ConfigSourceDto,
 };

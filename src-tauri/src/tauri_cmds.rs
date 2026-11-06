@@ -2080,6 +2080,24 @@ pub async fn lsp_get_statuses(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn lsp_redetect(
+    state: tauri::State<'_, AppState>,
+    language: String,
+) -> Result<Option<lsp_commands::LspServerConfigDto>, IpcError> {
+    lsp_commands::impl_lsp_redetect(&state, language).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_config_source(
+    state: tauri::State<'_, AppState>,
+    language: String,
+) -> Result<lsp_commands::ConfigSourceDto, IpcError> {
+    lsp_commands::impl_lsp_config_source(&state, language).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn lsp_start(
     state: tauri::State<'_, AppState>,
     language: String,
