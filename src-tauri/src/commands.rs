@@ -397,9 +397,15 @@ pub async fn run_conversation_turn(
                                 .ok();
                         }
                     }
-                    let result = state
-                        .kernel
-                        .run_task_in_session(
+                    // SPEC 5.8.1-5: honor the session cancel token. The
+                    // loop engine already races the token mid-stream, but
+                    // this outer select is a belt-and-suspenders guard:
+                    // if the engine ever blocks on a non-cancellable await
+                    // (e.g. a host tool call), dropping the future here
+                    // still kills the CLI child via `kill_on_drop`.
+                    let result = tokio::select! {
+                        biased;
+                        r = state.kernel.run_task_in_session(
                             session_id,
                             text,
                             Some(token.clone()),
@@ -410,8 +416,19 @@ pub async fn run_conversation_turn(
                             max_history_chars,
                             quoted_event_seq,
                             quoted_excerpt.clone(),
-                        )
-                        .await?;
+                        ) => r?,
+                        _ = token.cancelled() => {
+                            tracing::info!(session_id, "single role turn cancelled by user");
+                            LoopRunResult {
+                                transcript: Vec::new(),
+                                final_text: String::new(),
+                                steps: 0,
+                                truncated: false,
+                                cli_session_id: None,
+                                sources: Vec::new(),
+                            }
+                        }
+                    };
                     // P1-6: CLI handle persistence is best-effort. The
                     // reply is already persisted at this point; a failure
                     // here (e.g. DB write error) should not surface as an

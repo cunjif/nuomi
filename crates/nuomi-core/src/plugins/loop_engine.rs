@@ -102,9 +102,11 @@ pub struct LoopEngine {
     steering: Arc<Mutex<VecDeque<String>>>,
     /// Messages that continue the run after a natural stop.
     follow_ups: Arc<Mutex<VecDeque<String>>>,
-    /// Cooperative stop signal. Checked at every step boundary — an
-    /// in-flight provider stream is *not* aborted mid-token, so a cancel
-    /// takes effect when the current step finishes.
+    /// Cooperative stop signal. Checked at every step boundary *and*
+    /// raced against the in-flight provider stream (mid-token abort):
+    /// on cancel the stream future is dropped, which for CLI agents
+    /// kills the child (`kill_on_drop`) and for native providers drops
+    /// the in-flight HTTP body.
     cancel: Option<CancellationToken>,
     /// Role-level system prompt override (D4). When `Some`, replaces the
     /// `SystemPromptService` default for this run.
@@ -380,7 +382,36 @@ impl LoopEngine {
                 external_session_id: self.config.external_session_id.clone(),
             };
             let provider = turn_override.provider.as_ref().unwrap_or(&self.provider);
-            let response = self.stream_once(provider, &request).await?;
+            // Mid-stream cancel: race the provider stream against the cancel
+            // token. On cancel, `stream_once`'s future is dropped → the
+            // provider stream is dropped → for CLI agents `kill_on_drop`
+            // terminates the child process immediately (instead of waiting
+            // for it to finish thinking). Native HTTP providers likewise
+            // drop their in-flight response body.
+            let response = match &self.cancel {
+                Some(cancel) => {
+                    tokio::select! {
+                        biased;
+                        r = self.stream_once(provider, &request) => r?,
+                        _ = cancel.cancelled() => {
+                            let mut payload = serde_json::json!({ "steps": steps });
+                            if let Some(sid) = &self.config.session_id {
+                                payload["sessionId"] = serde_json::json!(sid);
+                            }
+                            ctx.publish(Event::new("session.cancelled", payload));
+                            return Ok(LoopRunResult {
+                                transcript,
+                                final_text: String::new(),
+                                steps,
+                                truncated: false,
+                                cli_session_id: last_cli_session_id,
+                                sources: drain_sources(&self.sources),
+                            });
+                        }
+                    }
+                }
+                None => self.stream_once(provider, &request).await?,
+            };
             if let Some(ref sid) = response.cli_session_id {
                 last_cli_session_id = Some(sid.clone());
             }
