@@ -10,15 +10,17 @@
 //! - `client`: LspClient — JSON-RPC 2.0 over stdio, request/response/notification
 //! - `manager`: LspManager — multi-language LS registry + process lifecycle
 //! - `defaults`: per-language default LS command mapping
+//! - `detector`: PATH + SDK auto-detection (ADR-0028)
 
 pub mod client;
 pub mod defaults;
+pub mod detector;
 pub mod manager;
 pub mod transport;
 pub mod types;
 
 pub use client::LspClient;
-pub use manager::LspManager;
+pub use manager::{ConfigSource, LspManager};
 pub use types::{LspLanguageId, LspServerConfig, LspServerStatus};
 
 use thiserror::Error;

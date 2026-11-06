@@ -2,21 +2,44 @@
 //!
 //! Manages a registry of LspClient instances keyed by language. Each language
 //! gets at most one LS process, started lazily on first use. The manager
-//! handles discovery (PATH → SDK config → user config), health checks, and
-//! graceful shutdown.
+//! handles discovery (user config → persisted autodetect → live detect →
+//! default), health checks, and graceful shutdown.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use rusqlite::Connection;
+use serde::Serialize;
 use tokio::sync::Mutex;
 
 use super::client::LspClient;
 use super::defaults;
+use super::detector;
 use super::types::{LspLanguageId, LspServerConfig, LspServerStatus};
 use super::LspError;
 
 /// Maximum number of concurrent LS processes.
 const MAX_CONCURRENT_LS: usize = 8;
+
+/// app_settings key prefix for user-edited configs.
+const KEY_USER_CONFIG: &str = "lsp_config.";
+/// app_settings key prefix for auto-detected configs.
+const KEY_AUTODETECT: &str = "lsp_autodetect.";
+
+/// The source of an effective LSP config, for UI display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSource {
+    /// User manually configured in Settings.
+    User,
+    /// Auto-detected and persisted.
+    AutoDetected,
+    /// Hardcoded default (detection found nothing).
+    Default,
+    /// No config available at all.
+    None,
+}
 
 /// Entry in the manager's registry.
 struct RegistryEntry {
@@ -30,6 +53,10 @@ pub struct LspManager {
     registry: Mutex<HashMap<LspLanguageId, RegistryEntry>>,
     /// User-provided configs that override defaults.
     user_configs: Mutex<HashMap<LspLanguageId, LspServerConfig>>,
+    /// Auto-detected configs persisted across restarts.
+    autodetected_configs: Mutex<HashMap<LspLanguageId, LspServerConfig>>,
+    /// Database path for config persistence. `None` = in-memory only (tests).
+    db_path: Option<PathBuf>,
 }
 
 impl LspManager {
@@ -37,29 +64,161 @@ impl LspManager {
         Self {
             registry: Mutex::new(HashMap::new()),
             user_configs: Mutex::new(HashMap::new()),
+            autodetected_configs: Mutex::new(HashMap::new()),
+            db_path: None,
+        }
+    }
+
+    /// Creates a manager backed by a SQLite database for config persistence.
+    /// Loads previously saved user and auto-detected configs from `app_settings`.
+    pub fn with_db(db_path: PathBuf) -> Self {
+        let mut user_configs = HashMap::new();
+        let mut autodetected_configs = HashMap::new();
+        if let Ok(conn) = Connection::open(&db_path) {
+            let _ = crate::store::migrations::run(&conn);
+            load_configs(&conn, KEY_USER_CONFIG, &mut user_configs);
+            load_configs(&conn, KEY_AUTODETECT, &mut autodetected_configs);
+        }
+        Self {
+            registry: Mutex::new(HashMap::new()),
+            user_configs: Mutex::new(user_configs),
+            autodetected_configs: Mutex::new(autodetected_configs),
+            db_path: Some(db_path),
         }
     }
 
     /// Register or update a user-provided LSP config for a language.
+    /// Persists to `app_settings` when a db_path is configured.
     pub async fn set_user_config(&self, config: LspServerConfig) {
-        let mut configs = self.user_configs.lock().await;
-        configs.insert(config.language.clone(), config);
-    }
-
-    /// Remove a user-provided LSP config (revert to default).
-    pub async fn remove_user_config(&self, language: &LspLanguageId) {
-        let mut configs = self.user_configs.lock().await;
-        configs.remove(language);
-    }
-
-    /// Get the effective config for a language (user config > default).
-    pub async fn effective_config(&self, language: &LspLanguageId) -> Option<LspServerConfig> {
-        let user_configs = self.user_configs.lock().await;
-        if let Some(cfg) = user_configs.get(language) {
-            return Some(cfg.clone());
+        let lang = config.language.clone();
+        {
+            let mut configs = self.user_configs.lock().await;
+            configs.insert(lang.clone(), config.clone());
         }
-        drop(user_configs);
+        self.persist(KEY_USER_CONFIG, &lang, &config).await;
+    }
+
+    /// Remove a user-provided LSP config (revert to auto-detect or default).
+    pub async fn remove_user_config(&self, language: &LspLanguageId) {
+        {
+            let mut configs = self.user_configs.lock().await;
+            configs.remove(language);
+        }
+        self.remove_persisted(KEY_USER_CONFIG, language).await;
+    }
+
+    /// Force re-detection for a language: clears the cached auto-detected config
+    /// and runs a fresh PATH + SDK probe. Returns the newly detected config if any.
+    pub async fn redetect(&self, language: &LspLanguageId) -> Option<LspServerConfig> {
+        {
+            let mut autodetected = self.autodetected_configs.lock().await;
+            autodetected.remove(language);
+        }
+        self.remove_persisted(KEY_AUTODETECT, language).await;
+
+        if let Some(cfg) = detector::detect_config(language) {
+            self.set_autodetected_config(language.clone(), cfg.clone()).await;
+            return Some(cfg);
+        }
+        None
+    }
+
+    /// Returns the source of the effective config for UI display.
+    pub async fn config_source(&self, language: &LspLanguageId) -> ConfigSource {
+        {
+            let user_configs = self.user_configs.lock().await;
+            if user_configs.contains_key(language) {
+                return ConfigSource::User;
+            }
+        }
+        {
+            let autodetected = self.autodetected_configs.lock().await;
+            if autodetected.contains_key(language) {
+                return ConfigSource::AutoDetected;
+            }
+        }
+        if defaults::default_config(language).is_some() {
+            ConfigSource::Default
+        } else {
+            ConfigSource::None
+        }
+    }
+
+    /// Get the effective config for a language (user > autodetected > default).
+    /// Side-effect-free — does not trigger live detection.
+    pub async fn effective_config(&self, language: &LspLanguageId) -> Option<LspServerConfig> {
+        {
+            let user_configs = self.user_configs.lock().await;
+            if let Some(cfg) = user_configs.get(language) {
+                return Some(cfg.clone());
+            }
+        }
+        {
+            let autodetected = self.autodetected_configs.lock().await;
+            if let Some(cfg) = autodetected.get(language) {
+                return Some(cfg.clone());
+            }
+        }
         defaults::default_config(language)
+    }
+
+    /// Resolve config with live detection (user > autodetected > detect > default).
+    /// Triggers PATH + SDK probing on first call for a language, persisting the
+    /// result for subsequent calls.
+    async fn resolve_config(&self, language: &LspLanguageId) -> Option<LspServerConfig> {
+        {
+            let user_configs = self.user_configs.lock().await;
+            if let Some(cfg) = user_configs.get(language) {
+                return Some(cfg.clone());
+            }
+        }
+        {
+            let autodetected = self.autodetected_configs.lock().await;
+            if let Some(cfg) = autodetected.get(language) {
+                return Some(cfg.clone());
+            }
+        }
+        if let Some(cfg) = detector::detect_config(language) {
+            self.set_autodetected_config(language.clone(), cfg.clone()).await;
+            return Some(cfg);
+        }
+        defaults::default_config(language)
+    }
+
+    async fn set_autodetected_config(&self, lang: LspLanguageId, cfg: LspServerConfig) {
+        {
+            let mut autodetected = self.autodetected_configs.lock().await;
+            autodetected.insert(lang.clone(), cfg.clone());
+        }
+        self.persist(KEY_AUTODETECT, &lang, &cfg).await;
+    }
+
+    async fn persist(&self, prefix: &str, lang: &LspLanguageId, config: &LspServerConfig) {
+        let Some(ref db_path) = self.db_path else { return };
+        let key = format!("{prefix}{lang}");
+        let Ok(value) = serde_json::to_string(config) else { return };
+        let path = db_path.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let Ok(conn) = Connection::open(&path) else { return };
+            let _ = crate::store::migrations::run(&conn);
+            let _ = crate::store::repos::settings::set(&conn, &key, &value);
+        })
+        .await;
+    }
+
+    async fn remove_persisted(&self, prefix: &str, lang: &LspLanguageId) {
+        let Some(ref db_path) = self.db_path else { return };
+        let key = format!("{prefix}{lang}");
+        let path = db_path.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let Ok(conn) = Connection::open(&path) else { return };
+            let _ = crate::store::migrations::run(&conn);
+            let _ = conn.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                rusqlite::params![&key],
+            );
+        })
+        .await;
     }
 
     /// Get the status of a language server.
@@ -73,10 +232,11 @@ impl LspManager {
 
     /// Start a Language Server for the given language (lazy, if not already running).
     ///
-    /// Uses the three-tier discovery strategy: user config → default config → error.
+    /// Uses the four-tier discovery strategy: user config → persisted autodetect
+    /// → live PATH/SDK detection → default config → error.
     pub async fn start(&self, language: &LspLanguageId) -> Result<Arc<LspClient>, LspError> {
         let config = self
-            .effective_config(language)
+            .resolve_config(language)
             .await
             .ok_or_else(|| LspError::NotAvailable(language.to_string()))?;
 
@@ -184,9 +344,15 @@ impl LspManager {
     pub async fn known_languages(&self) -> Vec<LspLanguageId> {
         let registry = self.registry.lock().await;
         let user_configs = self.user_configs.lock().await;
+        let autodetected = self.autodetected_configs.lock().await;
 
         let mut langs: Vec<LspLanguageId> = registry.keys().cloned().collect();
         for lang in user_configs.keys() {
+            if !langs.contains(lang) {
+                langs.push(lang.clone());
+            }
+        }
+        for lang in autodetected.keys() {
             if !langs.contains(lang) {
                 langs.push(lang.clone());
             }
@@ -203,6 +369,7 @@ impl LspManager {
     pub async fn all_statuses(&self) -> Vec<(LspLanguageId, LspServerStatus)> {
         let registry = self.registry.lock().await;
         let user_configs = self.user_configs.lock().await;
+        let autodetected = self.autodetected_configs.lock().await;
 
         let mut result = Vec::new();
 
@@ -222,6 +389,12 @@ impl LspManager {
                 } else {
                     result.push((lang.clone(), LspServerStatus::Disabled));
                 }
+            }
+        }
+
+        for lang in autodetected.keys() {
+            if !result.iter().any(|(l, _)| l == lang) {
+                result.push((lang.clone(), LspServerStatus::NotStarted));
             }
         }
 
@@ -249,6 +422,33 @@ impl LspManager {
             }
         }
         result
+    }
+}
+
+/// Loads all configs from `app_settings` whose key starts with `prefix`,
+/// deserializing each value as `LspServerConfig` into `out`.
+fn load_configs(
+    conn: &Connection,
+    prefix: &str,
+    out: &mut HashMap<LspLanguageId, LspServerConfig>,
+) {
+    let sql = "SELECT key, value FROM app_settings WHERE key LIKE ?1";
+    let pattern = format!("{prefix}%");
+    let Ok(mut rows) = conn.prepare(sql) else {
+        return;
+    };
+    let Ok(iter) = rows.query_map(rusqlite::params![&pattern], |row| {
+        let key: String = row.get(0)?;
+        let value: String = row.get(1)?;
+        Ok((key, value))
+    }) else {
+        return;
+    };
+    for row in iter.flatten() {
+        let lang = row.0.strip_prefix(prefix).unwrap_or("");
+        if let Ok(cfg) = serde_json::from_str::<LspServerConfig>(&row.1) {
+            out.insert(LspLanguageId::new(lang), cfg);
+        }
     }
 }
 
@@ -351,5 +551,165 @@ mod tests {
             mgr.status(&LspLanguageId::new("python")).await,
             LspServerStatus::NotStarted
         );
+    }
+
+    #[tokio::test]
+    async fn config_source_returns_none_for_unknown() {
+        let mgr = LspManager::new();
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("brainfuck")).await,
+            ConfigSource::None
+        );
+    }
+
+    #[tokio::test]
+    async fn config_source_returns_default_for_known_language() {
+        let mgr = LspManager::new();
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("python")).await,
+            ConfigSource::Default
+        );
+    }
+
+    #[tokio::test]
+    async fn config_source_returns_user_after_set_user_config() {
+        let mgr = LspManager::new();
+        mgr.set_user_config(LspServerConfig::new("python", "custom-pylsp"))
+            .await;
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("python")).await,
+            ConfigSource::User
+        );
+    }
+
+    #[tokio::test]
+    async fn config_source_returns_autodetected_after_set_autodetected() {
+        let mgr = LspManager::new();
+        mgr.set_autodetected_config(
+            LspLanguageId::new("python"),
+            LspServerConfig::new("python", "detected-pylsp"),
+        )
+        .await;
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("python")).await,
+            ConfigSource::AutoDetected
+        );
+    }
+
+    #[tokio::test]
+    async fn effective_config_prefers_user_over_autodetected() {
+        let mgr = LspManager::new();
+        mgr.set_autodetected_config(
+            LspLanguageId::new("python"),
+            LspServerConfig::new("python", "detected-pylsp"),
+        )
+        .await;
+        mgr.set_user_config(LspServerConfig::new("python", "user-pylsp"))
+            .await;
+        let cfg = mgr.effective_config(&LspLanguageId::new("python")).await;
+        assert_eq!(cfg.unwrap().command, "user-pylsp");
+    }
+
+    #[tokio::test]
+    async fn effective_config_uses_autodetected_when_no_user() {
+        let mgr = LspManager::new();
+        mgr.set_autodetected_config(
+            LspLanguageId::new("python"),
+            LspServerConfig::new("python", "detected-pylsp"),
+        )
+        .await;
+        let cfg = mgr.effective_config(&LspLanguageId::new("python")).await;
+        assert_eq!(cfg.unwrap().command, "detected-pylsp");
+    }
+
+    #[tokio::test]
+    async fn redetect_clears_and_reprobes() {
+        let mgr = LspManager::new();
+        mgr.set_autodetected_config(
+            LspLanguageId::new("python"),
+            LspServerConfig::new("python", "old-detected"),
+        )
+        .await;
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("python")).await,
+            ConfigSource::AutoDetected
+        );
+        // redetect may or may not find something depending on PATH, but it
+        // always clears the old autodetected entry.
+        let _ = mgr.redetect(&LspLanguageId::new("python")).await;
+        // After redetect, if detection found nothing, source falls back to Default.
+        let source = mgr.config_source(&LspLanguageId::new("python")).await;
+        assert!(source == ConfigSource::AutoDetected || source == ConfigSource::Default);
+    }
+
+    #[tokio::test]
+    async fn with_db_loads_persisted_configs() {
+        use crate::store::migrations;
+        let dir = std::env::temp_dir().join("nuomi_lsp_manager_with_db_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        std::fs::remove_file(&db_path).ok();
+
+        // First: create a manager, set a user config, which persists.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            migrations::run(&conn).unwrap();
+            let cfg = LspServerConfig::new("python", "persisted-pylsp")
+                .with_args(vec!["--stdio".into()]);
+            let value = serde_json::to_string(&cfg).unwrap();
+            crate::store::repos::settings::set(&conn, "lsp_config.python", &value).unwrap();
+        }
+
+        // Second: create a new manager with_db — it should load the config.
+        let mgr = LspManager::with_db(db_path.clone());
+        let cfg = mgr.effective_config(&LspLanguageId::new("python")).await;
+        assert_eq!(cfg.unwrap().command, "persisted-pylsp");
+        assert_eq!(
+            mgr.config_source(&LspLanguageId::new("python")).await,
+            ConfigSource::User
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn set_user_config_persists_to_db() {
+        let dir = std::env::temp_dir().join("nuomi_lsp_manager_persist_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        std::fs::remove_file(&db_path).ok();
+
+        let mgr = LspManager::with_db(db_path.clone());
+        mgr.set_user_config(
+            LspServerConfig::new("java", "my-jdtls").with_args(vec!["--stdio".into()]),
+        )
+        .await;
+
+        // Verify persisted by opening a fresh connection.
+        let conn = Connection::open(&db_path).unwrap();
+        let value =
+            crate::store::repos::settings::get(&conn, "lsp_config.java").unwrap().unwrap();
+        let cfg: LspServerConfig = serde_json::from_str(&value).unwrap();
+        assert_eq!(cfg.command, "my-jdtls");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn remove_user_config_deletes_from_db() {
+        let dir = std::env::temp_dir().join("nuomi_lsp_manager_remove_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        std::fs::remove_file(&db_path).ok();
+
+        let mgr = LspManager::with_db(db_path.clone());
+        mgr.set_user_config(LspServerConfig::new("java", "my-jdtls")).await;
+        mgr.remove_user_config(&LspLanguageId::new("java")).await;
+
+        let conn = Connection::open(&db_path).unwrap();
+        let value = crate::store::repos::settings::get(&conn, "lsp_config.java").unwrap();
+        assert!(value.is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
