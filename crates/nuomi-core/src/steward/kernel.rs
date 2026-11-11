@@ -32,6 +32,19 @@ pub enum StewardReply {
         diff: String,
         confirm_handle: String,
     },
+    /// A direct background-task dispatch onto a named team, awaiting user
+    /// confirmation in the chat (ADR 0029).
+    TaskDispatchPending {
+        task_id: String,
+        team_id: String,
+        confirm_handle: String,
+    },
+    /// A steward-produced team-formation proposal recorded in the approvals
+    /// inbox (ADR 0029); the user resolves it via `resolve_proposal`.
+    TeamProposalPending {
+        proposal_id: String,
+        confirm_handle: String,
+    },
     /// An evolution cycle has been accepted and started.
     EvolutionAccepted {
         cycle_id: String,
@@ -444,6 +457,12 @@ fn reply_text_for_event(reply: &StewardReply) -> String {
         StewardReply::ConfigProposal {
             proposal_id, diff, ..
         } => format!("配置变更建议（{proposal_id}）：\n{diff}"),
+        StewardReply::TaskDispatchPending {
+            task_id, team_id, ..
+        } => format!("任务派发待确认：任务 {task_id} → 团队 {team_id}"),
+        StewardReply::TeamProposalPending { proposal_id, .. } => {
+            format!("组队提案已进入审批收件箱（{proposal_id}）")
+        }
         StewardReply::EvolutionAccepted { cycle_id, .. } => {
             format!("进化周期已受理，周期 ID: {cycle_id}")
         }

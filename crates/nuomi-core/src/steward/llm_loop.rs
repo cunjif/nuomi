@@ -18,7 +18,7 @@
 //! - The whole run is bounded by a total timeout and a tool-round cap, both
 //!   configurable in `app_settings`.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -226,6 +226,7 @@ pub async fn run_with_config(
         session_id: input.session_id.clone(),
         workspace_id: input.workspace_id.clone(),
         bus: bus.clone(),
+        task_budget: Arc::new(AtomicU32::new(0)),
     };
 
     let deadline = Instant::now() + Duration::from_millis(config.llm_timeout_ms);
