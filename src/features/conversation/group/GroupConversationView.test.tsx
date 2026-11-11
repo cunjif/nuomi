@@ -147,7 +147,7 @@ describe("GroupConversationView — scrolling group pill (SPEC 5.8.1-4)", () => 
     expect(screen.getByTestId("group-pill-slot")).toBeTruthy();
 
     await act(async () => {
-      resolveSubmit({ finalText: "", steps: 0, truncated: false, sessionId: SESSION });
+      resolveSubmit({ finalText: "", steps: 0, truncated: false, sessionId: SESSION, suspended: false, suspendHandle: null });
     });
     await waitFor(() => expect(screen.queryByTestId("group-pill-slot")).toBeNull());
   });
@@ -180,7 +180,7 @@ describe("GroupConversationView — stop & failure notices (SPEC 5.8.1-5, 5.8.3)
     // The cancelled turn settles — the stopped notice stays; no failure or
     // interrupted notice replaces it and no further content is inserted.
     await act(async () => {
-      resolveSubmit({ finalText: "", steps: 0, truncated: false, sessionId: SESSION });
+      resolveSubmit({ finalText: "", steps: 0, truncated: false, sessionId: SESSION, suspended: false, suspendHandle: null });
     });
     expect(screen.getByTestId("turn-notice").getAttribute("data-kind")).toBe("stopped");
     expect(screen.queryByText(/Agent 执行失败/)).toBeNull();

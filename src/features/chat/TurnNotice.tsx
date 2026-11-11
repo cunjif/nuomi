@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
  * the stopped kind is a plain statement; failed/interrupted carry a retry
  * affordance that re-sends the last input.
  */
-export type TurnNoticeKind = "stopped" | "failed" | "interrupted";
+export type TurnNoticeKind = "stopped" | "failed" | "interrupted" | "suspended";
 
 export interface TurnNoticeProps {
   kind: TurnNoticeKind;
@@ -25,7 +25,9 @@ export function TurnNotice({ kind, summary, onRetry }: TurnNoticeProps): ReactNo
       ? t("chat.status.stopped")
       : kind === "failed"
         ? t("chat.status.agentFailed", { summary: summary ?? "" })
-        : t("chat.status.interrupted");
+        : kind === "suspended"
+          ? t("chat.status.suspended")
+          : t("chat.status.interrupted");
   return (
     <div
       data-testid="turn-notice"

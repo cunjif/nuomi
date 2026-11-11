@@ -179,6 +179,7 @@
       "stopped": "⏹ 已停止",
       "agentFailed": "⚠️ Agent 执行失败：{{summary}}",
       "interrupted": "⚠️ 回复已中断，已接收内容保留",
+      "suspended": "⏸ 已提交审批，等待确认…",
       "group": {
         "waiting": "🫖 正在等待 Agent 响应…",
         "speaking": "💭 {{name}} 正在思考…",
@@ -515,6 +516,10 @@
     "runWithTeamStarted": "团队运行已启动：{{runId}}",
     "runWithTeamFailed": "启动团队运行失败",
     "noTeamsForRun": "还没有团队，请先在设置中创建",
+    "assignee": "执行人",
+    "sourceSteward": "管家",
+    "sourceSchedule": "定时",
+    "sourceAgent": "智能体",
     "autoFormRun": "自发组队运行",
     "autoFormStarted": "自发组队完成：{{team}}（{{members}} 名成员），运行已启动：{{run}}",
     "autoFormFailed": "自发组队运行失败",

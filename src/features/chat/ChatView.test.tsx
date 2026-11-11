@@ -350,7 +350,7 @@ describe("ChatView — stop & failure notices (SPEC 5.8.1-5, 5.8.3)", () => {
     // The cancelled turn settles with a (hypothetically late) reply —
     // nothing may be inserted and no empty-response toast may fire.
     await act(async () => {
-      resolveSubmit({ finalText: "迟到的回复", steps: 1, truncated: false, sessionId: "cs1" });
+      resolveSubmit({ finalText: "迟到的回复", steps: 1, truncated: false, sessionId: "cs1", suspended: false, suspendHandle: null });
     });
     await waitFor(() => expect(screen.queryByText("迟到的回复")).toBeNull());
     expect(useToastStore.getState().toasts).toHaveLength(0);
@@ -450,7 +450,7 @@ describe("ChatView — speaker-column layout (胶囊不再被输入框覆盖)", 
     expect(scroll.contains(screen.getByTestId("agent-turn-row"))).toBe(true);
 
     await act(async () => {
-      resolveSubmit({ finalText: "好", steps: 1, truncated: false, sessionId: "cl1" });
+      resolveSubmit({ finalText: "好", steps: 1, truncated: false, sessionId: "cl1", suspended: false, suspendHandle: null });
     });
   });
 
@@ -498,7 +498,7 @@ describe("ChatView — speaker-column layout (胶囊不再被输入框覆盖)", 
     expect(screen.getByText(/仍在处理中/)).toBeTruthy();
 
     await act(async () => {
-      resolveSubmit({ finalText: "done", steps: 1, truncated: false, sessionId: "cl3" });
+      resolveSubmit({ finalText: "done", steps: 1, truncated: false, sessionId: "cl3", suspended: false, suspendHandle: null });
     });
   });
 });
@@ -592,7 +592,7 @@ describe("ChatView — WeChat-style bubble toolbar (气泡工具栏)", () => {
 
     // Submit carries the quoted seq.
     const submitSpy = vi.spyOn(ipc, "submitTask").mockResolvedValue({
-      finalText: "", steps: 0, truncated: false, sessionId: "bt3",
+      finalText: "", steps: 0, truncated: false, sessionId: "bt3", suspended: false, suspendHandle: null,
     } as unknown as Awaited<ReturnType<typeof ipc.submitTask>>);
     const input = screen.getByPlaceholderText("输入消息，Enter 发送（Shift+Enter 换行）");
     fireEvent.change(input, { target: { value: "追问" } });

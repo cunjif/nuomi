@@ -107,6 +107,16 @@ export function ChatView(): ReactNode {
         }
         return;
       }
+      // ADR-0030: Suspend-type tool paused the loop waiting for approval.
+      if (result.suspended) {
+        stream.clearLive();
+        stream.clearOptimistic();
+        setTurnNotice({ kind: "suspended" });
+        if (sessionId !== null) {
+          void qc.invalidateQueries({ queryKey: ["sessionEvents", sessionId] });
+        }
+        return;
+      }
       if (!hadLive && result.finalText.length > 0) setFinalText(result.finalText);
       stream.clearLive();
       // P1-3: clear the optimistic bubble now that the turn has completed

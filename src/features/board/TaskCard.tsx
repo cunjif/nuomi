@@ -45,6 +45,8 @@ export function TaskCard({
   const locale: RelativeTimeLocale = i18n.language.startsWith("zh") ? "zh-CN" : "en";
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
+  const assigneeTeam =
+    task.assigneeTeamId !== null ? teams.find((tm) => tm.id === task.assigneeTeamId) : undefined;
 
   const closeMenu = (): void => {
     setMenuOpen(false);
@@ -79,12 +81,34 @@ export function TaskCard({
           {task.description}
         </p>
       )}
+      {assigneeTeam !== undefined && (
+        <p className="mt-0.5 truncate text-[10px] text-ink-muted" title={assigneeTeam.name}>
+          {t("board.assignee")}: {assigneeTeam.name}
+        </p>
+      )}
       <div className="mt-0.5 flex items-center justify-between gap-1">
-        {scope === "all" && (
-          <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceLabel} />
-        )}
+        <div className="flex min-w-0 items-center gap-1">
+          {scope === "all" && (
+            <WorkspaceBadge workspaceId={task.workspaceId} workspaceLabel={task.workspaceLabel} />
+          )}
+          {task.source === "steward" && (
+            <span className="shrink-0 rounded bg-ink-accent/15 px-1 text-[9px] leading-4 text-ink">
+              {t("board.sourceSteward")}
+            </span>
+          )}
+          {task.source === "schedule" && (
+            <span className="shrink-0 rounded bg-ink-muted/15 px-1 text-[9px] leading-4 text-ink">
+              {t("board.sourceSchedule")}
+            </span>
+          )}
+          {task.source === "agent" && (
+            <span className="shrink-0 rounded bg-ink-accent/15 px-1 text-[9px] leading-4 text-ink">
+              {t("board.sourceAgent")}
+            </span>
+          )}
+        </div>
         <span
-          className="text-[10px] text-ink-muted/70"
+          className="shrink-0 text-[10px] text-ink-muted/70"
           title={new Date(task.createdAt).toLocaleString()}
         >
           {formatRelativeTime(task.createdAt, Date.now(), locale)}

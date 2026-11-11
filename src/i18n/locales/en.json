@@ -179,6 +179,7 @@
       "stopped": "⏹ Stopped",
       "agentFailed": "⚠️ Agent failed: {{summary}}",
       "interrupted": "⚠️ Reply interrupted — received content kept",
+      "suspended": "⏸ Submitted for approval, awaiting confirmation…",
       "group": {
         "waiting": "🫖 Waiting for agents…",
         "speaking": "💭 {{name}} is thinking…",
@@ -515,6 +516,10 @@
     "runWithTeamStarted": "Team run started: {{runId}}",
     "runWithTeamFailed": "Failed to start team run",
     "noTeamsForRun": "No teams yet — create one in Settings",
+    "assignee": "Assignee",
+    "sourceSteward": "Steward",
+    "sourceSchedule": "Scheduled",
+    "sourceAgent": "Agent",
     "autoFormRun": "Auto-form & run",
     "autoFormStarted": "Auto-team ready: {{team}} ({{members}} members) — run started: {{run}}",
     "autoFormFailed": "Failed to auto-form and run",
