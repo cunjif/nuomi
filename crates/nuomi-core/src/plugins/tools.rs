@@ -22,6 +22,37 @@ const DEFAULT_RUN_ID: &str = "default";
 pub trait Tool: Send + Sync {
     fn def(&self) -> ToolDef;
     async fn execute(&self, arguments: &serde_json::Value) -> Result<String, HarnessError>;
+    /// Declares whether this tool suspends the loop after execution,
+    /// waiting for async confirmation (e.g. approval inbox). Default
+    /// `false` — most tools are plain Result-type.
+    fn suspend_on_call(&self) -> bool {
+        false
+    }
+}
+
+/// Outcome of a tool execution in the loop engine — either a plain
+/// result string (fed back to the model) or a suspend request that
+/// pauses the loop pending async confirmation.
+#[derive(Debug)]
+pub enum ToolOutcome {
+    /// Normal result — fed back to the model, loop continues.
+    Result(String),
+    /// Suspend — publish event, pause loop, wait for async confirmation.
+    Suspend(SuspendRequest),
+}
+
+/// Carries the metadata needed by the loop engine and frontend when a
+/// suspend-type tool pauses execution (ADR-0030).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SuspendRequest {
+    /// Confirm handle (e.g. "resolve_proposal") — the frontend routes
+    /// the confirmation UI based on this.
+    pub confirm_handle: String,
+    /// Human-readable summary fed back to the model so it knows the
+    /// action is pending confirmation.
+    pub summary: String,
+    /// Associated entity id (proposal_id / task_id etc.).
+    pub entity_id: Option<String>,
 }
 
 /// Registry shared via the plugin Context.
@@ -54,6 +85,16 @@ impl ToolRegistry {
 
     pub async fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.read().await.get(name).cloned()
+    }
+
+    /// Returns true if the named tool declares `suspend_on_call`.
+    pub async fn is_suspend_tool(&self, name: &str) -> bool {
+        self.tools
+            .read()
+            .await
+            .get(name)
+            .map(|t| t.suspend_on_call())
+            .unwrap_or(false)
     }
 
     /// Tool definitions, optionally filtered by a role allowlist
@@ -198,6 +239,13 @@ impl ToolRegistry {
                 Err(error)
             }
         }
+    }
+
+    /// Returns all registered tool handles, in registration order. Used by
+    /// the kernel to fork a per-session registry that adds session-scoped
+    /// tools (ADR-0030 agent task dispatch) on top of the shared set.
+    pub async fn snapshot_tools(&self) -> Vec<Arc<dyn Tool>> {
+        self.tools.read().await.values().cloned().collect()
     }
 
     /// Publishes a `tool.call` event for observability (bus is injected).

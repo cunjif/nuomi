@@ -87,6 +87,12 @@ pub struct LoopRunResult {
     /// agent 身份字段在持久化阶段补齐。CLI 会话（宿主无工具循环）为空，
     /// 由持久化阶段按 participants 注入 cli_agent 身份条目。
     pub sources: Vec<SourceEntry>,
+    /// True if the loop was suspended by a suspend-type tool waiting for
+    /// async confirmation (ADR-0030). The caller should not treat this as
+    /// a final answer — the loop will resume when confirmation arrives.
+    pub suspended: bool,
+    /// The confirm handle when suspended (e.g. "resolve_proposal").
+    pub suspend_handle: Option<String>,
 }
 
 /// Streaming delta observer (e.g. CLI stdout printer).
@@ -359,6 +365,8 @@ impl LoopEngine {
                     truncated: false,
                     cli_session_id: last_cli_session_id,
                     sources: drain_sources(&self.sources),
+                    suspended: false,
+                    suspend_handle: None,
                 });
             }
             steps += 1;
@@ -406,6 +414,8 @@ impl LoopEngine {
                                 truncated: false,
                                 cli_session_id: last_cli_session_id,
                                 sources: drain_sources(&self.sources),
+                                suspended: false,
+                                suspend_handle: None,
                             });
                         }
                     }
@@ -453,6 +463,8 @@ impl LoopEngine {
                         truncated: false,
                         cli_session_id: last_cli_session_id,
                         sources: drain_sources(&self.sources),
+                        suspended: false,
+                        suspend_handle: None,
                     });
                 }
                 continue;
@@ -514,6 +526,45 @@ impl LoopEngine {
                         Err(e) => format!("[tool error] {e}"),
                     },
                 };
+
+                // ADR-0030: Suspend-type tools pause the loop after
+                // execution. The tool's execute() has already completed
+                // its side effects (e.g. writing a proposal); its return
+                // value is a JSON-serialized SuspendRequest.
+                if denied.is_none() && tools.is_suspend_tool(&call.name).await {
+                    if let Ok(suspend_req) =
+                        serde_json::from_str::<super::tools::SuspendRequest>(&result)
+                    {
+                        // Feed the summary back to the model so it knows
+                        // the action is pending confirmation.
+                        transcript.push(ChatMessage::tool_result(
+                            call.id,
+                            suspend_req.summary.clone(),
+                        ));
+                        // Publish suspend event for the frontend.
+                        ctx.publish(Event::new(
+                            "tool.suspended",
+                            serde_json::json!({
+                                "confirm_handle": suspend_req.confirm_handle,
+                                "entity_id": suspend_req.entity_id,
+                                "summary": suspend_req.summary,
+                            }),
+                        ));
+                        return Ok(LoopRunResult {
+                            transcript,
+                            final_text: String::new(),
+                            steps,
+                            truncated: false,
+                            cli_session_id: last_cli_session_id,
+                            sources: drain_sources(&self.sources),
+                            suspended: true,
+                            suspend_handle: Some(suspend_req.confirm_handle),
+                        });
+                    }
+                    // If deserialization fails, treat as normal result
+                    // (the tool's execute returned a plain string).
+                }
+
                 // Source evidence: only calls that actually executed count
                 // (a denied call never touched the file/URL).
                 if denied.is_none() {
@@ -558,6 +609,8 @@ impl LoopEngine {
             truncated: true,
             cli_session_id: last_cli_session_id,
             sources: drain_sources(&self.sources),
+            suspended: false,
+            suspend_handle: None,
         })
     }
 }

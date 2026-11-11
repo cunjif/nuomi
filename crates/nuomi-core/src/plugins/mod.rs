@@ -2,6 +2,7 @@
 //! Loop Engine (ReAct), SystemPrompt, Memory, Hook, MCP, Approval Gate,
 //! Sandbox (ADR-0022).
 
+pub mod agent_task_tools;
 pub mod approval_gate;
 pub mod hooks;
 pub mod loop_engine;
@@ -22,4 +23,4 @@ pub use loop_engine::{
 pub use memory::{MemoryPlugin, MemoryService};
 pub use sandbox::{SandboxPlugin, SandboxService, DEFAULT_POLL_INTERVAL};
 pub use system_prompt::{SystemPromptPlugin, SystemPromptService};
-pub use tools::{ToolRegistry, ToolsPlugin};
+pub use tools::{Tool, ToolRegistry, ToolsPlugin};

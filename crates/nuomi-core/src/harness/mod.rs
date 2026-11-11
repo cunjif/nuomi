@@ -43,3 +43,13 @@ pub enum HarnessError {
         message: String,
     },
 }
+
+impl From<crate::store::StoreError> for HarnessError {
+    fn from(e: crate::store::StoreError) -> Self {
+        HarnessError::PluginFailed {
+            plugin: "store".into(),
+            phase: "io",
+            message: e.to_string(),
+        }
+    }
+}

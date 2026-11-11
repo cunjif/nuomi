@@ -18,6 +18,7 @@ pub mod reference_pre_check;
 pub mod role_director;
 pub mod scheduler_service;
 pub mod session_context;
+pub mod shadow_team;
 pub mod single_role_materializer;
 pub mod source_collector;
 pub mod source_probe;
@@ -91,6 +92,7 @@ pub use session_context::{
     get_session_context_usage, optimize_session_prompt, SessionContextError, SessionContextSection,
     SessionContextUsage,
 };
+pub use shadow_team::{create_shadow_team, ShadowTeam};
 pub use single_role_materializer::{materialize_single_role, RoleOverlay, SingleRoleContext};
 pub use team_former::{
     draft_team_plan, form_team, form_team_from_plan, preview_team, FormedTeam, TeamPlan,

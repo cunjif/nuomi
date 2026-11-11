@@ -4,10 +4,10 @@
 //! SPEC T10 / AC17–AC18. The CLI reads `NUOMI_API_KEY` from the environment;
 //! keys are never persisted or logged.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -19,6 +19,7 @@ use crate::harness::sideload::{
 };
 use crate::harness::{Context, HarnessError, Kernel};
 use crate::plugins::{
+    agent_task_tools::{build_agent_task_tools, AgentTaskToolContext},
     DeltaCallback, HookRegistry, HooksPlugin, LoopConfig, LoopEngine, LoopRunResult, MemoryPlugin,
     MemoryService, SandboxPlugin, SandboxService, SystemPromptPlugin, SystemPromptService,
     ToolRegistry, ToolsPlugin, TurnHook, TurnOverride,
@@ -178,6 +179,11 @@ struct SessionState {
     delta_seq: Arc<AtomicU64>,
 }
 
+/// Shared per-session message injection queue (ADR-0030). Background tasks
+/// (e.g. self-dispatched team runs) push messages here; `run_turn` drains
+/// them into the transcript before the next loop iteration.
+pub type SessionInjectionQueue = Arc<StdMutex<HashMap<String, VecDeque<String>>>>;
+
 /// A booted kernel bound to one database and one provider.
 pub struct NuomiKernel {
     db_path: Arc<str>,
@@ -205,6 +211,14 @@ pub struct NuomiKernel {
     /// at 1 on every message and broke the frontend's delta dedupe).
     delta_seqs: Mutex<HashMap<String, Arc<AtomicU64>>>,
     state: Mutex<SessionState>,
+    /// Secret store for provider keyring access (ADR-0030). Set by the
+    /// shell layer after boot via [`NuomiKernel::set_secrets`]; defaults to
+    /// an in-memory store when unset. Agent task dispatch tools need this
+    /// to materialize providers for team planning / shadow team execution.
+    secrets: Mutex<Option<Arc<dyn crate::providers::SecretStore>>>,
+    /// Per-session pending message injections (ADR-0030). Background tasks
+    /// push result summaries here; `run_turn` drains them into the transcript.
+    injections: SessionInjectionQueue,
 }
 
 impl NuomiKernel {
@@ -364,7 +378,57 @@ impl NuomiKernel {
                 history: Vec::new(),
                 delta_seq: Arc::new(AtomicU64::new(0)),
             }),
+            secrets: Mutex::new(None),
+            injections: Arc::new(StdMutex::new(HashMap::new())),
         })
+    }
+
+    /// Sets the secret store for provider keyring access (ADR-0030). Called
+    /// by the shell layer after boot; agent task dispatch tools need this to
+    /// materialize providers for team planning / shadow team execution.
+    pub async fn set_secrets(&self, secrets: Arc<dyn crate::providers::SecretStore>) {
+        *self.secrets.lock().await = Some(secrets);
+    }
+
+    /// Returns the secret store, defaulting to an in-memory store when unset.
+    async fn secrets_or_default(&self) -> Arc<dyn crate::providers::SecretStore> {
+        self.secrets
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::providers::MemorySecretStore::default()))
+    }
+
+    /// Returns the shared session injection queue (ADR-0030). The caller
+    /// (e.g. `build_agent_task_tools`) passes this to background tasks so
+    /// they can push result summaries into the parent conversation.
+    pub fn injections(&self) -> SessionInjectionQueue {
+        Arc::clone(&self.injections)
+    }
+
+    /// Pushes a message into a session's pending injection queue (ADR-0030).
+    /// The message will be drained into the transcript on the next
+    /// `run_task_in_session` / `run_turn` call for that session.
+    pub fn inject_session_message(&self, session_id: &str, msg: impl Into<String>) {
+        let mut map = self
+            .injections
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.entry(session_id.to_string())
+            .or_default()
+            .push_back(msg.into());
+    }
+
+    /// Drains all pending injection messages for a session (ADR-0030).
+    fn drain_injections(&self, session_id: &str) -> Vec<String> {
+        let mut map = self
+            .injections
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.remove(session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
     }
 
     /// Side-load outcomes (loaded/skipped/failed) from boot (ADR 0009).
@@ -563,6 +627,10 @@ impl NuomiKernel {
         quoted_event_seq: Option<i64>,
         quoted_excerpt: Option<String>,
     ) -> CoreResult<LoopRunResult> {
+        // ADR-0030: Drain pending injection messages (e.g. self-dispatched
+        // task results) into the transcript as user messages before the
+        // loop starts, so the model sees them in context.
+        let injected_msgs = self.drain_injections(session_id);
         let history_len = history.len();
         // Bridge streaming deltas onto the kernel bus so the shell's event
         // bridge can forward them on `event://session/{id}` (ADR-0002).
@@ -648,10 +716,72 @@ impl NuomiKernel {
         // early attempt fails (spec §5.1.3).
         self.try_derive_title_early(session_id, task).await;
 
+        // ADR-0030: When a RoleOverlay is present, inject agent task
+        // dispatch tools (create_self_task / propose_team_dispatch) into a
+        // per-session ToolRegistry forked from the shared one.
+        let session_tools: ToolRegistry = if let Some(ref role_id) = overlay_role_id {
+            let workspace_id = {
+                let path = self.db_path.clone();
+                tokio::task::spawn_blocking(move || -> Option<String> {
+                    let db = Db::open(&path).ok()?;
+                    repos::workspace_open_state::find_focused(&db.0)
+                        .ok()?
+                        .map(|r| r.workspace_id)
+                })
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+            };
+            let agent_ctx = AgentTaskToolContext {
+                db_path: self.db_path.clone(),
+                secrets: self.secrets_or_default().await,
+                session_id: session_id.to_string(),
+                workspace_id,
+                role_id: role_id.clone(),
+                bus: Some(self.ctx.bus()),
+                task_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                injections: Arc::clone(&self.injections),
+            };
+            let extra_tools = build_agent_task_tools(agent_ctx);
+            let fork = ToolRegistry::new();
+            for tool in extra_tools {
+                fork.register(tool).await.ok();
+            }
+            for tool in self.tools.snapshot_tools().await {
+                fork.register(tool).await.ok();
+            }
+            if let Some(journal) = self.tools.exchange().await {
+                fork.set_exchange(journal).await.ok();
+            }
+            fork
+        } else {
+            // No overlay → use the shared registry directly via a temporary
+            // clone that shares the same internal state. We can't pass
+            // &self.tools because we need a single code path below; instead
+            // we snapshot + re-register into a local fork. This is cheap
+            // (Arc clones) and keeps the exchange journal wired.
+            let fork = ToolRegistry::new();
+            for tool in self.tools.snapshot_tools().await {
+                fork.register(tool).await.ok();
+            }
+            if let Some(journal) = self.tools.exchange().await {
+                fork.set_exchange(journal).await.ok();
+            }
+            fork
+        };
+
+        // ADR-0030: Inject pending background task results as user messages
+        // before the current task, so the model sees them in context.
+        let mut history = history;
+        for msg in injected_msgs {
+            history.push(crate::providers::ChatMessage::user(msg));
+        }
+
         let result = engine
             .run_with_history(
                 &self.ctx,
-                &self.tools,
+                &session_tools,
                 Some(&self.hooks),
                 Some(&self.memory),
                 history,
