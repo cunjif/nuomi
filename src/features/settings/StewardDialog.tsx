@@ -213,6 +213,10 @@ function replyText(reply: StewardReplyDto): string {
       return reply.content;
     case "config_proposal":
       return `配置变更建议（${reply.proposal_id}）：\n${reply.diff}`;
+    case "task_dispatch_pending":
+      return `任务派发待确认：任务 ${reply.task_id} → 团队 ${reply.team_id}`;
+    case "team_proposal_pending":
+      return `组队提案已进入审批收件箱（${reply.proposal_id}）`;
     case "evolution_accepted":
       return `进化周期已受理，周期 ID: ${reply.cycle_id}`;
     case "clarify":

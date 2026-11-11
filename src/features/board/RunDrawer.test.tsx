@@ -26,6 +26,9 @@ function seedTask(): void {
     updatedAt: 1,
     workspaceId: "__migrated__",
     workspaceLabel: null,
+    source: "manual",
+    assigneeTeamId: null,
+    createdBy: null,
   });
 }
 

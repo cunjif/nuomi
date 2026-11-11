@@ -159,6 +159,9 @@ describe("requestCloseWorkspace — running-task probe", () => {
       updatedAt: 1,
       workspaceId: "ws-a",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
     tdState.runs.push({
       id: runId,

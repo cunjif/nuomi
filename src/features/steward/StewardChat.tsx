@@ -214,6 +214,10 @@ function replyText(reply: StewardReplyDto): string {
       return reply.content;
     case "config_proposal":
       return `配置变更建议（${reply.proposal_id}）：\n${reply.diff}`;
+    case "task_dispatch_pending":
+      return `任务派发待确认：任务 ${reply.task_id} → 团队 ${reply.team_id}`;
+    case "team_proposal_pending":
+      return `组队提案已进入审批收件箱（${reply.proposal_id}）`;
     case "evolution_accepted":
       return `进化周期已受理，周期 ID: ${reply.cycle_id}`;
     case "clarify":
@@ -247,6 +251,9 @@ function MessageBubble({
   if (reply && reply.type === "config_proposal" && sessionId !== undefined) {
     return <ConfigProposalBubble reply={reply} sessionId={sessionId} />;
   }
+  if (reply && reply.type === "task_dispatch_pending") {
+    return <TaskDispatchBubble reply={reply} />;
+  }
   return (
     <div className="flex justify-start">
       <div className="max-w-[80%] whitespace-pre-wrap rounded bg-surface-raised px-3 py-2 text-sm text-ink">
@@ -268,8 +275,7 @@ function MessageBubble({
   );
 }
 
-/** Live (in-flight) steward bubble: streaming → tool call → authoritative takeover. */
-function LiveStewardBubble({ live, pending }: { live: StewardLiveTurn; pending: boolean }): ReactNode {
+/** Live (in-flight) steward bubble: streaming → tool call → authoritative takeover. */function LiveStewardBubble({ live, pending }: { live: StewardLiveTurn; pending: boolean }): ReactNode {
   const text = live.authoritativeText ?? live.streamText;
   return (
     <div className="flex justify-start">
@@ -344,6 +350,60 @@ function ConfigProposalBubble({
         ) : (
           <p className="text-xs text-ink-muted">
             {resolution === "confirmed" ? "已确认生效" : "已取消，配置保持不变"}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TaskDispatchBubble({
+  reply,
+}: {
+  reply: Extract<StewardReplyDto, { type: "task_dispatch_pending" }>;
+}): ReactNode {
+  const qc = useQueryClient();
+  const [resolution, setResolution] = useState<"pending" | "confirmed" | "declined">("pending");
+  const confirmMut = useMutation({
+    mutationFn: (confirmed: boolean) =>
+      ipc.stewardConfirmTaskDispatch(reply.task_id, reply.team_id, confirmed),
+    onSuccess: (run) => {
+      setResolution(run === null ? "declined" : "confirmed");
+      toast.success(run === null ? "已拒绝派发" : "团队运行已启动");
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+    },
+    onError: (e) => toast.error(`派发失败: ${e}`),
+  });
+  const busy = confirmMut.isPending;
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] rounded bg-surface-raised p-3">
+        <p className="mb-2 text-sm font-medium text-ink">任务派发确认</p>
+        <p className="mb-3 text-xs text-ink-muted">
+          将任务 <span className="font-mono text-ink">{reply.task_id}</span> 派发给团队{" "}
+          <span className="font-mono text-ink">{reply.team_id}</span> 执行。
+        </p>
+        {resolution === "pending" ? (
+          <div className="flex gap-2">
+            <button
+              className="rounded bg-ink-accent px-3 py-1 text-xs text-surface disabled:opacity-50"
+              onClick={() => confirmMut.mutate(true)}
+              disabled={busy}
+            >
+              {confirmMut.isPending ? "启动中..." : "确认派发"}
+            </button>
+            <button
+              className="rounded border border-ink-muted/40 px-3 py-1 text-xs text-ink-muted hover:bg-surface disabled:opacity-50"
+              onClick={() => confirmMut.mutate(false)}
+              disabled={busy}
+            >
+              拒绝
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-muted">
+            {resolution === "confirmed" ? "已确认，团队运行已启动" : "已拒绝本次派发"}
           </p>
         )}
       </div>

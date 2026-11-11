@@ -36,6 +36,9 @@ describe("BoardView — create task flow (AC10)", () => {
       updatedAt: 1,
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
     const base = testDoubleCommands();
     const updateTaskStatus = vi.fn(base.updateTaskStatus);
@@ -62,6 +65,9 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       updatedAt: 1,
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
     tdState.teams.push({
       id: "team-1",
@@ -104,6 +110,9 @@ describe("BoardView — run task with team (M-TEAM1 T5)", () => {
       updatedAt: 1,
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
     injectIpcCommands(testDoubleCommands());
 
@@ -127,6 +136,9 @@ describe("BoardView — auto-form dry-run (打磨③b)", () => {
       updatedAt: 1,
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
   };
 
@@ -241,6 +253,9 @@ describe("BoardView — batch operations (批次二②)", () => {
       updatedAt: 1,
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
   };
 
@@ -365,6 +380,9 @@ describe("BoardView — card density and search (board polish)", () => {
       updatedAt: Date.now(),
       workspaceId: "__migrated__",
       workspaceLabel: null,
+      source: "manual",
+      assigneeTeamId: null,
+      createdBy: null,
     });
   };
 
