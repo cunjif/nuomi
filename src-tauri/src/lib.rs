@@ -155,6 +155,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         tauri_cmds::form_team,
         tauri_cmds::preview_team,
         tauri_cmds::run_team_on_task,
+        tauri_cmds::steward_confirm_task_dispatch,
         tauri_cmds::run_team_session,
         tauri_cmds::list_integrations,
         tauri_cmds::upsert_integration,

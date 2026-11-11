@@ -409,6 +409,9 @@ async fn ac8_env_fallback_failure_marks_task_failed() {
         created_at: now,
         updated_at: now,
         workspace_id: "__migrated__".into(),
+        source: "manual".into(),
+        assignee_team_id: None,
+        created_by: None,
     };
     repos::tasks_runs::insert_task(&db.0, &task).unwrap();
 

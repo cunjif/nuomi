@@ -237,7 +237,7 @@ export function testDoubleCommands(): CommandSet {
       const seq = (events.at(-1)?.seq ?? 0) + 1;
       events.push({ seq, kind: "message", payload: { role: "user", content: input }, createdAt: Date.now() });
       tdState.events.set(sessionId, events);
-      return ok({ finalText: "", steps: 0, truncated: false, sessionId });
+      return ok({ finalText: "", steps: 0, truncated: false, sessionId, suspended: false, suspendHandle: null });
     },
     async enqueueMessage(_sessionId, input) {
       return ok({ id: nextId("q"), text: input, seq: 1, createdAt: Date.now() });
@@ -262,6 +262,9 @@ export function testDoubleCommands(): CommandSet {
         updatedAt: Date.now(),
         workspaceId: "__migrated__",
         workspaceLabel: null,
+        source: "manual",
+        assigneeTeamId: null,
+        createdBy: null,
       };
       tdState.tasks.unshift(t);
       return ok(t);
@@ -1286,6 +1289,27 @@ export function testDoubleCommands(): CommandSet {
       tdState.runs.push(run);
       return ok(run);
     },
+    async stewardConfirmTaskDispatch(taskId, teamId, confirmed) {
+      if (!confirmed) return ok(null);
+      const task = tdState.tasks.find((t) => t.id === taskId);
+      if (task === undefined) return err("task.not_found", `task#${taskId} not found`);
+      if (!tdState.teams.some((t) => t.id === teamId)) {
+        return err("team.not_found", `team#${teamId} not found`);
+      }
+      const run: RunDto = {
+        id: nextId("run"),
+        taskId,
+        sessionId: task.sessionId ?? nextId("s"),
+        status: "succeeded",
+        heartbeatAt: Date.now(),
+        kind: "team",
+        cancelable: false,
+      };
+      tdState.runs.push(run);
+      task.assigneeTeamId = teamId;
+      task.updatedAt = Date.now();
+      return ok(run);
+    },
     async runTeamSession(_sessionId, _teamId, _task) {
       return ok({ finalOutput: "team ok", converged: true, rounds: 1 });
     },
@@ -1508,7 +1532,7 @@ export function testDoubleCommands(): CommandSet {
       const seq = (events.at(-1)?.seq ?? 0) + 1;
       events.push({ seq, kind: "message", payload: { role: "user", content: text }, createdAt: Date.now() });
       tdState.events.set(sessionId, events);
-      return ok({ finalText: "", steps: 0, truncated: false, sessionId });
+      return ok({ finalText: "", steps: 0, truncated: false, sessionId, suspended: false, suspendHandle: null });
     },
     async stopConversation(_sessionId) {
       return ok(null);

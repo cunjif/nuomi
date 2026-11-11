@@ -232,6 +232,8 @@ export const ipc = {
   formTeam: (task: string, sessionId: string | null) => unwrap(current.formTeam(task, sessionId)),
   previewTeam: (task: string) => unwrap(current.previewTeam(task)),
   runTeamOnTask: (taskId: string, teamId: string) => unwrap(current.runTeamOnTask(taskId, teamId)),
+  stewardConfirmTaskDispatch: (taskId: string, teamId: string, confirmed: boolean) =>
+    unwrap(current.stewardConfirmTaskDispatch(taskId, teamId, confirmed)),
   runTeamSession: (sessionId: string, teamId: string, task: string) =>
     unwrap(current.runTeamSession(sessionId, teamId, task)),
   listIntegrations: () => unwrap(current.listIntegrations()),

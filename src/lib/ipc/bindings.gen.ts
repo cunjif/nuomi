@@ -934,6 +934,14 @@ async runTeamOnTask(taskId: string, teamId: string) : Promise<Result<RunDto, Ipc
     else return { status: "error", error: e  as any };
 }
 },
+async stewardConfirmTaskDispatch(taskId: string, teamId: string, confirmed: boolean) : Promise<Result<RunDto | null, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steward_confirm_task_dispatch", { taskId, teamId, confirmed }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async runTeamSession(sessionId: string, teamId: string, task: string) : Promise<Result<TeamRunResultDto, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("run_team_session", { sessionId, teamId, task }) };
@@ -2362,7 +2370,16 @@ createdTemp: boolean }
  */
 export type RoutingRulesDto = { preferLocal?: boolean; capabilityOverrides?: Partial<{ [key in CapabilityDto]: string }> }
 export type RunDto = { id: string; taskId: string; sessionId: string; status: string; heartbeatAt: number; kind: string; cancelable: boolean }
-export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string }
+export type RunResultDto = { finalText: string; steps: number; truncated: boolean; sessionId: string; 
+/**
+ * ADR-0030: true when the loop was suspended by a suspend-type tool
+ * waiting for async confirmation (e.g. approval inbox).
+ */
+suspended: boolean; 
+/**
+ * ADR-0030: the confirm handle when suspended (e.g. "resolve_proposal").
+ */
+suspendHandle: string | null }
 /**
  * One active run as shown by the close-confirm dialog.
  */
@@ -2448,12 +2465,12 @@ export type StewardMessageDto = { id: string; role: StewardMessageRoleDto; text:
 export type StewardMessageRoleDto = "user" | "steward"
 export type StewardPromptOptimizeResultDto = { optimized: string }
 export type StewardPruneRecordDto = { occurredAt: number; budgetTokens: number; approxTokens: number; duplicatesCollapsed: number; resultsSummarized: number; foldedMessages: number }
-export type StewardReplyDto = { type: "text"; content: string } | { type: "config_proposal"; proposal_id: string; diff: string; confirm_handle: string } | { type: "evolution_accepted"; cycle_id: string; progress_subscribe_handle: string } | { type: "clarify"; candidates: StewardIntentDto[] } | { type: "refused"; reason: string }
+export type StewardReplyDto = { type: "text"; content: string } | { type: "config_proposal"; proposal_id: string; diff: string; confirm_handle: string } | { type: "task_dispatch_pending"; task_id: string; team_id: string; confirm_handle: string } | { type: "team_proposal_pending"; proposal_id: string; confirm_handle: string } | { type: "evolution_accepted"; cycle_id: string; progress_subscribe_handle: string } | { type: "clarify"; candidates: StewardIntentDto[] } | { type: "refused"; reason: string }
 export type StewardRunStatusDto = { state: StewardRunStatusStateDto; label: string }
 export type StewardRunStatusStateDto = "idle" | "running" | "awaiting_approval" | "failed"
 export type StewardSessionDto = { id: string; stewardId: string; title: string; goal?: string | null; createdAt: number; updatedAt: number; todoList?: TodoItemDto[] | null; runStatus?: StewardRunStatusDto | null }
 export type StewardSettingsDto = { soul: SoulConfigDto | null; binding: BindingConfigDto; runStatus: StewardRunStatusDto; todoList: TodoItemDto[]; messageStats: MessageStatsDto }
-export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceLabel: string | null }
+export type TaskDto = { id: string; sessionId: string | null; title: string; description: string; status: string; createdAt: number; updatedAt: number; workspaceId: string; workspaceLabel: string | null; source: string; assigneeTeamId: string | null; createdBy: string | null }
 export type TeamDto = { id: string; name: string; topology: TeamTopologyDto; memberRoleIds: string[]; config: JsonValue; createdAt: number; updatedAt: number }
 export type TeamInput = { name: string; topology: TeamTopologyDto; memberRoleIds: string[]; 
 /**

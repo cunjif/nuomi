@@ -266,6 +266,9 @@ async fn approval_flow_via_commands() {
         created_at: now,
         updated_at: now,
         workspace_id: "__migrated__".into(),
+        source: "manual".into(),
+        assignee_team_id: None,
+        created_by: None,
     };
     let run = nuomi_core::domain::Run {
         id: "run-test".into(),

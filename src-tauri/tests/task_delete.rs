@@ -37,6 +37,9 @@ fn seed_task(db: &Db, id: &str, status: TaskStatus) {
             created_at: now,
             updated_at: now,
             workspace_id: "__migrated__".into(),
+            source: "manual".into(),
+            assignee_team_id: None,
+            created_by: None,
         },
     )
     .unwrap();

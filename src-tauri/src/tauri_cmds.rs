@@ -1119,6 +1119,17 @@ pub async fn run_team_on_task(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn steward_confirm_task_dispatch(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    team_id: String,
+    confirmed: bool,
+) -> Result<Option<commands::RunDto>, IpcError> {
+    commands::impl_steward_confirm_task_dispatch(&state, task_id, team_id, confirmed).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn run_team_session(
     state: tauri::State<'_, AppState>,
     session_id: String,

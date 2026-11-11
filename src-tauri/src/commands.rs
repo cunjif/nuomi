@@ -353,6 +353,8 @@ pub async fn run_conversation_turn(
                 transcript: Vec::new(),
                 cli_session_id: None,
                 sources: Vec::new(),
+                suspended: false,
+                suspend_handle: None,
             }
         } else if participants.len() > 1 {
             // ADR 0013: IM group chat — Selector mode. First participant is
@@ -426,6 +428,8 @@ pub async fn run_conversation_turn(
                                 truncated: false,
                                 cli_session_id: None,
                                 sources: Vec::new(),
+                                suspended: false,
+                                suspend_handle: None,
                             }
                         }
                     };
@@ -483,6 +487,8 @@ pub async fn run_conversation_turn(
         steps: result.steps,
         truncated: result.truncated,
         session_id: session_id.to_string(),
+        suspended: result.suspended,
+        suspend_handle: result.suspend_handle,
     })
 }
 
@@ -1022,6 +1028,11 @@ pub struct RunResultDto {
     pub steps: usize,
     pub truncated: bool,
     pub session_id: String,
+    /// ADR-0030: true when the loop was suspended by a suspend-type tool
+    /// waiting for async confirmation (e.g. approval inbox).
+    pub suspended: bool,
+    /// ADR-0030: the confirm handle when suspended (e.g. "resolve_proposal").
+    pub suspend_handle: Option<String>,
 }
 
 // ---------- tasks ----------
@@ -1046,6 +1057,9 @@ pub async fn impl_create_task(
         created_at: now_ms(),
         updated_at: now_ms(),
         workspace_id: "__migrated__".to_string(),
+        source: "manual".to_string(),
+        assignee_team_id: None,
+        created_by: None,
     };
     let path = state.db_path.clone();
     let created = tokio::task::spawn_blocking(move || -> Result<Task, IpcError> {
@@ -1312,6 +1326,9 @@ pub struct TaskDto {
     pub updated_at: i64,
     pub workspace_id: String,
     pub workspace_label: Option<String>,
+    pub source: String,
+    pub assignee_team_id: Option<String>,
+    pub created_by: Option<String>,
 }
 
 impl From<Task> for TaskDto {
@@ -1326,6 +1343,9 @@ impl From<Task> for TaskDto {
             updated_at: t.updated_at,
             workspace_id: t.workspace_id,
             workspace_label: None,
+            source: t.source,
+            assignee_team_id: t.assignee_team_id,
+            created_by: t.created_by,
         }
     }
 }
@@ -1875,15 +1895,34 @@ pub async fn impl_resolve_proposal(
 
     // Dispatch every recorded task onto the fresh team. Tasks may have
     // moved on while the proposal waited: skipping is the honest outcome,
-    // not an error.
+    // not an error. Started runs backfill the task's assignee (ADR 0029).
+    let formed_team_id = formed.team.id.clone();
     for task_id in &draft.task_ids {
-        if let Err(error) =
-            impl_run_team_on_task(state, task_id.clone(), formed.team.id.clone()).await
-        {
-            tracing::warn!(
-                task_id = %task_id, error = %error,
-                "proposal dispatch skipped a task"
-            );
+        match impl_run_team_on_task(state, task_id.clone(), formed_team_id.clone()).await {
+            Ok(_) => {
+                let path = state.db_path.clone();
+                let tid = task_id.clone();
+                let backfill_team_id = formed_team_id.clone();
+                let at = now_ms();
+                if let Err(error) = tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+                    let db = Db::open(&path)?;
+                    repos::tasks_runs::assign_task_team(&db.0, &tid, &backfill_team_id, at)?;
+                    Ok(())
+                })
+                .await
+                {
+                    tracing::warn!(
+                        task_id = %task_id, error = %error,
+                        "proposal dispatch: assignee backfill skipped"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    task_id = %task_id, error = %error,
+                    "proposal dispatch skipped a task"
+                );
+            }
         }
     }
 
@@ -1900,6 +1939,37 @@ pub async fn impl_resolve_proposal(
             }),
         ));
     Ok(())
+}
+
+/// In-chat confirmation of a steward direct dispatch (ADR 0029): confirmed
+/// means `run_team_on_task` on the named team, with the assignee backfilled;
+/// declined is a plain no-op. The dispatch tool itself only validated
+/// targets — this is where the run actually starts.
+pub async fn impl_steward_confirm_task_dispatch(
+    state: &AppState,
+    task_id: String,
+    team_id: String,
+    confirmed: bool,
+) -> Result<Option<RunDto>, IpcError> {
+    if !confirmed {
+        return Ok(None);
+    }
+    let run = impl_run_team_on_task(state, task_id.clone(), team_id.clone()).await?;
+    let path = state.db_path.clone();
+    let at = now_ms();
+    if let Err(error) = tokio::task::spawn_blocking(move || -> Result<(), IpcError> {
+        let db = Db::open(&path)?;
+        repos::tasks_runs::assign_task_team(&db.0, &task_id, &team_id, at)?;
+        Ok(())
+    })
+    .await
+    {
+        tracing::warn!(
+            task_id = %run.task_id, error = %error,
+            "direct dispatch: assignee backfill skipped"
+        );
+    }
+    Ok(Some(run))
 }
 
 /// Persists a pending team-plan proposal and announces it on the bus. The
@@ -9078,6 +9148,15 @@ pub enum StewardReplyDto {
         diff: String,
         confirm_handle: String,
     },
+    TaskDispatchPending {
+        task_id: String,
+        team_id: String,
+        confirm_handle: String,
+    },
+    TeamProposalPending {
+        proposal_id: String,
+        confirm_handle: String,
+    },
     EvolutionAccepted {
         cycle_id: String,
         progress_subscribe_handle: String,
@@ -9143,6 +9222,22 @@ impl From<nuomi_core::steward::kernel::StewardReply> for StewardReplyDto {
             } => Self::ConfigProposal {
                 proposal_id,
                 diff,
+                confirm_handle,
+            },
+            R::TaskDispatchPending {
+                task_id,
+                team_id,
+                confirm_handle,
+            } => Self::TaskDispatchPending {
+                task_id,
+                team_id,
+                confirm_handle,
+            },
+            R::TeamProposalPending {
+                proposal_id,
+                confirm_handle,
+            } => Self::TeamProposalPending {
+                proposal_id,
                 confirm_handle,
             },
             R::EvolutionAccepted {

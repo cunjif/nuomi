@@ -212,6 +212,9 @@ impl AppState {
             safe_mode: false,
         })
         .await?;
+        // ADR-0030: inject the secret store so agent task dispatch tools
+        // can materialize providers for team planning / shadow team runs.
+        kernel.set_secrets(Arc::clone(&secrets)).await;
         let kernel_boot_ms = boot_started.elapsed().as_millis() as u64;
         let db_path: Arc<str> = Arc::from(db_path.to_string_lossy().to_string());
         // Phase 2: legacy single-workspace migration. Runs after kernel boot
@@ -325,9 +328,7 @@ impl AppState {
         );
         Ok(Self {
             kernel: Arc::new(kernel),
-            lsp_manager: Arc::new(LspManager::with_db(PathBuf::from(
-                db_path.to_string(),
-            ))),
+            lsp_manager: Arc::new(LspManager::with_db(PathBuf::from(db_path.to_string()))),
             db_path,
             workspace_root: std::sync::Arc::new(std::sync::RwLock::new(workspace_root)),
             workspace_env_configured,
