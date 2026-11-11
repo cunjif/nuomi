@@ -181,6 +181,9 @@ mod tests {
             created_at,
             updated_at: created_at,
             workspace_id: workspace_id.into(),
+            source: "manual".into(),
+            assignee_team_id: None,
+            created_by: None,
         }
     }
 

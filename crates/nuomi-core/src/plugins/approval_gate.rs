@@ -303,6 +303,9 @@ mod tests {
             created_at: now_ms(),
             updated_at: now_ms(),
             workspace_id: "__migrated__".into(),
+            source: "manual".into(),
+            assignee_team_id: None,
+            created_by: None,
         };
         repos::tasks_runs::insert_task(&conn, &task).unwrap();
         let run = Run {

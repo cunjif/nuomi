@@ -14,8 +14,8 @@ use crate::store::StoreError;
 
 pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO tasks (id, session_id, title, description, status, created_at, updated_at, workspace_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO tasks (id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             t.id,
             t.session_id,
@@ -24,7 +24,10 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.status.as_str(),
             t.created_at,
             t.updated_at,
-            t.workspace_id
+            t.workspace_id,
+            t.source,
+            t.assignee_team_id,
+            t.created_by
         ],
     )?;
     Ok(())
@@ -32,8 +35,8 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
 
 pub fn get_task(conn: &Connection, id: &str) -> Result<Task, StoreError> {
     conn.query_row(
-        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
-         FROM tasks WHERE id = ?1",
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by
+          FROM tasks WHERE id = ?1",
         params![id],
         row_to_task,
     )
@@ -60,10 +63,31 @@ pub fn update_task_status(
     guard_rows(n, "task", id, expected.as_str())
 }
 
+/// Backfills the assignee team of a dispatched task (ADR 0029). Zero
+/// affected rows → `NotFound`.
+pub fn assign_task_team(
+    conn: &Connection,
+    id: &str,
+    team_id: &str,
+    at: i64,
+) -> Result<(), StoreError> {
+    let n = conn.execute(
+        "UPDATE tasks SET assignee_team_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, team_id, at],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            entity: "task",
+            id: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub fn list_tasks(conn: &Connection, limit: u32) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
-         FROM tasks ORDER BY created_at DESC LIMIT ?1",
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by
+          FROM tasks ORDER BY created_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_task)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -75,8 +99,8 @@ pub fn list_tasks_by_status(
     limit: u32,
 ) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
-         FROM tasks WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2",
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by
+          FROM tasks WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![status.as_str(), limit], row_to_task)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -91,10 +115,10 @@ pub fn list_queued_tasks(
     limit: u32,
 ) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
-         FROM tasks
-         WHERE status = 'queued' AND (?1 IS NULL OR workspace_id = ?1)
-         ORDER BY created_at ASC LIMIT ?2",
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by
+          FROM tasks
+          WHERE status = 'queued' AND (?1 IS NULL OR workspace_id = ?1)
+          ORDER BY created_at ASC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_task)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -501,8 +525,8 @@ pub fn list_tasks_by_workspace(
     limit: u32,
 ) -> Result<Vec<Task>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id
-         FROM tasks WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        "SELECT id, session_id, title, description, status, created_at, updated_at, workspace_id, source, assignee_team_id, created_by
+          FROM tasks WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![workspace_id, limit], row_to_task)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -687,6 +711,9 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
         workspace_id: row.get(7)?,
+        source: row.get(8)?,
+        assignee_team_id: row.get(9)?,
+        created_by: row.get(10)?,
     })
 }
 
@@ -771,6 +798,9 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             workspace_id: "__migrated__".into(),
+            source: "manual".into(),
+            assignee_team_id: None,
+            created_by: None,
         }
     }
 

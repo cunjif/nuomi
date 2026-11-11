@@ -393,6 +393,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             "/../../migrations/0049_product_registry.sql"
         )),
     ),
+    (
+        50,
+        "0050_task_source_and_assignee",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../migrations/0050_task_source_and_assignee.sql"
+        )),
+    ),
 ];
 
 /// Applies all pending migrations inside transactions, updating `user_version`.

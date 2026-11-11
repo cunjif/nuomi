@@ -691,6 +691,20 @@ pub struct Task {
     pub created_at: i64,
     pub updated_at: i64,
     pub workspace_id: String,
+    /// Provenance of the card: 'manual' | 'schedule' | 'steward' (ADR 0029).
+    #[serde(default = "default_task_source")]
+    pub source: String,
+    /// Team the task was dispatched to; backfilled once a dispatch is
+    /// approved (proposal) or confirmed (direct dispatch).
+    #[serde(default)]
+    pub assignee_team_id: Option<String>,
+    /// Creator reference: steward session id / schedule id / NULL.
+    #[serde(default)]
+    pub created_by: Option<String>,
+}
+
+fn default_task_source() -> String {
+    "manual".to_string()
 }
 
 /// One execution attempt of a task; lifecycle governed by

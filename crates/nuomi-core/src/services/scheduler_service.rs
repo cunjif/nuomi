@@ -378,6 +378,9 @@ pub async fn tick(db_path: &Arc<str>, bus: Option<&EventBus>) -> Result<u64, Sch
                 created_at: now,
                 updated_at: now,
                 workspace_id: s.workspace_id.clone(),
+                source: "schedule".into(),
+                assignee_team_id: None,
+                created_by: Some(s.id.clone()),
             };
             repos::tasks_runs::insert_task(conn, &task)?;
             repos::events::append(
