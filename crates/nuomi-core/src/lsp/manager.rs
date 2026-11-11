@@ -117,7 +117,8 @@ impl LspManager {
         self.remove_persisted(KEY_AUTODETECT, language).await;
 
         if let Some(cfg) = detector::detect_config(language) {
-            self.set_autodetected_config(language.clone(), cfg.clone()).await;
+            self.set_autodetected_config(language.clone(), cfg.clone())
+                .await;
             return Some(cfg);
         }
         None
@@ -179,7 +180,8 @@ impl LspManager {
             }
         }
         if let Some(cfg) = detector::detect_config(language) {
-            self.set_autodetected_config(language.clone(), cfg.clone()).await;
+            self.set_autodetected_config(language.clone(), cfg.clone())
+                .await;
             return Some(cfg);
         }
         defaults::default_config(language)
@@ -194,12 +196,18 @@ impl LspManager {
     }
 
     async fn persist(&self, prefix: &str, lang: &LspLanguageId, config: &LspServerConfig) {
-        let Some(ref db_path) = self.db_path else { return };
+        let Some(ref db_path) = self.db_path else {
+            return;
+        };
         let key = format!("{prefix}{lang}");
-        let Ok(value) = serde_json::to_string(config) else { return };
+        let Ok(value) = serde_json::to_string(config) else {
+            return;
+        };
         let path = db_path.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            let Ok(conn) = Connection::open(&path) else { return };
+            let Ok(conn) = Connection::open(&path) else {
+                return;
+            };
             let _ = crate::store::migrations::run(&conn);
             let _ = crate::store::repos::settings::set(&conn, &key, &value);
         })
@@ -207,11 +215,15 @@ impl LspManager {
     }
 
     async fn remove_persisted(&self, prefix: &str, lang: &LspLanguageId) {
-        let Some(ref db_path) = self.db_path else { return };
+        let Some(ref db_path) = self.db_path else {
+            return;
+        };
         let key = format!("{prefix}{lang}");
         let path = db_path.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            let Ok(conn) = Connection::open(&path) else { return };
+            let Ok(conn) = Connection::open(&path) else {
+                return;
+            };
             let _ = crate::store::migrations::run(&conn);
             let _ = conn.execute(
                 "DELETE FROM app_settings WHERE key = ?1",
@@ -654,8 +666,8 @@ mod tests {
         {
             let conn = Connection::open(&db_path).unwrap();
             migrations::run(&conn).unwrap();
-            let cfg = LspServerConfig::new("python", "persisted-pylsp")
-                .with_args(vec!["--stdio".into()]);
+            let cfg =
+                LspServerConfig::new("python", "persisted-pylsp").with_args(vec!["--stdio".into()]);
             let value = serde_json::to_string(&cfg).unwrap();
             crate::store::repos::settings::set(&conn, "lsp_config.python", &value).unwrap();
         }
@@ -687,8 +699,9 @@ mod tests {
 
         // Verify persisted by opening a fresh connection.
         let conn = Connection::open(&db_path).unwrap();
-        let value =
-            crate::store::repos::settings::get(&conn, "lsp_config.java").unwrap().unwrap();
+        let value = crate::store::repos::settings::get(&conn, "lsp_config.java")
+            .unwrap()
+            .unwrap();
         let cfg: LspServerConfig = serde_json::from_str(&value).unwrap();
         assert_eq!(cfg.command, "my-jdtls");
 
@@ -703,7 +716,8 @@ mod tests {
         std::fs::remove_file(&db_path).ok();
 
         let mgr = LspManager::with_db(db_path.clone());
-        mgr.set_user_config(LspServerConfig::new("java", "my-jdtls")).await;
+        mgr.set_user_config(LspServerConfig::new("java", "my-jdtls"))
+            .await;
         mgr.remove_user_config(&LspLanguageId::new("java")).await;
 
         let conn = Connection::open(&db_path).unwrap();

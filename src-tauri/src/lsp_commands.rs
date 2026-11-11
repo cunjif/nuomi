@@ -137,11 +137,7 @@ pub async fn impl_lsp_redetect(
     language: String,
 ) -> Result<Option<LspServerConfigDto>, IpcError> {
     let lang = LspLanguageId::new(language);
-    Ok(state
-        .lsp_manager
-        .redetect(&lang)
-        .await
-        .map(Into::into))
+    Ok(state.lsp_manager.redetect(&lang).await.map(Into::into))
 }
 
 /// Get the config source for a language (user / autodetected / default / none).

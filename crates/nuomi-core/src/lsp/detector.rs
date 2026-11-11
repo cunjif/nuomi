@@ -69,7 +69,10 @@ fn detect_java() -> Option<LspServerConfig> {
         }
     }
     if let Some(path) = find_vscode_jdtls() {
-        return Some(LspServerConfig::new("java", path.to_string_lossy().into_owned()));
+        return Some(LspServerConfig::new(
+            "java",
+            path.to_string_lossy().into_owned(),
+        ));
     }
     None
 }
