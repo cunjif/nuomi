@@ -1264,7 +1264,9 @@
     "areaLabel": "终端",
     "empty": "尚未打开终端",
     "new": "新建终端",
-    "close": "关闭终端"
+    "close": "关闭终端",
+    "rename": "重命名终端",
+    "renameHint": "拖拽排序，双击重命名"
   },
   "capability": {
     "reasoning": "推理",

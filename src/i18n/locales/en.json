@@ -1309,7 +1309,9 @@
     "areaLabel": "Terminal",
     "empty": "No terminal open",
     "new": "New terminal",
-    "close": "Close terminal"
+    "close": "Close terminal",
+    "rename": "Rename terminal",
+    "renameHint": "Drag to reorder · double-click to rename"
   },
   "split": {
     "keepLeft": "Keep left",

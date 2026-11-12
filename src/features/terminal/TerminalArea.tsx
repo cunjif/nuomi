@@ -18,23 +18,25 @@ import { EditorToolbar } from "../shell/EditorArea";
 import { TerminalTabs } from "./TerminalTabs";
 import { TerminalView } from "./TerminalView";
 import { resolveTerminalCwd } from "./resolveTerminalCwd";
+import { nextTerminalTitle } from "./terminalTitle";
 import { useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
 
 export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
   const bucket = useUiStore((s) => s.terminalByWorkspace[workspaceId]);
   const addTerminal = useUiStore((s) => s.addTerminal);
+  const setTerminalBackendId = useUiStore((s) => s.setTerminalBackendId);
 
   const terminals = bucket?.terminals ?? [];
   const activeId = bucket?.activeTerminalId ?? null;
   const activeTerminal = terminals.find((t) => t.id === activeId) ?? null;
 
   const handleNew = async (): Promise<void> => {
-    const { cwd, source } = await resolveTerminalCwd();
+    const { cwd, source } = await resolveTerminalCwd(workspaceId);
     const id = `term-${Date.now()}`;
     const instance: TerminalInstance = {
       id,
-      title: `Terminal ${terminals.length + 1}`,
+      title: nextTerminalTitle(terminals),
       createdAt: Date.now(),
       cwd,
       cwdSource: source,
@@ -54,6 +56,9 @@ export function TerminalArea({ workspaceId }: { workspaceId: string }): ReactNod
               terminalId={activeTerminal.id}
               cwd={activeTerminal.cwd}
               initialCommand={activeTerminal.initialCommand}
+              onBackendReady={(backendId) =>
+                setTerminalBackendId(workspaceId, activeTerminal.id, backendId)
+              }
             />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-sm text-ink-muted">
