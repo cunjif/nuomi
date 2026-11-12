@@ -11657,7 +11657,20 @@ pub async fn impl_terminal_create(
         let db = Db::open(&db_path).ok()?;
         migrations::run(&db.0).ok()?;
         let ws_entry = repos::workspaces::find_active(&db.0).ok().flatten()?;
-        let root = std::path::PathBuf::from(&ws_entry.root_path);
+        // The v2 workspace's `root_path` is a uuid placeholder (P1-C): a path
+        // built from it resolves *relatively* against the process cwd, which
+        // under `tauri dev` is `src-tauri/` — the terminal log then lands
+        // inside the dev watcher's watched directory and every line of shell
+        // output triggers "Rebuilding application" (the app "crashes" and
+        // restarts on first terminal use). Derive the real work directory
+        // via the compat_roots pattern instead, and refuse relative paths.
+        let root = nuomi_core::services::workspace_registry_v2::compat_roots(&db.0, &ws_entry)
+            .ok()?
+            .into_iter()
+            .next()?;
+        if !root.is_absolute() {
+            return None;
+        }
         let producer = nuomi_core::services::product_dir::Producer::new(
             nuomi_core::services::product_dir::ProducerModule::Terminal,
             "pending",
