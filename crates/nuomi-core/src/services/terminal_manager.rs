@@ -60,9 +60,12 @@ impl Drop for TerminalHandle {
         // Best-effort kill + reap; the child may have already exited.
         let _ = self.child.kill();
         let _ = self.child.wait();
-        if let Some(handle) = self.reader_thread.take() {
-            let _ = handle.join();
-        }
+        // Never `join` the reader thread here. It blocks on `read`, and both
+        // callers (`kill` / `kill_all`) drop the handle while holding the
+        // manager's terminals mutex — a PTY that does not signal EOF would
+        // stall every later create/write/resize forever. Detaching the handle
+        // is enough: the thread exits on its own when the pty closes.
+        drop(self.reader_thread.take());
     }
 }
 
@@ -207,18 +210,29 @@ impl TerminalManager {
 
     /// Kills the terminal and removes it from the manager.
     pub fn kill(&self, id: &str) -> Result<(), TerminalError> {
-        let mut terminals = self.terminals.lock().expect("terminal mutex poisoned");
-        terminals
-            .remove(id)
-            .ok_or_else(|| TerminalError::NotFound(id.to_string()))?;
-        // Drop runs kill + reap + join.
-        Ok(())
+        // Remove under the lock, then drop the handle *outside* it: Drop kills
+        // and reaps the child, which must never happen while the manager's
+        // mutex is held.
+        let handle = {
+            let mut terminals = self.terminals.lock().expect("terminal mutex poisoned");
+            terminals.remove(id)
+        };
+        match handle {
+            Some(handle) => {
+                drop(handle);
+                Ok(())
+            }
+            None => Err(TerminalError::NotFound(id.to_string())),
+        }
     }
 
     /// Kills all terminals (e.g. on workspace close or app shutdown).
     pub fn kill_all(&self) {
-        let mut terminals = self.terminals.lock().expect("terminal mutex poisoned");
-        terminals.clear();
+        let handles: Vec<TerminalHandle> = {
+            let mut terminals = self.terminals.lock().expect("terminal mutex poisoned");
+            terminals.drain().map(|(_, handle)| handle).collect()
+        };
+        drop(handles);
     }
 }
 
@@ -227,8 +241,10 @@ impl TerminalManager {
 /// Unix: $SHELL → /bin/bash fallback.
 fn default_shell() -> (String, Vec<String>) {
     if cfg!(windows) {
-        // Prefer pwsh (PowerShell 7+), then Windows PowerShell, then cmd.
-        for candidate in ["pwsh.exe", "powershell.exe", "cmd.exe"] {
+        // Prefer pwsh (PowerShell 7+), then Windows PowerShell. `cmd.exe`
+        // does not understand `-NoLogo` — passing it prints a "not recognized"
+        // error and the shell exits immediately — so it gets no arguments.
+        for candidate in ["pwsh.exe", "powershell.exe"] {
             if which_in_path(candidate).is_some() {
                 return (candidate.to_string(), vec!["-NoLogo".to_string()]);
             }
@@ -324,5 +340,19 @@ mod tests {
     fn default_shell_returns_something() {
         let (program, _) = default_shell();
         assert!(!program.is_empty());
+    }
+
+    #[test]
+    fn default_shell_arguments_match_the_program() {
+        let (program, args) = default_shell();
+        if cfg!(windows) {
+            if program == "cmd.exe" {
+                assert!(args.is_empty(), "cmd.exe does not accept -NoLogo");
+            } else {
+                assert_eq!(args, vec!["-NoLogo".to_string()]);
+            }
+        } else {
+            assert!(args.is_empty());
+        }
     }
 }
