@@ -434,6 +434,37 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
+/// Persists every panic (any thread) to `%TEMP%\nuomi-panic.log` before the
+/// default handler prints it. A vanishing window with no console attached
+/// loses the panic text otherwise — the log is the only forensic trail left.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown payload".to_string()
+        };
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let msg = format!("panic at {location}: {payload}\n");
+        eprintln!("{msg}");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::temp_dir().join("nuomi-panic.log"))
+        {
+            use std::io::Write as _;
+            let _ = f.write_all(msg.as_bytes());
+        }
+        default_hook(info);
+    }));
+}
+
 /// Bootstraps the kernel off the window-critical path: runs inside a task on
 /// the Tauri async runtime while the main thread returns to the event loop
 /// and the (config-defined) window paints immediately. Once the state is
@@ -569,6 +600,7 @@ async fn boot_and_wire(
 
 pub fn run() {
     init_tracing();
+    install_panic_hook();
     let builder = specta_builder();
     #[cfg(debug_assertions)]
     if let Err(e) = export_bindings() {
@@ -653,5 +685,22 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
+        .map_err(|err| {
+            // A window that disappears along with the process is usually this
+            // path: the event loop surfaced a fatal error (most often the
+            // WebView2 process going away). Persist it before the panic so the
+            // cause survives the process.
+            let msg = format!("nuomi shell run() error: {err}");
+            eprintln!("{msg}");
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(std::env::temp_dir().join("nuomi-shell-crash.log"))
+            {
+                use std::io::Write as _;
+                let _ = writeln!(f, "{msg}");
+            }
+            err
+        })
         .expect("error while running nuomi shell");
 }
