@@ -134,6 +134,12 @@ export interface TerminalInstance {
   cwdSource?: "workspace" | "home" | "explicit";
   /** Command to execute once the terminal PTY is ready (e.g. "python main.py"). */
   initialCommand?: string;
+  /**
+   * Backend (PTY) id returned by `terminalCreate`. `id` above is the frontend
+   * tab key, so killing the process must use this — passing the tab key to
+   * `terminalKill` fails with `terminal.not_found` and leaks the shell.
+   */
+  backendId?: string;
 }
 
 /**
@@ -327,6 +333,31 @@ interface UiState {
   removeTerminal: (workspaceId: string, terminalId: string) => void;
   /** ADR-0024 Part B: set the active terminal in a workspace's bucket. */
   setActiveTerminal: (workspaceId: string, terminalId: string) => void;
+  /** ADR-0024 Part B: record the PTY id once `terminalCreate` resolves. */
+  setTerminalBackendId: (
+    workspaceId: string,
+    terminalId: string,
+    backendId: string,
+  ) => void;
+  /**
+   * ADR-0024 Part B: move `draggedId` into `targetId`'s position (drag
+   * reorder). Pure display-order change: `activeTerminalId`, PTY ids and cwd
+   * bindings are untouched, so a dragged terminal never restarts.
+   */
+  reorderTerminal: (
+    workspaceId: string,
+    draggedId: string,
+    targetId: string,
+  ) => void;
+  /**
+   * ADR-0024 Part B: rename a terminal tab. A blank/whitespace-only title is
+   * ignored (the previous name is kept); PTY id + cwd are untouched.
+   */
+  renameTerminal: (
+    workspaceId: string,
+    terminalId: string,
+    title: string,
+  ) => void;
   /**
    * Switches to another workspace (single-open transition): the backend
    * saves the outgoing snapshot, closes it and opens the target. Editor
@@ -737,6 +768,55 @@ export const useUiStore = create<UiState>((set, get) => ({
       terminalByWorkspace: {
         ...get().terminalByWorkspace,
         [workspaceId]: { ...bucket, activeTerminalId: terminalId },
+      },
+    });
+  },
+  setTerminalBackendId: (workspaceId, terminalId, backendId) => {
+    const bucket = get().terminalByWorkspace[workspaceId];
+    if (!bucket) return;
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: {
+          ...bucket,
+          terminals: bucket.terminals.map((t) =>
+            t.id === terminalId ? { ...t, backendId } : t,
+          ),
+        },
+      },
+    });
+  },
+  renameTerminal: (workspaceId, terminalId, title) => {
+    const name = title.trim();
+    if (name === "") return;
+    const bucket = get().terminalByWorkspace[workspaceId];
+    if (!bucket) return;
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: {
+          ...bucket,
+          terminals: bucket.terminals.map((t) =>
+            t.id === terminalId ? { ...t, title: name } : t,
+          ),
+        },
+      },
+    });
+  },
+  reorderTerminal: (workspaceId, draggedId, targetId) => {
+    const bucket = get().terminalByWorkspace[workspaceId];
+    if (!bucket) return;
+    const from = bucket.terminals.findIndex((t) => t.id === draggedId);
+    const to = bucket.terminals.findIndex((t) => t.id === targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const terminals = [...bucket.terminals];
+    const moved = terminals.splice(from, 1)[0];
+    if (moved === undefined) return;
+    terminals.splice(to, 0, moved);
+    set({
+      terminalByWorkspace: {
+        ...get().terminalByWorkspace,
+        [workspaceId]: { ...bucket, terminals },
       },
     });
   },

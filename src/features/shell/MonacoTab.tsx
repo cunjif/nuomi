@@ -18,6 +18,7 @@ import type { DocumentSymbol, EditorWysiwygApi } from "../../lib/editor-ext";
 import { WysiwygMarkdownEditor } from "../../lib/editor-ext/builtin/wysiwyg-markdown";
 import { extractSymbols } from "../../lib/editor-ext/builtin/outline-symbols";
 import { ipc } from "../../lib/ipc/client";
+import { monoFontStack } from "../../lib/theme/monoFont";
 import { useTheme } from "../../lib/store/useTheme";
 import { toast } from "../../lib/store/toastStore";
 import { useUiStore } from "../../lib/store/uiStore";
@@ -37,10 +38,7 @@ const MonacoEditor = lazy(async () => {
 // same as the `font-mono` class and .md-wysiwyg code). Resolved at render
 // into a concrete face list: Monaco's canvas-based char measurement cannot
 // resolve a var() reference, so the stack must be read, not inlined.
-const monoFont = (): string => {
-  const stack = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
-  return stack !== "" ? stack : "monospace";
-};
+const monoFont = (): string => monoFontStack();
 
 interface MonacoTabProps {
   path: string;
