@@ -2155,6 +2155,24 @@ export function testDoubleCommands(): CommandSet {
     async lspDocumentSymbols(_language: string, _rootUri: string, _uri: string) {
       return ok(null);
     },
+    async lspPrepareRename(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspRename(_language: string, _rootUri: string, _uri: string, _line: number, _character: number, _newName: string) {
+      return ok(null);
+    },
+    async lspWorkspaceSymbols(_language: string, _rootUri: string, _query: string) {
+      return ok([]);
+    },
+    async lspTypeDefinition(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspImplementation(_language: string, _rootUri: string, _uri: string, _line: number, _character: number) {
+      return ok(null);
+    },
+    async lspCodeAction(_language: string, _rootUri: string, _uri: string, _line: number, _character: number, _diagnostics: unknown) {
+      return ok([]);
+    },
     async lspDidOpen(_language: string, _rootUri: string, _uri: string, _languageId: string, _text: string) {
       return ok(null);
     },

@@ -1870,6 +1870,54 @@ async lspDocumentSymbols(language: string, rootUri: string, uri: string) : Promi
     else return { status: "error", error: e  as any };
 }
 },
+async lspPrepareRename(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_prepare_rename", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspRename(language: string, rootUri: string, uri: string, line: number, character: number, newName: string) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_rename", { language, rootUri, uri, line, character, newName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspWorkspaceSymbols(language: string, rootUri: string, query: string) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_workspace_symbols", { language, rootUri, query }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspTypeDefinition(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_type_definition", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspImplementation(language: string, rootUri: string, uri: string, line: number, character: number) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_implementation", { language, rootUri, uri, line, character }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lspCodeAction(language: string, rootUri: string, uri: string, line: number, character: number, diagnostics: JsonValue) : Promise<Result<JsonValue, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("lsp_code_action", { language, rootUri, uri, line, character, diagnostics }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async lspDidOpen(language: string, rootUri: string, uri: string, languageId: string, text: string) : Promise<Result<null, IpcError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("lsp_did_open", { language, rootUri, uri, languageId, text }) };

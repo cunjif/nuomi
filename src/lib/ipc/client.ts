@@ -474,6 +474,18 @@ export const ipc = {
     unwrap(current.lspFormatting(language, rootUri, uri)),
   lspDocumentSymbols: (language: string, rootUri: string, uri: string) =>
     unwrap(current.lspDocumentSymbols(language, rootUri, uri)),
+  lspPrepareRename: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspPrepareRename(language, rootUri, uri, line, character)),
+  lspRename: (language: string, rootUri: string, uri: string, line: number, character: number, newName: string) =>
+    unwrap(current.lspRename(language, rootUri, uri, line, character, newName)),
+  lspWorkspaceSymbols: (language: string, rootUri: string, query: string) =>
+    unwrap(current.lspWorkspaceSymbols(language, rootUri, query)),
+  lspTypeDefinition: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspTypeDefinition(language, rootUri, uri, line, character)),
+  lspImplementation: (language: string, rootUri: string, uri: string, line: number, character: number) =>
+    unwrap(current.lspImplementation(language, rootUri, uri, line, character)),
+  lspCodeAction: (language: string, rootUri: string, uri: string, line: number, character: number, diagnostics: JsonValue) =>
+    unwrap(current.lspCodeAction(language, rootUri, uri, line, character, diagnostics)),
   lspDidOpen: (language: string, rootUri: string, uri: string, languageId: string, text: string) =>
     unwrap(current.lspDidOpen(language, rootUri, uri, languageId, text)),
   lspDidChange: (language: string, rootUri: string, uri: string, version: number, text: string) =>
