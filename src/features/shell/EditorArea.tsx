@@ -21,7 +21,14 @@ import { WorkspaceBottomBar } from "./WorkspaceBottomBar";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
 import { RunEntryButtons } from "./run/RunEntryButtons";
 import { RunStatusBar } from "./run/RunStatusBar";
-import { useUiStore } from "../../lib/store/uiStore";
+import { RightPanelDock } from "./RightPanelDock";
+import { PanelResizer } from "../../components/ui/PanelResizer";
+import {
+  useUiStore,
+  PANEL_MIN_WIDTH,
+  PANEL_MAX_WIDTH,
+  PANEL_DEFAULT_WIDTH,
+} from "../../lib/store/uiStore";
 
 // Register + contribute the builtin editor extensions once at module load so
 // preview matchers are queryable during the first child (MonacoTab) render.
@@ -103,6 +110,10 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
     activeTempFile !== null ? tempFileTabs.find((t) => t.absPath === activeTempFile) ?? null : null;
   // Re-render when feature toggles change (workbench.runPanel etc.).
   useEditorExtVersion();
+  // Explorer sidebar layout (width / collapsed dock / fully hidden), shared
+  // via uiStore.rightPanel and persisted to localStorage.
+  const rightPanel = useUiStore((s) => s.rightPanel);
+  const setRightPanel = useUiStore((s) => s.setRightPanel);
 
   return (
     <section aria-label={t("files.treeLabel")} className="flex h-full min-h-0 flex-1 flex-col bg-surface-raised">
@@ -131,17 +142,35 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
           {isEditorExtensionEnabled("workbench.runPanel") && <RunStatusBar />}
         </div>
         {/* Explorer sidebar (right, per 用户截图): workspace actions + root
-        label on top, then ONE scroll container for the whole tree. */}
-        <aside
-          aria-label={t("files.treeLabel")}
-          className="flex w-56 shrink-0 flex-col border-l border-ink-muted/30 bg-surface"
-        >
-          <EditorToolbar />
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            <FileTree workspaceId={workspaceId} />
-          </div>
-          <WorkspaceBottomBar workspaceId={workspaceId} />
-        </aside>
+        label on top, then ONE scroll container for the whole tree. Hidden
+        state renders nothing (restored via AreaNav); collapsed state swaps
+        the panel for its icon dock. */}
+        {rightPanel.hidden ? null : rightPanel.collapsed ? (
+          <RightPanelDock workspaceId={workspaceId} />
+        ) : (
+          <aside
+            aria-label={t("files.treeLabel")}
+            style={{ width: rightPanel.width }}
+            className="relative flex shrink-0 flex-col border-l border-ink-muted/30 bg-surface"
+          >
+            <EditorToolbar />
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <FileTree workspaceId={workspaceId} />
+            </div>
+            <WorkspaceBottomBar workspaceId={workspaceId} />
+            <PanelResizer
+              side="right"
+              width={rightPanel.width}
+              minWidth={PANEL_MIN_WIDTH}
+              maxWidth={PANEL_MAX_WIDTH}
+              onWidthChange={(width) => setRightPanel({ width })}
+              onCollapse={() => setRightPanel({ collapsed: true })}
+              onReset={() => setRightPanel({ width: PANEL_DEFAULT_WIDTH })}
+              resizeLabel={t("shell.panelResize")}
+              collapseLabel={t("shell.panelCollapse")}
+            />
+          </aside>
+        )}
       </div>
     </section>
   );

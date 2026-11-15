@@ -66,6 +66,75 @@ export function resolveInitialTheme(): Theme {
   return "chalkboard-dark";
 }
 
+/** localStorage key for the left/right panel layout (width/collapsed/hidden). */
+export const PANEL_LAYOUT_STORAGE_KEY = "nuomi.panelLayout";
+
+/** Panel width bounds (px). Default mirrors the retired `w-56` fixed width. */
+export const PANEL_MIN_WIDTH = 180;
+export const PANEL_MAX_WIDTH = 480;
+export const PANEL_DEFAULT_WIDTH = 224;
+
+/** Three-state layout of a dockable side panel: resizable width, collapsible
+ * to its icon dock, or fully hidden (dock included — restored via AreaNav). */
+export interface PanelLayoutState {
+  width: number;
+  collapsed: boolean;
+  hidden: boolean;
+}
+
+const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
+  width: PANEL_DEFAULT_WIDTH,
+  collapsed: false,
+  hidden: false,
+};
+
+export function clampPanelWidth(width: number): number {
+  return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+/** Validates one stored panel entry; anything malformed falls back to defaults. */
+function readStoredPanel(raw: unknown): PanelLayoutState | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const candidate = raw as Partial<PanelLayoutState>;
+  if (typeof candidate.width !== "number" || typeof candidate.collapsed !== "boolean" || typeof candidate.hidden !== "boolean") {
+    return null;
+  }
+  return {
+    width: clampPanelWidth(candidate.width),
+    collapsed: candidate.collapsed,
+    hidden: candidate.hidden,
+  };
+}
+
+/** Reads the persisted panel layout (best-effort; storage failures and
+ * corrupted JSON both fall back to the expanded defaults). */
+export function resolveInitialPanelLayout(): { leftPanel: PanelLayoutState; rightPanel: PanelLayoutState } {
+  try {
+    const raw = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY);
+    if (!raw) return { leftPanel: DEFAULT_PANEL_LAYOUT, rightPanel: DEFAULT_PANEL_LAYOUT };
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") {
+      return { leftPanel: DEFAULT_PANEL_LAYOUT, rightPanel: DEFAULT_PANEL_LAYOUT };
+    }
+    const candidate = parsed as { left?: unknown; right?: unknown };
+    return {
+      leftPanel: readStoredPanel(candidate.left) ?? DEFAULT_PANEL_LAYOUT,
+      rightPanel: readStoredPanel(candidate.right) ?? DEFAULT_PANEL_LAYOUT,
+    };
+  } catch {
+    return { leftPanel: DEFAULT_PANEL_LAYOUT, rightPanel: DEFAULT_PANEL_LAYOUT };
+  }
+}
+
+/** Best-effort write; a failed write only costs cross-restart restoration. */
+function persistPanelLayout(leftPanel: PanelLayoutState, rightPanel: PanelLayoutState): void {
+  try {
+    localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, JSON.stringify({ left: leftPanel, right: rightPanel }));
+  } catch {
+    // Storage unavailable (private mode / jsdom restrictions) — ignore.
+  }
+}
+
 /** Per-workspace editor state bucket (ADR 0017). Keyed by workspace id in
  * `editorByWorkspace`. Each workspace owns an independent set of open files,
  * selection, clipboard, dirtiness, and cross-workspace edit references. */
@@ -96,6 +165,26 @@ export interface TempFileEntry {
   dirty: boolean;
 }
 
+/**
+ * ADR-0031: one navigation-history position (VSCode navigateBack/Forward).
+ * `line`/`col` are 1-based Monaco positions; `workspaceId` pins the entry to
+ * the workspace whose editor bucket hosts `path` (single-open model).
+ */
+export interface JumpEntry {
+  workspaceId: string;
+  path: string;
+  line: number;
+  col: number;
+}
+
+/** Navigation-history stack depth cap (VSCode keeps ~100; 50 is plenty). */
+const JUMP_STACK_MAX = 50;
+
+function pushJumpStack(stack: JumpEntry[], entry: JumpEntry): JumpEntry[] {
+  const next = [...stack, entry];
+  return next.length > JUMP_STACK_MAX ? next.slice(next.length - JUMP_STACK_MAX) : next;
+}
+
 /** Best-effort active-run probe for the guarded close (backend truth).
  * Any failure resolves to an empty list — the backend's NeedConfirm
  * refusal remains the backstop, so a failed probe just skips the dialog. */
@@ -119,6 +208,25 @@ function emptyEditorState(): WorkspaceEditorState {
     dirtyPaths: {},
     crossRefs: {},
   };
+}
+
+/** app_settings key holding the file-tree expansion JSON blob. One record
+ * for every bucket — written on each toggle, read once at mount (P2-N). */
+export const TREE_EXPANDED_SETTINGS_KEY = "workbench.tree.expanded";
+
+/**
+ * File-tree expansion buckets (P2-N). Key = `<workspaceId>::<dirId>` where
+ * `dirId` is the focused work directory's id (the FileTree root points at
+ * it), plus the special `<workspaceId>::products` bucket for the Products
+ * node. Values are expanded paths relative to that tree root (the Products
+ * sentinel value is `::products`, which no real relative path collides
+ * with). Persisted as one JSON blob in app_settings so expansion survives
+ * area/view switches, workspace switches, focus-directory switches and app
+ * restarts; both FileTree hosts (workbench sidebar + terminal area) share
+ * the buckets.
+ */
+export function treeBucketKey(workspaceId: string, dirId: string): string {
+  return `${workspaceId}::${dirId}`;
 }
 
 /** Layout mode for the main content area (split retired with ADR-0021). */
@@ -227,6 +335,27 @@ interface UiState {
    */
   terminalByWorkspace: Record<string, { terminals: TerminalInstance[]; activeTerminalId: string | null }>;
   /**
+   * P2-N: file-tree expansion buckets keyed by `treeBucketKey`
+   * (`<workspaceId>::<dirId>` / `<workspaceId>::products`). Persisted to
+   * app_settings as one JSON blob (see `toggleTreeDir`).
+   */
+  expandedByDir: Record<string, string[]>;
+  /**
+   * P2-N: guards the one-shot app_settings hydration — the first FileTree
+   * mount reads the blob into `expandedByDir`; later mounts keep memory
+   * state (which is newer than the blob).
+   */
+  treeExpandedHydrated: boolean;
+  /**
+   * ADR-0031: cross-tab navigation history (VSCode navigateBack/Forward).
+   * `back` holds jump origins (where a navigation started); `forward` holds
+   * positions parked by a jumpBack. Memory-only ephemeral state — not
+   * persisted across restarts, not cleared on workspace switch (VSCode
+   * keeps history across file switches too).
+   */
+  jumpBackStack: JumpEntry[];
+  jumpForwardStack: JumpEntry[];
+  /**
    * ADR-0024 Part B: remembers the previous area when toggling to terminal
    * via Alt+`, so Alt+` again switches back. Null = no previous area recorded.
    */
@@ -236,6 +365,13 @@ interface UiState {
    * ADR-0021 single-open; the type no longer admits "split").
    */
   layoutMode: LayoutMode;
+  /** Left rail (nav + conversation list) layout; persisted to localStorage. */
+  leftPanel: PanelLayoutState;
+  /** Explorer sidebar (workbench) layout; persisted to localStorage. */
+  rightPanel: PanelLayoutState;
+  /** Patches one panel's layout (width is clamped) and persists both. */
+  setLeftPanel: (patch: Partial<PanelLayoutState>) => void;
+  setRightPanel: (patch: Partial<PanelLayoutState>) => void;
   /** Conversation list workspace filter ("all" = cross-workspace aggregation). */
   conversationWorkspaceFilter: "all" | string;
   setConversationWorkspaceFilter: (filter: "all" | string) => void;
@@ -292,6 +428,20 @@ interface UiState {
   clearClipboard: (workspaceId: string) => void;
   setRunDrawerTask: (taskId: string | null) => void;
   markDirty: (path: string, dirty: boolean, workspaceId: string) => void;
+  /**
+   * ADR-0031: record a jump origin before a navigation (VSCode
+   * navigateBack). Clears the forward stack — a fresh jump truncates the
+   * redo branch.
+   */
+  recordJumpOrigin: (origin: JumpEntry) => void;
+  /** ADR-0031: push a jump origin WITHOUT clearing the forward stack (used by jumpForward). */
+  recordJumpBackKeepForward: (origin: JumpEntry) => void;
+  /** ADR-0031: pop the newest jump origin (null when empty). */
+  popJumpOrigin: () => JumpEntry | null;
+  /** ADR-0031: park the current position so jumpForward can restore it later. */
+  recordJumpForward: (entry: JumpEntry) => void;
+  /** ADR-0031: pop the newest forward position (null when empty). */
+  popJumpForward: () => JumpEntry | null;
   /** Records a cross-workspace edit ref (ADR 0017): the tab at `localPath`
    *  in `workspaceId` actually lives at `sourcePath` in `sourceWorkspaceId`. */
   registerCrossRef: (
@@ -396,6 +546,17 @@ interface UiState {
   closeWorkspaceViaIpc: (workspaceId: string, force?: boolean) => Promise<void>;
   /** Sets the layout mode and persists via IPC. */
   setLayoutMode: (mode: LayoutMode) => Promise<void>;
+  /**
+   * P2-N: toggles one expanded path within a tree bucket and persists the
+   * whole blob to app_settings (best-effort — a failed write only costs
+   * cross-restart restoration, never the in-memory state).
+   */
+  toggleTreeDir: (bucketKey: string, path: string) => void;
+  /**
+   * P2-N: reads the persisted expansion blob from app_settings into
+   * `expandedByDir` (once per app run; corrupted JSON is dropped).
+   */
+  hydrateTreeExpanded: () => Promise<void>;
   /** Syncs the open-workspace mirror from the backend (call on startup). */
   syncOpenWorkspace: () => Promise<void>;
 }
@@ -416,8 +577,25 @@ export const useUiStore = create<UiState>((set, get) => ({
   tempFileTabs: [],
   activeTempFile: null,
   terminalByWorkspace: {},
+  expandedByDir: {},
+  treeExpandedHydrated: false,
+  jumpBackStack: [],
+  jumpForwardStack: [],
   previousArea: null,
   layoutMode: "single",
+  ...resolveInitialPanelLayout(),
+  setLeftPanel: (patch) => {
+    const prev = get().leftPanel;
+    const leftPanel: PanelLayoutState = { ...prev, ...patch, width: clampPanelWidth(patch.width ?? prev.width) };
+    set({ leftPanel });
+    persistPanelLayout(leftPanel, get().rightPanel);
+  },
+  setRightPanel: (patch) => {
+    const prev = get().rightPanel;
+    const rightPanel: PanelLayoutState = { ...prev, ...patch, width: clampPanelWidth(patch.width ?? prev.width) };
+    set({ rightPanel });
+    persistPanelLayout(get().leftPanel, rightPanel);
+  },
   conversationWorkspaceFilter: "all",
   setConversationWorkspaceFilter: (filter) => set({ conversationWorkspaceFilter: filter }),
   /**
@@ -685,6 +863,25 @@ export const useUiStore = create<UiState>((set, get) => ({
         },
       };
     }),
+  recordJumpOrigin: (origin) =>
+    set((s) => ({ jumpBackStack: pushJumpStack(s.jumpBackStack, origin), jumpForwardStack: [] })),
+  recordJumpBackKeepForward: (origin) =>
+    set((s) => ({ jumpBackStack: pushJumpStack(s.jumpBackStack, origin) })),
+  popJumpOrigin: () => {
+    const back = get().jumpBackStack;
+    if (back.length === 0) return null;
+    const target = back[back.length - 1];
+    set({ jumpBackStack: back.slice(0, -1) });
+    return target ?? null;
+  },
+  recordJumpForward: (entry) => set((s) => ({ jumpForwardStack: pushJumpStack(s.jumpForwardStack, entry) })),
+  popJumpForward: () => {
+    const forward = get().jumpForwardStack;
+    if (forward.length === 0) return null;
+    const target = forward[forward.length - 1];
+    set({ jumpForwardStack: forward.slice(0, -1) });
+    return target ?? null;
+  },
   registerCrossRef: (workspaceId, localPath, sourceWorkspaceId, sourcePath) =>
     set((s) => {
       const bucket = s.editorByWorkspace[workspaceId] ?? emptyEditorState();
@@ -930,6 +1127,36 @@ export const useUiStore = create<UiState>((set, get) => ({
   setLayoutMode: async (mode) => {
     set({ layoutMode: mode });
     await ipc.setLayoutSnapshot(mode, null);
+  },
+  toggleTreeDir: (bucketKey, path) => {
+    const current = get().expandedByDir[bucketKey] ?? [];
+    const expanded = current.includes(path)
+      ? current.filter((p) => p !== path)
+      : [...current, path];
+    const expandedByDir = { ...get().expandedByDir, [bucketKey]: expanded };
+    set({ expandedByDir });
+    void ipc.appSettingSet(TREE_EXPANDED_SETTINGS_KEY, JSON.stringify(expandedByDir)).catch(() => {
+      // Best-effort persistence: memory state stays authoritative.
+    });
+  },
+  hydrateTreeExpanded: async () => {
+    if (get().treeExpandedHydrated) return;
+    set({ treeExpandedHydrated: true });
+    try {
+      const raw = await ipc.appSettingGet(TREE_EXPANDED_SETTINGS_KEY);
+      if (raw === null) return;
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== "object") return;
+      const restored: Record<string, string[]> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (Array.isArray(value) && value.every((p) => typeof p === "string")) {
+          restored[key] = value;
+        }
+      }
+      set({ expandedByDir: restored });
+    } catch {
+      // Corrupted blob: start from the default (all collapsed).
+    }
   },
   syncOpenWorkspace: async () => {
     const open = await ipc.workspaceGetOpen();

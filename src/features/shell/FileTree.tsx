@@ -11,7 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc/client";
 import { describeError } from "../../i18n";
-import { useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
+import { treeBucketKey, useUiStore, type TerminalInstance } from "../../lib/store/uiStore";
 import { useOpenWorkspace } from "../../lib/store/workspaceQueries";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/ContextMenu";
 import { languageForPath } from "./editorLanguage";
@@ -33,6 +33,12 @@ const ILLEGAL_NAME_CHARS = /[/\\:*?"<>|]/;
 
 interface NodeContext {
   workspaceId: string;
+  /** P2-N expansion bucket key (`<workspaceId>::<focusedDirId>`); null when
+   *  no focused work directory exists (tree is empty/disabled then). */
+  treeBucketKey: string | null;
+  /** P2-N: toggles one expanded path within the context's bucket (no-op when
+   *  the bucket key is null). */
+  toggleTreeDir: (path: string) => void;
   selectedPaths: string[];
   renaming: string | null;
   creating: { parent: string; isDir: boolean } | null;
@@ -57,6 +63,16 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
   const qc = useQueryClient();
   const { data: openWorkspace } = useOpenWorkspace();
   const hasDirectories = (openWorkspace?.directories ?? []).some((d) => d.mounted);
+  // P2-N: the FileTree root lists the focused (isActive) work directory —
+  // bucket expansion by that directory's stable id so switching focus
+  // directories or workspaces swaps buckets instead of resetting.
+  const focusedDirId = (openWorkspace?.directories ?? []).find((d) => d.isActive)?.id ?? null;
+  const bucketKey = focusedDirId !== null ? treeBucketKey(workspaceId, focusedDirId) : null;
+  // P2-N: one-shot hydration of the persisted expansion blob. Both hosts
+  // (workbench sidebar / terminal area) share the same store buckets.
+  useEffect(() => {
+    void useUiStore.getState().hydrateTreeExpanded();
+  }, []);
   const rootQuery = useQuery({ queryKey: ["dir", workspaceId, ""], queryFn: () => ipc.listDir("", workspaceId), enabled: hasDirectories });
   const sdkQuery = useQuery({ queryKey: ["app-setting", SDK_CONFIGS_KEY], queryFn: () => ipc.appSettingGet(SDK_CONFIGS_KEY) });
 
@@ -182,6 +198,10 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
 
   const ctxValue: NodeContext = {
     workspaceId,
+    treeBucketKey: bucketKey,
+    toggleTreeDir: (path) => {
+      if (bucketKey !== null) useUiStore.getState().toggleTreeDir(bucketKey, path);
+    },
     selectedPaths,
     renaming,
     creating,
@@ -398,8 +418,12 @@ export function FileTree({ workspaceId }: { workspaceId: string }): ReactNode {
 
 function DirNode({ parent, name, depth }: { parent: string; name: string; depth: number }): ReactNode {
   const ctx = useNodeCtx();
-  const [open, setOpen] = useState(false);
+  // P2-N: expansion lives in the uiStore bucket (keyed by workspace + focused
+  // directory), so it survives remounts, area/view switches, focus-directory
+  // and workspace switches, and app restarts — and is shared across hosts.
+  const expandedPaths = useUiStore((s) => (ctx.treeBucketKey !== null ? s.expandedByDir[ctx.treeBucketKey] : undefined));
   const path = joinPath(parent, name);
+  const open = expandedPaths?.includes(path) ?? false;
   const childrenQuery = useQuery({
     queryKey: ["dir", path],
     queryFn: () => ipc.listDir(path),
@@ -423,7 +447,9 @@ function DirNode({ parent, name, depth }: { parent: string; name: string; depth:
           data-path={path}
           onClick={(e) => {
             ctx.onNodeClick(e, path, true);
-            if (!e.ctrlKey && !e.metaKey && !e.shiftKey) setOpen((o) => !o);
+            if (!e.ctrlKey && !e.metaKey && !e.shiftKey && ctx.treeBucketKey !== null) {
+              ctx.toggleTreeDir(path);
+            }
           }}
           onContextMenu={(e) => ctx.onNodeContextMenu(e, path, true)}
           aria-expanded={open}
@@ -511,9 +537,15 @@ function LeafNode({ parent, name, depth }: { parent: string; name: string; depth
   );
 }
 
+const PRODUCTS_SENTINEL = "::products";
+
 function ProductsNode({ workspaceId }: { workspaceId: string }): ReactNode {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  // P2-N: the Products node is workspace-scoped (not tied to a focused
+  // directory), so it gets its own bucket; the sentinel path cannot collide
+  // with real relative paths (those never start with "::").
+  const productsBucketKey = treeBucketKey(workspaceId, "products");
+  const open = useUiStore((s) => s.expandedByDir[productsBucketKey]?.includes(PRODUCTS_SENTINEL) ?? false);
   const openProduct = useUiStore((s) => s.openProduct);
   const productsQuery = useQuery({
     queryKey: ["products", workspaceId],
@@ -539,7 +571,7 @@ function ProductsNode({ workspaceId }: { workspaceId: string }): ReactNode {
     <div>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => useUiStore.getState().toggleTreeDir(productsBucketKey, PRODUCTS_SENTINEL)}
         aria-expanded={open}
         className="block w-full truncate rounded text-left text-sm text-ink-muted hover:bg-surface-overlay"
         style={{ paddingLeft: 8 }}

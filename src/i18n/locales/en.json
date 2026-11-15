@@ -91,7 +91,14 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "close": "Close",
-    "windowControlFailed": "Window control failed"
+    "windowControlFailed": "Window control failed",
+    "leftPanelToggle": "Left panel visibility",
+    "rightPanelToggle": "Right panel visibility",
+    "panelShow": "Show panel",
+    "panelHide": "Hide panel completely",
+    "panelExpand": "Expand panel",
+    "panelCollapse": "Collapse panel",
+    "panelResize": "Drag to resize (double-click to reset)"
   },
   "theme": {
     "toggle": "Change theme",
@@ -1106,7 +1113,18 @@
     "nav": {
       "gotoDefinition": "Go to Definition",
       "findReferences": "Find References",
-      "noReferences": "No references found"
+      "noReferences": "No references found",
+      "jumpBack": "Back (jump history)",
+      "jumpForward": "Forward (jump history)",
+      "goToTypeDefinition": "Go to Type Definition",
+      "goToImplementation": "Go to Implementations"
+    },
+    "rename": {
+      "menuLabel": "Rename Symbol",
+      "applied_one": "Rename applied (1 file)",
+      "applied_other": "Rename applied ({{count}} files)",
+      "failed": "Rename failed",
+      "unavailable": "Cannot rename here (LSP language server required)"
     }
   },
   "tab": {
@@ -1148,6 +1166,8 @@
   "palette": {
     "filePlaceholder": "Find a workspace file…",
     "commandPlaceholder": "Type a command…",
+    "symbolPlaceholder": "Search workspace symbols… (Ctrl+T)",
+    "noSymbolLanguage": "The active file does not support symbol search (LSP language required)",
     "noResults": "No matching results",
     "hint": "↑↓ navigate · Enter select · Esc close",
     "scopeCurrent": "Current workspace",

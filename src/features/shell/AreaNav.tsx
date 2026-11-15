@@ -34,7 +34,7 @@ function WindowControls(): ReactNode {
   const base =
     "flex h-9 w-11 items-center justify-center text-xs text-ink-muted hover:bg-surface-overlay hover:text-ink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
   return (
-    <div className="relative z-10 ml-auto flex items-stretch self-stretch">
+    <div className="relative z-10 flex items-stretch self-stretch">
       <button type="button" aria-label={t("shell.minimize")} onClick={() => run(() => win.minimize())} className={base}>
         <Icon name="minimize" size={14} />
       </button>
@@ -48,6 +48,72 @@ function WindowControls(): ReactNode {
         className={`${base} hover:bg-state-danger hover:text-surface`}
       >
         <Icon name="close" size={14} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Side-panel toggles: press cycles expanded ⇄ collapsed (icon dock), so the
+ * dock is always the visible "collapsed" face of the panel. Fully hidden
+ * state (dock included) is entered only from the dock's own hide button;
+ * pressing here while hidden restores the dock directly — the dock can
+ * never be lost by accident. Available outside Tauri too so tests and
+ * plain-browser runs exercise the same behavior.
+ */
+function PanelToggles(): ReactNode {
+  const { t } = useTranslation();
+  const leftPanel = useUiStore((s) => s.leftPanel);
+  const rightPanel = useUiStore((s) => s.rightPanel);
+  const setLeftPanel = useUiStore((s) => s.setLeftPanel);
+  const setRightPanel = useUiStore((s) => s.setRightPanel);
+  const base =
+    "flex h-9 w-8 items-center justify-center text-xs focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
+  const toggle = (
+    panel: typeof leftPanel,
+    set: (patch: { hidden?: boolean; collapsed?: boolean }) => void,
+  ): void => {
+    // Hidden → restore as the dock; expanded → collapse to the dock;
+    // dock → expand. The dock thus remains reachable in one click from
+    // every state.
+    if (panel.hidden) set({ hidden: false, collapsed: true });
+    else set({ collapsed: !panel.collapsed });
+  };
+  return (
+    <div className="flex items-stretch self-stretch">
+      <button
+        type="button"
+        aria-pressed={!leftPanel.hidden}
+        aria-label={t("shell.leftPanelToggle")}
+        title={
+          leftPanel.hidden
+            ? t("shell.panelShow")
+            : leftPanel.collapsed
+              ? t("shell.panelExpand")
+              : t("shell.panelCollapse")
+        }
+        data-testid="left-panel-toggle"
+        onClick={() => toggle(leftPanel, setLeftPanel)}
+        className={`${base} ${leftPanel.hidden ? "text-ink-muted/50" : "text-ink-muted"} hover:bg-surface-overlay hover:text-ink`}
+      >
+        <Icon name="panel-left" size={14} />
+      </button>
+      <button
+        type="button"
+        aria-pressed={!rightPanel.hidden}
+        aria-label={t("shell.rightPanelToggle")}
+        title={
+          rightPanel.hidden
+            ? t("shell.panelShow")
+            : rightPanel.collapsed
+              ? t("shell.panelExpand")
+              : t("shell.panelCollapse")
+        }
+        data-testid="right-panel-toggle"
+        onClick={() => toggle(rightPanel, setRightPanel)}
+        className={`${base} ${rightPanel.hidden ? "text-ink-muted/50" : "text-ink-muted"} hover:bg-surface-overlay hover:text-ink`}
+      >
+        <Icon name="panel-right" size={14} />
       </button>
     </div>
   );
@@ -119,13 +185,17 @@ export function AreaNav(): ReactNode {
             </button>
           ))}
         </div>
-        {/* Window controls right (Tauri only); drag filler keeps ml-auto
-        spacing when controls are hidden (browser/tests). */}
-        {tauriReady ? (
-          <WindowControls />
-        ) : (
-          <span className="ml-auto h-full w-8" aria-hidden="true" />
-        )}
+        {/* Panel visibility toggles + window controls right (window
+        buttons Tauri only); the wrapper owns ml-auto so the toggles hug
+        the controls on both runtimes. */}
+        <div className="relative z-10 ml-auto flex items-stretch">
+          <PanelToggles />
+          {tauriReady ? (
+            <WindowControls />
+          ) : (
+            <span className="h-full w-8" aria-hidden="true" />
+          )}
+        </div>
       </div>
     </header>
   );

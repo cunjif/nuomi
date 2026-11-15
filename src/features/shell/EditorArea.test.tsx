@@ -200,3 +200,68 @@ describe("EditorArea — workbench enhancement integration", () => {
     expect(await screen.findByText("notes.txt")).toBeInTheDocument();
   });
 });
+
+describe("EditorArea — explorer panel layout states", () => {
+  afterEach(() => {
+    useUiStore.setState({ rightPanel: { width: 224, collapsed: false, hidden: false } });
+  });
+
+  it("expanded: renders the aside with controlled width and the edge resizer", async () => {
+    tdSeedFiles({ "README.md": "hello" });
+    openInStore("README.md");
+    useUiStore.setState({ rightPanel: { width: 320, collapsed: false, hidden: false } });
+    renderPanel();
+
+    await screen.findByRole("button", { name: "切换工作区" });
+    expect(screen.getByTestId("panel-resizer-right")).toBeInTheDocument();
+    expect(screen.queryByTestId("right-panel-dock")).toBeNull();
+    const aside = document.querySelector("aside[aria-label='工作区文件']");
+    expect(aside).toHaveStyle({ width: "320px" });
+  });
+
+  it("collapsed: swaps the aside for the icon dock; expand restores the panel", async () => {
+    tdSeedFiles({ "README.md": "hello" });
+    openInStore("README.md");
+    useUiStore.setState({ rightPanel: { width: 224, collapsed: true, hidden: false } });
+    renderPanel();
+
+    expect(await screen.findByTestId("right-panel-dock")).toBeInTheDocument();
+    expect(screen.queryByTestId("panel-resizer-right")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开面板" }));
+    expect(useUiStore.getState().rightPanel.collapsed).toBe(false);
+    // The expanded panel (with its toolbar) is back.
+    await screen.findByRole("button", { name: "切换工作区" });
+    expect(screen.getByTestId("panel-resizer-right")).toBeInTheDocument();
+  });
+
+  it("collapsed dock: the switch-workspace icon opens the workspace list dialog", async () => {
+    openInStore("README.md");
+    useUiStore.setState({ rightPanel: { width: 224, collapsed: true, hidden: false } });
+    renderPanel();
+
+    expect(await screen.findByTestId("right-panel-dock")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "切换工作区" }));
+    await screen.findByRole("dialog");
+  });
+
+  it("hidden: renders neither the aside nor the dock", () => {
+    openInStore("README.md");
+    useUiStore.setState({ rightPanel: { width: 224, collapsed: false, hidden: true } });
+    renderPanel();
+
+    expect(screen.queryByTestId("right-panel-dock")).toBeNull();
+    expect(screen.queryByTestId("panel-resizer-right")).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换工作区" })).toBeNull();
+  });
+
+  it("the chevron collapses the expanded panel to the dock", async () => {
+    tdSeedFiles({ "README.md": "hello" });
+    openInStore("README.md");
+    renderPanel();
+
+    await screen.findByRole("button", { name: "切换工作区" });
+    fireEvent.click(screen.getByTestId("panel-collapse-right"));
+    expect(useUiStore.getState().rightPanel.collapsed).toBe(true);
+    expect(screen.getByTestId("right-panel-dock")).toBeInTheDocument();
+  });
+});

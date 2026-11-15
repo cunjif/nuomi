@@ -91,7 +91,14 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "close": "关闭",
-    "windowControlFailed": "窗口操作失败"
+    "windowControlFailed": "窗口操作失败",
+    "leftPanelToggle": "左侧面板显示",
+    "rightPanelToggle": "右侧面板显示",
+    "panelShow": "显示面板",
+    "panelHide": "完全隐藏面板",
+    "panelExpand": "展开面板",
+    "panelCollapse": "收起面板",
+    "panelResize": "拖拽调节面板宽度（双击重置）"
   },
   "theme": {
     "toggle": "切换主题",
@@ -1113,7 +1120,18 @@
     "nav": {
       "gotoDefinition": "转到定义",
       "findReferences": "查找引用",
-      "noReferences": "未找到引用"
+      "noReferences": "未找到引用",
+      "jumpBack": "后退（跳转历史）",
+      "jumpForward": "前进（跳转历史）",
+      "goToTypeDefinition": "转到类型定义",
+      "goToImplementation": "转到实现"
+    },
+    "rename": {
+      "menuLabel": "重命名符号",
+      "applied_one": "重命名完成（1 个文件）",
+      "applied_other": "重命名完成（{{count}} 个文件）",
+      "failed": "重命名失败",
+      "unavailable": "此处不可重命名（需 LSP 语言服务）"
     }
   },
   "tab": {
@@ -1155,6 +1173,8 @@
   "palette": {
     "filePlaceholder": "查找工作区文件…",
     "commandPlaceholder": "输入命令…",
+    "symbolPlaceholder": "搜索工作区符号…（Ctrl+T）",
+    "noSymbolLanguage": "当前活动文件不支持符号搜索（需 LSP 语言）",
     "noResults": "没有匹配结果",
     "hint": "↑↓ 选择 · Enter 确认 · Esc 关闭",
     "scopeCurrent": "当前工作区",

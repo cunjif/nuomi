@@ -1,15 +1,10 @@
 import { useRef, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/ui/Icon/Icon";
 import { Dialog } from "../../components/ui/Dialog";
 import { useClickOutside } from "../../components/ui/useClickOutside";
-import { ipc } from "../../lib/ipc/client";
 import type { WorkDirectoryDto } from "../../lib/ipc/bindings.gen";
-import { toast } from "../../lib/store/toastStore";
-import { useUiStore } from "../../lib/store/uiStore";
-import { useInvalidateWorkspaceQueries, useOpenWorkspace } from "../../lib/store/workspaceQueries";
+import { useWorkDirectoryOps } from "./useWorkDirectoryOps";
 
 /**
  * Workspace bottom bar (ADR-0021 two-level model): lives at the bottom of
@@ -18,6 +13,8 @@ import { useInvalidateWorkspaceQueries, useOpenWorkspace } from "../../lib/store
  * FileTree/sandbox root follows); a stale chip (missing on disk) toasts the
  * relocate hint instead (spec 5.5.3-1c). Right-click offers focus/remove;
  * the "+" popover mounts unmounted directories or browses for a new one.
+ * Directory operations are shared with the collapsed-panel dock via
+ * useWorkDirectoryOps — this component owns only its chip UI state.
  */
 export function WorkspaceBottomBar({
   workspaceId,
@@ -25,9 +22,7 @@ export function WorkspaceBottomBar({
   workspaceId: string;
 }): ReactNode {
   const { t } = useTranslation();
-  const qc = useQueryClient();
-  const { invalidateAll } = useInvalidateWorkspaceQueries();
-  const editorByWorkspace = useUiStore((s) => s.editorByWorkspace);
+  const ops = useWorkDirectoryOps(workspaceId);
   const [menuForId, setMenuForId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
@@ -40,41 +35,11 @@ export function WorkspaceBottomBar({
     },
   });
 
-  const { data: open } = useOpenWorkspace();
   // Render only when the open workspace is this component's host (a mismatch
   // means a switch is in flight — hide until the query settles).
-  if (!open || open.id !== workspaceId) return null;
+  if (ops.open === null) return null;
 
-  const dirs = open.directories ?? [];
-  const mountedDirs = dirs.filter((d) => d.mounted);
-  const unmountedDirs = dirs.filter((d) => !d.mounted);
-
-  /** Focusing/removing a directory moves the sandbox root, so file/dir
-   * caches under the old root must refetch (same keys, new resolution). */
-  const invalidate = (): void => {
-    invalidateAll();
-    void qc.invalidateQueries({ queryKey: ["workspace"] });
-    void qc.invalidateQueries({ queryKey: ["dir"] });
-    void qc.invalidateQueries({ queryKey: ["file"] });
-  };
-
-  const handleFocus = (dir: WorkDirectoryDto): void => {
-    if (dir.isActive) return;
-    if (!dir.available) {
-      // Stale directory: keep the chip readable but block the switch (spec
-      // 5.5.3-1c — hint removal or relocation).
-      toast.error(t("workspace.directoryMissingToast"));
-      return;
-    }
-    void ipc
-      .workspaceFocusDirectory(workspaceId, dir.id)
-      .then(() => invalidate())
-      .catch((e) => toast.error(`${t("workspace.dirOpFailed")}: ${String(e)}`));
-  };
-
-  const dirtyFiles = Object.keys(editorByWorkspace[workspaceId]?.dirtyPaths ?? {}).filter(
-    (p) => editorByWorkspace[workspaceId]?.dirtyPaths[p],
-  );
+  const { mountedDirs, unmountedDirs } = ops;
 
   /**
    * Dirty guard only applies to the *active* directory: the editor can only
@@ -83,59 +48,14 @@ export function WorkspaceBottomBar({
    */
   const handleRemove = (dir: WorkDirectoryDto): void => {
     setMenuForId(null);
-    if (dir.isActive && dirtyFiles.length > 0) {
+    if (dir.isActive && ops.dirtyActiveFiles.length > 0) {
       setConfirmRemoveId(dir.id);
       return;
     }
-    void doRemove(dir.id);
+    void ops.removeDir(dir);
   };
 
-  const doRemove = async (directoryId: string): Promise<void> => {
-    try {
-      const result = await ipc.workspaceRemoveDirectory(workspaceId, directoryId);
-      if (result.workspaceClosed) {
-        // Last directory removed → backend closed the workspace; return to
-        // the empty state.
-        useUiStore.getState().setActiveWorkspaceId(null);
-      }
-      invalidate();
-      toast.success(t("workspace.dirRemoved"));
-    } catch (e) {
-      toast.error(`${t("workspace.dirOpFailed")}: ${String(e)}`);
-    }
-  };
-
-  const handleMount = (dir: WorkDirectoryDto): void => {
-    if (!dir.available) return;
-    void ipc
-      .workspaceMountDirectory(workspaceId, dir.id)
-      .then(() => {
-        setAddOpen(false);
-        invalidate();
-        toast.success(t("workspace.dirMounted"));
-      })
-      .catch((e) => toast.error(`${t("workspace.dirOpFailed")}: ${String(e)}`));
-  };
-
-  const handleBrowse = (): void => {
-    void pickFolder({ directory: true, multiple: false })
-      .then((selected) => {
-        if (!selected) return;
-        // Joins the open workspace (and auto-focuses) via the two-level
-        // add_directory semantics — no separate mount call needed.
-        return useUiStore
-          .getState()
-          .openDirectory(selected)
-          .then(() => {
-            setAddOpen(false);
-            invalidate();
-            toast.success(t("workspace.dirAdded"));
-          });
-      })
-      .catch((e) => toast.error(`${t("workspace.addDirFailed")}: ${String(e)}`));
-  };
-
-  const confirmDirtyFiles = confirmRemoveId !== null ? dirtyFiles : [];
+  const confirmDirtyFiles = confirmRemoveId !== null ? ops.dirtyActiveFiles : [];
 
   return (
     <div ref={rootRef} className="relative shrink-0 border-t border-ink-muted/30 bg-surface">
@@ -152,7 +72,7 @@ export function WorkspaceBottomBar({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => handleFocus(dir)}
+                onClick={() => ops.focusDir(dir)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setMenuForId(menuForId === dir.id ? null : dir.id);
@@ -182,7 +102,7 @@ export function WorkspaceBottomBar({
                     type="button"
                     disabled={dir.isActive}
                     onClick={() => {
-                      handleFocus(dir);
+                      ops.focusDir(dir);
                       setMenuForId(null);
                     }}
                     className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
@@ -222,7 +142,11 @@ export function WorkspaceBottomBar({
               type="button"
               disabled={!dir.available}
               title={dir.available ? dir.absPath : t("workspace.directoryMissing")}
-              onClick={() => handleMount(dir)}
+              onClick={() => {
+                void ops.mountDir(dir).then((added) => {
+                  if (added) setAddOpen(false);
+                });
+              }}
               className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
             >
               {dir.displayName}
@@ -232,7 +156,11 @@ export function WorkspaceBottomBar({
           <div className="my-1 border-t border-ink-muted/30" />
           <button
             type="button"
-            onClick={handleBrowse}
+            onClick={() => {
+              void ops.browseNewDir().then((added) => {
+                if (added) setAddOpen(false);
+              });
+            }}
             className="block w-full px-3 py-1 text-left text-ink-muted hover:bg-surface-overlay hover:text-ink-accent"
           >
             {t("workspace.browseNewDir")}
@@ -257,7 +185,8 @@ export function WorkspaceBottomBar({
               onClick={() => {
                 const id = confirmRemoveId;
                 setConfirmRemoveId(null);
-                if (id !== null) void doRemove(id);
+                const dir = mountedDirs.find((d) => d.id === id);
+                if (id !== null && dir !== undefined) void ops.removeDir(dir);
               }}
               className="rounded px-3 py-1 text-xs text-state-danger hover:bg-state-danger/10"
             >

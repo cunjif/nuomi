@@ -76,6 +76,18 @@ const MenuIcon: Glyph = (p) => (
     <path d="M4.5 7h15M4.5 12h15M4.5 17h15" />
   </svg>
 );
+const PanelLeftIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M4.5 4.8h15v14.6h-15z" />
+    <path d="M9.6 4.8v14.6" />
+  </svg>
+);
+const PanelRightIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M4.5 4.8h15v14.6h-15z" />
+    <path d="M14.4 4.8v14.6" />
+  </svg>
+);
 
 // ── window controls ──────────────────────────────────────────────────────
 const CloseIcon: Glyph = (p) => (
@@ -152,6 +164,12 @@ const SearchIcon: Glyph = (p) => (
   <svg {...p}>
     <circle cx="10.5" cy="10.5" r="6" />
     <path d="M15 15l5 5" />
+  </svg>
+);
+const ListIcon: Glyph = (p) => (
+  <svg {...p}>
+    <path d="M8.5 6.5h11M8.5 12h11M8.5 17.5h11" />
+    <path d="M4.6 6.5h.01M4.6 12h.01M4.6 17.5h.01" />
   </svg>
 );
 const ChevronDownIcon: Glyph = (p) => (
@@ -353,6 +371,8 @@ export const iconRegistry = {
   settings: SettingsIcon,
   plugins: PluginsIcon,
   menu: MenuIcon,
+  "panel-left": PanelLeftIcon,
+  "panel-right": PanelRightIcon,
   close: CloseIcon,
   minimize: MinimizeIcon,
   maximize: MaximizeIcon,
@@ -367,6 +387,7 @@ export const iconRegistry = {
   more: MoreIcon,
   spinner: SpinnerIcon,
   search: SearchIcon,
+  list: ListIcon,
   "chevron-down": ChevronDownIcon,
   eye: EyeIcon,
   "eye-off": EyeOffIcon,

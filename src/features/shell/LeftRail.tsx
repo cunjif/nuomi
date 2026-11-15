@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useUiStore, type View } from "../../lib/store/uiStore";
+import { useUiStore, type View, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_DEFAULT_WIDTH } from "../../lib/store/uiStore";
 import { Icon, type IconName } from "../../components/ui/Icon/Icon";
+import { PanelResizer } from "../../components/ui/PanelResizer";
 import { ConversationsList } from "../conversation/ConversationsList";
 import { ThemeToggle } from "./ThemeToggle";
+import { LeftPanelDock } from "./LeftPanelDock";
 
-const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
+export const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
   { view: "chat", labelKey: "shell.navChat", icon: "chat" },
   { view: "steward", labelKey: "shell.navSteward", icon: "sparkles" },
   { view: "board", labelKey: "shell.navBoard", icon: "board" },
@@ -18,13 +20,28 @@ const NAV_ITEMS: Array<{ view: View; labelKey: string; icon: IconName }> = [
   { view: "settings", labelKey: "shell.navSettings", icon: "settings" },
 ];
 
-/** Left rail: view switcher on top, session list below. */
+/**
+ * Left rail: view switcher on top, session list below. Three layout states
+ * (uiStore.leftPanel, persisted): expanded (resizable width + edge resizer),
+ * collapsed (LeftPanelDock icon column), or fully hidden (renders nothing —
+ * restored via the AreaNav toggle).
+ */
 export function LeftRail(): ReactNode {
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
+  const leftPanel = useUiStore((s) => s.leftPanel);
+  const setLeftPanel = useUiStore((s) => s.setLeftPanel);
   const { t } = useTranslation();
+
+  if (leftPanel.hidden) return null;
+  if (leftPanel.collapsed) return <LeftPanelDock />;
+
   return (
-    <nav aria-label={t("shell.appName")} className="relative flex w-56 shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised">
+    <nav
+      aria-label={t("shell.appName")}
+      style={{ width: leftPanel.width }}
+      className="relative flex shrink-0 flex-col border-r border-ink-muted/30 bg-surface-raised"
+    >
       <span aria-hidden="true" className="binder-holes pointer-events-none absolute inset-y-0 left-0 w-3" />
       <div className="flex flex-col py-2 pl-5 pr-2">
         {NAV_ITEMS.map((item) => (
@@ -54,6 +71,17 @@ export function LeftRail(): ReactNode {
       <div className="shrink-0 border-t border-ink-muted/30 p-1">
         <ThemeToggle />
       </div>
+      <PanelResizer
+        side="left"
+        width={leftPanel.width}
+        minWidth={PANEL_MIN_WIDTH}
+        maxWidth={PANEL_MAX_WIDTH}
+        onWidthChange={(width) => setLeftPanel({ width })}
+        onCollapse={() => setLeftPanel({ collapsed: true })}
+        onReset={() => setLeftPanel({ width: PANEL_DEFAULT_WIDTH })}
+        resizeLabel={t("shell.panelResize")}
+        collapseLabel={t("shell.panelCollapse")}
+      />
     </nav>
   );
 }
