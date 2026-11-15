@@ -2212,6 +2212,84 @@ pub async fn lsp_document_symbols(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn lsp_prepare_rename(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_prepare_rename(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_rename(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_rename(&state, language, root_uri, uri, line, character, new_name).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_workspace_symbols(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    query: String,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_workspace_symbols(&state, language, root_uri, query).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_type_definition(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_type_definition(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_implementation(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_implementation(&state, language, root_uri, uri, line, character).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_code_action(
+    state: tauri::State<'_, AppState>,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+    diagnostics: serde_json::Value,
+) -> Result<serde_json::Value, IpcError> {
+    lsp_commands::impl_lsp_code_action(&state, language, root_uri, uri, line, character, diagnostics).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn lsp_did_open(
     state: tauri::State<'_, AppState>,
     language: String,

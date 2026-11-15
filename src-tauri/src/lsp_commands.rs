@@ -285,6 +285,93 @@ pub async fn impl_lsp_document_symbols(
     client.document_symbols(&uri).await.map_err(IpcError::from)
 }
 
+pub async fn impl_lsp_prepare_rename(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client
+        .prepare_rename(&uri, line, character)
+        .await
+        .map_err(IpcError::from)
+}
+
+pub async fn impl_lsp_rename(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client
+        .rename(&uri, line, character, &new_name)
+        .await
+        .map_err(IpcError::from)
+}
+
+pub async fn impl_lsp_workspace_symbols(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    query: String,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client.workspace_symbol(&query).await.map_err(IpcError::from)
+}
+
+pub async fn impl_lsp_type_definition(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client
+        .type_definition(&uri, line, character)
+        .await
+        .map_err(IpcError::from)
+}
+
+pub async fn impl_lsp_implementation(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client
+        .implementation(&uri, line, character)
+        .await
+        .map_err(IpcError::from)
+}
+
+pub async fn impl_lsp_code_action(
+    state: &AppState,
+    language: String,
+    root_uri: String,
+    uri: String,
+    line: u32,
+    character: u32,
+    diagnostics: serde_json::Value,
+) -> Result<serde_json::Value, IpcError> {
+    let client = get_client(state, &language, &root_uri).await?;
+    client
+        .code_action(&uri, line, character, diagnostics)
+        .await
+        .map_err(IpcError::from)
+}
+
 // ---------- notification commands (fire-and-forget to LS) ----------
 
 pub async fn impl_lsp_did_open(

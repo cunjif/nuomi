@@ -372,6 +372,108 @@ impl LspClient {
         .await
     }
 
+    /// Request `textDocument/prepareRename` (ADR-0031 M2).
+    pub async fn prepare_rename(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Value, LspError> {
+        self.request(
+            "textDocument/prepareRename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            }),
+        )
+        .await
+    }
+
+    /// Request `textDocument/rename` (ADR-0031 M2).
+    pub async fn rename(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        new_name: &str,
+    ) -> Result<Value, LspError> {
+        self.request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+                "newName": new_name,
+            }),
+        )
+        .await
+    }
+
+    /// Request `workspace/symbol` (ADR-0031 M2).
+    pub async fn workspace_symbol(&self, query: &str) -> Result<Value, LspError> {
+        self.request(
+            "workspace/symbol",
+            json!({
+                "query": query,
+            }),
+        )
+        .await
+    }
+
+    /// Request `textDocument/typeDefinition` (ADR-0031 M3).
+    pub async fn type_definition(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Value, LspError> {
+        self.request(
+            "textDocument/typeDefinition",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            }),
+        )
+        .await
+    }
+
+    /// Request `textDocument/implementation` (ADR-0031 M3).
+    pub async fn implementation(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Value, LspError> {
+        self.request(
+            "textDocument/implementation",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            }),
+        )
+        .await
+    }
+
+    /// Request `textDocument/codeAction` (ADR-0031 M3). `diagnostics` is the
+    /// client-side diagnostic list (Monaco markers mapped back to LSP shape)
+    /// that some servers require before offering quick fixes.
+    pub async fn code_action(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        diagnostics: Value,
+    ) -> Result<Value, LspError> {
+        self.request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": { "start": { "line": line, "character": character }, "end": { "line": line, "character": character } },
+                "context": { "diagnostics": diagnostics },
+            }),
+        )
+        .await
+    }
+
     /// Try to receive the next server notification (non-blocking).
     pub async fn try_recv_notification(&self) -> Option<ServerNotification> {
         let mut rx = self.notifications_rx.lock().await;
