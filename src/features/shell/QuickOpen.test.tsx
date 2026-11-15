@@ -1,7 +1,8 @@
 /**
  * QuickOpen palette tests: Ctrl+P file quick open (filter + Enter opens),
- * Ctrl+Shift+P command palette (builtin commands run), Escape dismiss and
- * the global Ctrl+F find-in-file interception.
+ * Ctrl+Shift+P command palette (builtin commands run), Escape dismiss, the
+ * global Ctrl+F find-in-file interception and the Ctrl+T workspace-symbol
+ * mode (ADR-0031 M2).
  */
 import type { ReactNode } from "react";
 import { fireEvent, screen } from "@testing-library/react";
@@ -13,6 +14,13 @@ import { registerActiveEditor } from "../../lib/editor-ext/indexer/workspace-ind
 import { usePaletteStore } from "../../lib/store/paletteStore";
 import { THEME_STORAGE_KEY, useUiStore } from "../../lib/store/uiStore";
 import { QuickOpen, useGlobalPaletteShortcuts } from "./QuickOpen";
+
+// Symbols mode resolves the active language via monaco's editor registry.
+// jsdom never mounts real Monaco; an empty registry keeps the LSP-less
+// branch (no-symbol-language empty state) deterministic.
+vi.mock("monaco-editor", () => ({
+  editor: { getEditors: () => [] },
+}));
 
 function Harness(): ReactNode {
   useGlobalPaletteShortcuts();
@@ -117,5 +125,26 @@ describe("QuickOpen — Ctrl+F find in file", () => {
     pressKey({ code: "KeyF", ctrlKey: true });
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe("QuickOpen — Ctrl+T workspace symbols (ADR-0031 M2)", () => {
+  it("opens the symbols mode with its own placeholder and empty state", async () => {
+    renderWithProviders(<Harness />);
+    pressKey({ code: "KeyT", ctrlKey: true });
+    expect(screen.getByTestId("quick-open")).toBeTruthy();
+    const input = await screen.findByPlaceholderText("搜索工作区符号…（Ctrl+T）");
+    // No live Monaco editor in jsdom → the deterministic no-LSP empty state.
+    await screen.findByText("当前活动文件不支持符号搜索（需 LSP 语言）");
+    fireEvent.keyDown(input, { key: "Escape", cancelable: true });
+    expect(screen.queryByTestId("quick-open")).toBeNull();
+  });
+
+  it("Ctrl+T toggles: second press closes", () => {
+    renderWithProviders(<Harness />);
+    pressKey({ code: "KeyT", ctrlKey: true });
+    expect(screen.getByTestId("quick-open")).toBeTruthy();
+    pressKey({ code: "KeyT", ctrlKey: true });
+    expect(screen.queryByTestId("quick-open")).toBeNull();
   });
 });

@@ -1,4 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { injectIpcCommands } from "../../lib/ipc/client";
 import { tdSeedFiles, tdState, testDoubleCommands } from "../../lib/ipc/test-double";
@@ -132,5 +134,12 @@ describe("MonacoTab — edit + Ctrl+S save flow (AC10)", () => {
     fireEvent.keyDown(editor.closest("section") as HTMLElement, { key: "s", ctrlKey: true });
 
     await screen.findByText(/路径越界/);
+  });
+
+  it("pins VSCode-style peek for ambiguous definitions/references (ADR-0031)", () => {
+    // jsdom never mounts Monaco (textarea mock), so the option is guarded as
+    // a source-level contract the same way monacoThemes guards theme data.
+    const source = readFileSync(resolve("src/features/shell/MonacoTab.tsx"), "utf8");
+    expect(source).toContain('gotoLocation: { multipleDefinitions: "peek", multipleReferences: "peek" }');
   });
 });

@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { injectIpcCommands, resetIpcCommands } from "../../ipc/client";
 import { tdSeedFiles, testDoubleCommands } from "../../ipc/test-double";
+import { useUiStore } from "../../store/uiStore";
 import {
   ensureEditorExtensionsActivated,
   getOutlineProviders,
@@ -18,7 +19,11 @@ import {
   buildIndexFromFiles,
   extractDocComment,
   getWorkspaceIndex,
+  jumpBack,
+  jumpForward,
   reindexWorkspace,
+  registerActiveEditor,
+  requestOpenSymbol,
   updateFileIndex,
   type IndexedFile,
 } from "./workspace-index";
@@ -125,6 +130,91 @@ describe("workspace-index — buildIndexFromFiles", () => {
     // The hover can render a doc section even when the method has no refs
     // beyond its declaration line — the ref count is a footer, not the body.
     expect(index.definitions.get("greet")?.[0]?.doc).not.toBeNull();
+  });
+});
+
+describe("workspace-index — jump history (ADR-0031)", () => {
+  beforeEach(() => {
+    useUiStore.setState({ jumpBackStack: [], jumpForwardStack: [], activeWorkspaceId: "ws-a" });
+  });
+
+  interface EditorStub {
+    path: string | null;
+    cursor: { line: number; col: number } | null;
+    revealed: number | null;
+  }
+
+  /** Registers a controllable active-editor stub and returns its state cell. */
+  function stubEditor(path: string | null): EditorStub {
+    const stub: EditorStub = { path, cursor: { line: 10, col: 1 }, revealed: null };
+    registerActiveEditor(path, (line) => {
+      stub.revealed = line;
+      stub.cursor = { line: line + 1, col: 1 };
+    }, {
+      find: () => {},
+      position: () => (stub.path === null ? null : stub.cursor),
+    });
+    return stub;
+  }
+
+  it("records the origin on a jump and returns via jumpBack → jumpForward", () => {
+    const stub = stubEditor("a.ts");
+    // Same-file jump line 10 → 5: origin recorded, cursor lands on 5.
+    requestOpenSymbol("a.ts", 4);
+    expect(stub.revealed).toBe(4);
+    expect(useUiStore.getState().jumpBackStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 10, col: 1 }]);
+
+    jumpBack();
+    expect(stub.revealed).toBe(9); // 0-based reveal of origin line 10
+    expect(useUiStore.getState().jumpBackStack).toHaveLength(0);
+    expect(useUiStore.getState().jumpForwardStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 5, col: 1 }]);
+
+    jumpForward();
+    expect(stub.revealed).toBe(4); // back to the jumped-to line
+    expect(useUiStore.getState().jumpForwardStack).toHaveLength(0);
+    expect(useUiStore.getState().jumpBackStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 10, col: 1 }]);
+  });
+
+  it("does not record a no-op jump (same file, same line)", () => {
+    stubEditor("a.ts");
+    requestOpenSymbol("a.ts", 9); // origin line 10 == target line 10
+    expect(useUiStore.getState().jumpBackStack).toHaveLength(0);
+  });
+
+  it("records origins for cross-file jumps", () => {
+    stubEditor("a.ts");
+    requestOpenSymbol("b.ts", 2);
+    expect(useUiStore.getState().jumpBackStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 10, col: 1 }]);
+    expect(useUiStore.getState().editorByWorkspace["ws-a"]?.openFiles).toContain("b.ts");
+  });
+
+  it("truncates the forward branch when a fresh jump follows jumpBack", () => {
+    const stub = stubEditor("a.ts");
+    stub.cursor = { line: 30, col: 1 }; // start at line 30
+    requestOpenSymbol("a.ts", 9); // 30 → 10; back=[{line:30}]
+    expect(useUiStore.getState().jumpBackStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 30, col: 1 }]);
+    jumpBack(); // back to 30; forward=[{line:10}]
+    expect(useUiStore.getState().jumpForwardStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 10, col: 1 }]);
+    requestOpenSymbol("a.ts", 0); // fresh jump 30 → 1: forward branch must be cleared
+    expect(useUiStore.getState().jumpForwardStack).toHaveLength(0);
+    expect(useUiStore.getState().jumpBackStack).toEqual([{ workspaceId: "ws-a", path: "a.ts", line: 30, col: 1 }]);
+    jumpBack();
+    expect(stub.revealed).toBe(29);
+  });
+
+  it("is a no-op on an empty stack", () => {
+    const stub = stubEditor("a.ts");
+    jumpBack();
+    jumpForward();
+    expect(stub.revealed).toBeNull();
+  });
+
+  it("caps the back stack at 50 entries", () => {
+    stubEditor("a.ts");
+    for (let i = 0; i < 55; i += 1) {
+      requestOpenSymbol("a.ts", 9 + (i % 3) + 1);
+    }
+    expect(useUiStore.getState().jumpBackStack).toHaveLength(50);
   });
 });
 
