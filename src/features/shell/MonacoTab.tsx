@@ -314,7 +314,8 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           };
           // Workspace-index jump target registration + pending goto (F12
           // from another file lands here after this tab mounts) + the
-          // global Ctrl+F find-in-file action.
+          // global Ctrl+F find-in-file action + the cursor getter the jump
+          // history uses to record navigation origins (ADR-0031).
           registerActiveEditor(
             path,
             (line) => {
@@ -327,6 +328,10 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
               find: () => {
                 void editor.getAction("actions.find")?.run();
                 editor.focus();
+              },
+              position: () => {
+                const pos = editor.getPosition();
+                return pos === null ? null : { line: pos.lineNumber, col: pos.column };
               },
             },
           );
@@ -369,6 +374,10 @@ export function MonacoTab({ path, workspaceId }: MonacoTabProps): ReactNode {
           renderWhitespace: "selection",
           smoothScrolling: true,
           scrollBeyondLastLine: false,
+          // ADR-0031: VSCode-style peek for ambiguous definition/reference
+          // targets (Monaco's default happens to be peek; declared
+          // explicitly so a Monaco upgrade can't silently change it).
+          gotoLocation: { multipleDefinitions: "peek", multipleReferences: "peek" },
           readOnly: productId !== null,
         }}
       />

@@ -24,7 +24,7 @@ import { ipc } from "../ipc/client";
 interface QueuedMonacoProvider {
   extId: string;
   language: string;
-  kind: "hover" | "definition" | "reference" | "formatting" | "completion" | "signatureHelp";
+  kind: "hover" | "definition" | "reference" | "formatting" | "completion" | "signatureHelp" | "documentSymbol" | "typeDefinition" | "implementation" | "codeAction";
   // Monaco provider interfaces are structural; kept loose here because the
   // queue is flushed against the real Monaco namespace only.
   provider: unknown;
@@ -323,6 +323,18 @@ function makeContext(extId: string, monaco: typeof Monaco | null, editor: Monaco
     registerReferenceProvider(language, provider) {
       monacoQueue.push({ extId, language, kind: "reference", provider });
     },
+    registerDocumentSymbolProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "documentSymbol", provider });
+    },
+    registerTypeDefinitionProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "typeDefinition", provider });
+    },
+    registerImplementationProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "implementation", provider });
+    },
+    registerCodeActionProvider(language, provider) {
+      monacoQueue.push({ extId, language, kind: "codeAction", provider });
+    },
     registerDocumentFormattingEditProvider(language, provider) {
       monacoQueue.push({ extId, language, kind: "formatting", provider });
     },
@@ -382,6 +394,10 @@ export function attachMonacoProviders(
     }
     else if (q.kind === "definition") monaco.languages.registerDefinitionProvider(q.language, q.provider as Monaco.languages.DefinitionProvider);
     else if (q.kind === "reference") monaco.languages.registerReferenceProvider(q.language, q.provider as Monaco.languages.ReferenceProvider);
+    else if (q.kind === "documentSymbol") monaco.languages.registerDocumentSymbolProvider(q.language, q.provider as Monaco.languages.DocumentSymbolProvider);
+    else if (q.kind === "typeDefinition") monaco.languages.registerTypeDefinitionProvider(q.language, q.provider as Monaco.languages.TypeDefinitionProvider);
+    else if (q.kind === "implementation") monaco.languages.registerImplementationProvider(q.language, q.provider as Monaco.languages.ImplementationProvider);
+    else if (q.kind === "codeAction") monaco.languages.registerCodeActionProvider(q.language, q.provider as Monaco.languages.CodeActionProvider);
     else if (q.kind === "completion") monaco.languages.registerCompletionItemProvider(q.language, q.provider as Monaco.languages.CompletionItemProvider);
     else if (q.kind === "signatureHelp") monaco.languages.registerSignatureHelpProvider(q.language, q.provider as Monaco.languages.SignatureHelpProvider);
     else monaco.languages.registerDocumentFormattingEditProvider(q.language, q.provider as Monaco.languages.DocumentFormattingEditProvider);

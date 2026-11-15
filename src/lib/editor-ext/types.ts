@@ -124,6 +124,10 @@ export interface EditorExtContext {
   registerHoverProvider(language: string, provider: Monaco.languages.HoverProvider): void;
   registerDefinitionProvider(language: string, provider: Monaco.languages.DefinitionProvider): void;
   registerReferenceProvider(language: string, provider: Monaco.languages.ReferenceProvider): void;
+  registerDocumentSymbolProvider(language: string, provider: Monaco.languages.DocumentSymbolProvider): void;
+  registerTypeDefinitionProvider(language: string, provider: Monaco.languages.TypeDefinitionProvider): void;
+  registerImplementationProvider(language: string, provider: Monaco.languages.ImplementationProvider): void;
+  registerCodeActionProvider(language: string, provider: Monaco.languages.CodeActionProvider): void;
   registerDocumentFormattingEditProvider(
     language: string,
     provider: Monaco.languages.DocumentFormattingEditProvider,

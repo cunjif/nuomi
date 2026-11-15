@@ -2,10 +2,11 @@
  * VSCode-style palette overlay (需求: 全局快捷键):
  * - Ctrl/Cmd+P        → quick file open (workspace file search);
  * - Ctrl/Cmd+Shift+P  → global command palette;
+ * - Ctrl/Cmd+T        → workspace symbols via the active file's LSP (ADR-0031 M2);
  * - Ctrl/Cmd+F        → find within the open file (only when a Monaco editor
  *   surface registered a find action — see triggerActiveEditorFind).
  *
- * One modal, two modes (paletteStore.mode). Builtin commands self-register
+ * One modal, three modes (paletteStore.mode). Builtin commands self-register
  * at module scope; other modules can contribute via registerPaletteCommand.
  * Shortcuts are handled at window keydown CAPTURE phase so neither Monaco
  * keybindings nor browser defaults (print / find-in-page) observe them —
@@ -15,7 +16,8 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { listWorkspaceFiles, triggerActiveEditorFind } from "../../lib/editor-ext/indexer/workspace-index";
+import { listWorkspaceFiles, requestOpenSymbol, triggerActiveEditorFind } from "../../lib/editor-ext/indexer/workspace-index";
+import { lspUriToRelativePath } from "../../lib/editor-ext/builtin/lsp-bridge";
 import { registerPaletteCommand, usePaletteCommands, type PaletteCommand } from "../../lib/commands/palette";
 import { usePaletteStore } from "../../lib/store/paletteStore";
 import { THEME_STORAGE_KEY, nextTheme, useUiStore } from "../../lib/store/uiStore";
@@ -23,9 +25,20 @@ import { ipc } from "../../lib/ipc/client";
 
 const MAX_RESULTS = 50;
 
+const SYMBOL_LANGUAGES = ["typescript", "javascript", "rust", "python", "java", "go", "c", "cpp"];
+
+interface SymbolHit {
+  name: string;
+  kind: number;
+  container: string | null;
+  fsPath: string;
+  line: number; // 0-based
+}
+
 type PaletteItem =
   | { kind: "file"; path: string; sourceWorkspaceId?: string; sourceWorkspaceName?: string }
-  | { kind: "command"; cmd: PaletteCommand };
+  | { kind: "command"; cmd: PaletteCommand }
+  | { kind: "symbol"; hit: SymbolHit };
 
 // ── builtin commands ─────────────────────────────────────────────────────
 
@@ -136,6 +149,13 @@ export function useGlobalPaletteShortcuts(): void {
       }
       return;
     }
+    if (e.code === "KeyT" && !e.shiftKey) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (palette.mode === "symbols") palette.close();
+      else palette.open("symbols");
+      return;
+    }
     if (e.code === "KeyF" && !e.shiftKey) {
       // Palette owns the keyboard while open — swallow the chord.
       if (palette.mode !== null) {
@@ -202,6 +222,65 @@ export function QuickOpen(): ReactNode {
     staleTime: 30_000,
   });
 
+  // Workspace-symbol mode (ADR-0031 M2): language comes from the focused
+  // editor; the LSP query itself is debounced like a search box.
+  const [symbolLang, setSymbolLang] = useState<string | null>(null);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    if (mode !== "symbols") {
+      setSymbolLang(null);
+      return;
+    }
+    void import("monaco-editor").then((monaco) => {
+      const editors = monaco.editor.getEditors();
+      const focused = editors.find((e) => e.hasTextFocus()) ?? editors[0];
+      const lang = focused?.getModel()?.getLanguageId() ?? null;
+      setSymbolLang(lang !== null && SYMBOL_LANGUAGES.includes(lang) ? lang : null);
+    });
+  }, [mode]);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const symbolsQuery = useQuery({
+    queryKey: ["workspace-symbols", symbolLang, debouncedQuery],
+    queryFn: async (): Promise<SymbolHit[]> => {
+      if (symbolLang === null) return [];
+      const ws = await ipc.getWorkspace();
+      const root = ws.root ?? "";
+      if (root === "") return [];
+      const result = await ipc.lspWorkspaceSymbols(symbolLang, `file:///${root.replaceAll("\\", "/")}`, debouncedQuery);
+      if (!Array.isArray(result)) return [];
+      const hits: SymbolHit[] = [];
+      for (const raw of result) {
+        if (typeof raw !== "object" || raw === null) continue;
+        const s = raw as Record<string, unknown>;
+        const loc = s.location;
+        if (typeof loc !== "object" || loc === null) continue;
+        const l = loc as Record<string, unknown>;
+        const range = l.range;
+        const uri = typeof l.uri === "string" ? l.uri : null;
+        if (uri === null || typeof range !== "object" || range === null) continue;
+        const r = range as Record<string, unknown>;
+        const start = r.start;
+        if (typeof start !== "object" || start === null) continue;
+        const line = (start as Record<string, unknown>).line;
+        if (typeof line !== "number") continue;
+        hits.push({
+          name: typeof s.name === "string" ? s.name : "",
+          kind: typeof s.kind === "number" ? s.kind : 0,
+          container: typeof s.containerName === "string" && s.containerName !== "" ? s.containerName : null,
+          fsPath: uri.replace(/^file:\/\//, ""),
+          line,
+        });
+      }
+      return hits.filter((h) => h.name !== "");
+    },
+    enabled: mode === "symbols" && symbolLang !== null,
+    staleTime: 15_000,
+  });
+
   // Reset per open and per keystroke (VSCode resets selection on type).
   useEffect(() => {
     setQuery("");
@@ -253,8 +332,18 @@ export function QuickOpen(): ReactNode {
         })
         .map((cmd) => ({ kind: "command" as const, cmd }));
     }
+    if (mode === "symbols") {
+      // Client-side filter on top of the debounced server query — the LSP
+      // already does fuzzy matching, the local pass keeps keystroke gaps
+      // consistent while the debounce catches up.
+      const q = query.trim().toLowerCase();
+      return (symbolsQuery.data ?? [])
+        .filter((h) => q === "" || h.name.toLowerCase().includes(q))
+        .slice(0, MAX_RESULTS)
+        .map((hit) => ({ kind: "symbol" as const, hit }));
+    }
     return [];
-  }, [mode, filesQuery.data, crossQuery.data, scope, query, commands, t]);
+  }, [mode, filesQuery.data, crossQuery.data, scope, query, commands, symbolsQuery.data, t]);
 
   const clampedIdx = Math.min(activeIdx, Math.max(0, items.length - 1));
 
@@ -267,6 +356,13 @@ export function QuickOpen(): ReactNode {
         registerCrossRef(activeWorkspaceId, item.path, sourceWs, item.path);
       }
     } else if (item.kind === "command") item.cmd.run();
+    else if (item.kind === "symbol") {
+      void (async () => {
+        const ws = await ipc.getWorkspace();
+        const relative = lspUriToRelativePath(item.hit.fsPath, ws.root ?? "");
+        if (relative !== null) requestOpenSymbol(relative, item.hit.line);
+      })();
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
@@ -287,10 +383,16 @@ export function QuickOpen(): ReactNode {
   };
 
   if (mode === null) return null;
+  const placeholder =
+    mode === "files"
+      ? t("palette.filePlaceholder")
+      : mode === "symbols"
+        ? t("palette.symbolPlaceholder")
+        : t("palette.commandPlaceholder");
   return (
     <div
       role="dialog"
-      aria-label={mode === "files" ? t("palette.filePlaceholder") : t("palette.commandPlaceholder")}
+      aria-label={placeholder}
       className="fixed inset-0 z-50 flex items-start justify-center"
     >
       {/* Backdrop: click dismisses (tabIndex -1 keeps tab order inside panel). */}
@@ -312,7 +414,7 @@ export function QuickOpen(): ReactNode {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={mode === "files" ? t("palette.filePlaceholder") : t("palette.commandPlaceholder")}
+          placeholder={placeholder}
           className="w-full border-b border-ink-muted/30 bg-transparent px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted"
         />
         {mode === "files" && (
@@ -339,10 +441,10 @@ export function QuickOpen(): ReactNode {
             </button>
           </div>
         )}
-        <ul role="listbox" aria-label={t("palette.filePlaceholder")} className="max-h-80 overflow-y-auto p-1">
+        <ul role="listbox" aria-label={placeholder} className="max-h-80 overflow-y-auto p-1">
           {items.length === 0 && (
             <li className="px-2 py-3 text-center text-xs text-ink-muted" role="option" aria-selected={false}>
-              {t("palette.noResults")}
+              {mode === "symbols" && symbolLang === null ? t("palette.noSymbolLanguage") : t("palette.noResults")}
             </li>
           )}
           {items.map((item, i) =>
@@ -367,6 +469,31 @@ export function QuickOpen(): ReactNode {
                       </span>
                     )}
                     {item.path}
+                  </span>
+                </button>
+              </li>
+            ) : item.kind === "symbol" ? (
+              <li key={`${item.hit.fsPath}-${item.hit.line}-${item.hit.name}`}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === clampedIdx}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseMove={() => setActiveIdx(i)}
+                  onClick={() => runItem(item)}
+                  className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm ${
+                    i === clampedIdx ? "bg-surface-overlay text-ink" : "text-ink-muted"
+                  }`}
+                >
+                  <span className="min-w-0 truncate">
+                    {item.hit.container !== null && (
+                      <span className="mr-1 text-[10px] opacity-60">{item.hit.container}·</span>
+                    )}
+                    {item.hit.name}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2 truncate font-mono text-[10px] opacity-70">
+                    <span className="rounded bg-surface-overlay/60 px-1">{item.hit.line + 1}</span>
+                    {item.hit.fsPath.replace(/^file:\/+\//, "")}
                   </span>
                 </button>
               </li>

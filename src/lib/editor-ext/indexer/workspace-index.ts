@@ -12,6 +12,7 @@
 import { ipc } from "../../ipc/client";
 import { languageForPath } from "../../../features/shell/editorLanguage";
 import { useUiStore } from "../../store/uiStore";
+import type { JumpEntry } from "../../store/uiStore";
 import { getOutlineProviders } from "../registry";
 import type { DocumentSymbol, SymbolProvider } from "../types";
 
@@ -299,6 +300,8 @@ let activeEditor: {
   reveal: (line: number) => void;
   path: string | null;
   find?: () => void;
+  /** Current 1-based cursor position (jump-history origin capture); null when unavailable. */
+  position?: () => { line: number; col: number } | null;
 } | null = null;
 let pendingJump: { path: string; line: number } | null = null;
 
@@ -306,13 +309,50 @@ let pendingJump: { path: string; line: number } | null = null;
 export function registerActiveEditor(
   path: string | null,
   reveal: (line: number) => void,
-  actions?: { find(): void },
+  actions?: {
+    find(): void;
+    /** 1-based cursor position getter; omit in surfaces without a caret (wysiwyg). */
+    position?(): { line: number; col: number } | null;
+  },
 ): void {
-  activeEditor = { path, reveal, find: actions?.find };
+  activeEditor = { path, reveal, find: actions?.find, position: actions?.position };
+}
+
+/** ADR-0031: the current editor position as a jump-history entry (null outside Monaco tabs). */
+function currentJumpEntry(): JumpEntry | null {
+  if (activeEditor === null || activeEditor.path === null) return null;
+  const pos = activeEditor.position?.() ?? null;
+  if (pos === null) return null;
+  const workspaceId = useUiStore.getState().activeWorkspaceId;
+  return workspaceId === null ? null : { workspaceId, path: activeEditor.path, line: pos.line, col: pos.col };
+}
+
+/** Execute a recorded jump entry through the same plumbing as requestOpenSymbol. */
+function navigateTo(entry: JumpEntry): void {
+  if (activeEditor !== null && activeEditor.path === entry.path) {
+    activeEditor.reveal(entry.line - 1);
+    return;
+  }
+  pendingJump = { path: entry.path, line: entry.line - 1 };
+  const s = useUiStore.getState();
+  if (s.activeWorkspaceId === null) return;
+  if (entry.workspaceId !== s.activeWorkspaceId) {
+    // Cross-workspace entry (single-open model): switch only — the target
+    // workspace's bucket restores its own last active file. Going through
+    // switchToWorkspace keeps the dirty-guard dialog flow intact.
+    void s.switchToWorkspace(entry.workspaceId);
+    return;
+  }
+  s.openFile(entry.path, s.activeWorkspaceId);
 }
 
 /** Open a workspace file at a 0-based line (go-to-definition / references). */
 export function requestOpenSymbol(path: string, line: number): void {
+  // ADR-0031: record where the navigation started so Alt+← can return.
+  const origin = currentJumpEntry();
+  if (origin !== null && !(origin.path === path && origin.line === line + 1)) {
+    useUiStore.getState().recordJumpOrigin(origin);
+  }
   if (activeEditor !== null && activeEditor.path === path) {
     activeEditor.reveal(line);
     return;
@@ -320,6 +360,26 @@ export function requestOpenSymbol(path: string, line: number): void {
   pendingJump = { path, line };
   const s = useUiStore.getState();
   if (s.activeWorkspaceId !== null) s.openFile(path, s.activeWorkspaceId);
+}
+
+/** ADR-0031: navigate back through the jump history (VSCode navigateBack). */
+export function jumpBack(): void {
+  const s = useUiStore.getState();
+  const target = s.popJumpOrigin();
+  if (target === null) return;
+  const current = currentJumpEntry();
+  if (current !== null) s.recordJumpForward(current);
+  navigateTo(target);
+}
+
+/** ADR-0031: re-apply a position parked by jumpBack (VSCode navigateForward). */
+export function jumpForward(): void {
+  const s = useUiStore.getState();
+  const target = s.popJumpForward();
+  if (target === null) return;
+  const current = currentJumpEntry();
+  if (current !== null) s.recordJumpBackKeepForward(current);
+  navigateTo(target);
 }
 
 /** MonacoTab consumes the jump targeted at its file once mounted. */

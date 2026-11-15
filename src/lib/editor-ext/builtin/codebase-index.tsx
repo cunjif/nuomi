@@ -24,6 +24,8 @@ import { getOutlineProviders } from "../registry";
 import { ipc } from "../../../lib/ipc/client";
 import { i18n } from "../../../i18n";
 import {
+  jumpBack,
+  jumpForward,
   getWorkspaceIndex,
   reindexWorkspace,
   requestOpenSymbol,
@@ -183,7 +185,8 @@ function NavPanel(): ReactNode {
   );
 }
 
-/** Editor command surface: F12 definition jump/picker, Alt+F1 references. */
+/** Editor command surface: F12 definition jump/picker, Alt+F1 references,
+ * Alt+←/→ navigation history (ADR-0031). */
 function bindEditorCommands(monaco: typeof Monaco, editor: Monaco.editor.IStandaloneCodeEditor): void {
   const currentWord = (): string | null => {
     const model = editor.getModel();
@@ -215,6 +218,24 @@ function bindEditorCommands(monaco: typeof Monaco, editor: Monaco.editor.IStanda
   };
   editor.addCommand(monaco.KeyCode.F12, jumpToDefinition);
   editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.F1, findReferences);
+  // ADR-0031: VSCode navigateBack/Forward over the cross-tab jump history.
+  // Alt+←/→ deliberately — Ctrl+- is the browser/webview zoom chord.
+  editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, () => jumpBack());
+  editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.RightArrow, () => jumpForward());
+  editor.addAction({
+    id: "nuomi.jumpBack",
+    label: i18n.t("editor.nav.jumpBack"),
+    keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow],
+    contextMenuGroupId: "navigation",
+    run: () => jumpBack(),
+  });
+  editor.addAction({
+    id: "nuomi.jumpForward",
+    label: i18n.t("editor.nav.jumpForward"),
+    keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.RightArrow],
+    contextMenuGroupId: "navigation",
+    run: () => jumpForward(),
+  });
   editor.addAction({
     id: "nuomi.gotoDefinition",
     label: i18n.t("editor.nav.gotoDefinition"),
