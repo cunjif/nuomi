@@ -140,6 +140,24 @@ const SNAPSHOT_UNAVAILABLE_NOTE: &str = "\n\n[系统提示] 应用状态暂时�
 const TIMEOUT_REPLY: &str = "模型服务响应超时，请重试。";
 const PROVIDER_ERROR_REPLY: &str = "模型服务暂不可用，请检查 Provider 配置或稍后重试。";
 const EMPTY_REPLY: &str = "模型返回了空回复，请重试。";
+/// Max characters of the vendor error detail appended to the degrade reply —
+/// `ensure_status` already caps vendor bodies at 4 KiB, but a chat bubble
+/// should stay readable.
+const PROVIDER_ERROR_DETAIL_MAX_CHARS: usize = 500;
+
+fn truncate_reply_detail(detail: &str) -> String {
+    if detail.chars().count() <= PROVIDER_ERROR_DETAIL_MAX_CHARS {
+        detail.to_string()
+    } else {
+        format!(
+            "{}…(truncated)",
+            detail
+                .chars()
+                .take(PROVIDER_ERROR_DETAIL_MAX_CHARS)
+                .collect::<String>()
+        )
+    }
+}
 
 /// Runs the steward agent loop with the configuration loaded from
 /// `app_settings`.
@@ -297,16 +315,24 @@ pub async fn run_with_config(
                 });
             }
             Ok(Err(provider_error)) => {
+                // Surface the vendor's own error message in the bubble — the
+                // generic degrade copy alone hides root causes (expired key,
+                // wrong model, rate limit). The same detail is audited
+                // verbatim in the `steward.llm_failed` event.
+                let detail = provider_error.to_string();
                 publish_llm_failed(
                     &db_path,
                     bus.as_ref(),
                     &input.session_id,
                     "provider_error",
-                    Some(provider_error.to_string()),
+                    Some(detail.clone()),
                 )
                 .await;
                 return Ok(StewardReply::Text {
-                    content: PROVIDER_ERROR_REPLY.into(),
+                    content: format!(
+                        "{PROVIDER_ERROR_REPLY}\n\n[错误详情] {}",
+                        truncate_reply_detail(&detail)
+                    ),
                 });
             }
             Ok(Ok(response)) => response,
@@ -877,7 +903,16 @@ mod tests {
         .await
         .unwrap();
         match reply {
-            StewardReply::Text { content } => assert_eq!(content, PROVIDER_ERROR_REPLY),
+            StewardReply::Text { content } => {
+                assert!(
+                    content.starts_with(PROVIDER_ERROR_REPLY),
+                    "degrade reply must keep the generic copy prefix, got: {content}"
+                );
+                assert!(
+                    content.contains("[错误详情] protocol violation from 'err': connection refused"),
+                    "bubble must surface the vendor error detail, got: {content}"
+                );
+            }
             other => panic!("expected Text, got {other:?}"),
         }
         // Degradation is audited with the underlying provider error.

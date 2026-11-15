@@ -917,9 +917,10 @@ mod tests {
         .await
         .unwrap();
         match reply {
-            StewardReply::Text { content } => assert_eq!(
-                content,
-                "模型服务暂不可用，请检查 Provider 配置或稍后重试。"
+            StewardReply::Text { content } => assert!(
+                content
+                    .starts_with("模型服务暂不可用，请检查 Provider 配置或稍后重试。"),
+                "degrade reply must keep the generic copy prefix, got: {content}"
             ),
             other => panic!("expected degraded Text, got {other:?}"),
         }
@@ -1152,9 +1153,14 @@ mod tests {
             .unwrap();
         match reply {
             StewardReply::Text { content } => {
-                assert_eq!(
-                    content,
-                    "模型服务暂不可用，请检查 Provider 配置或稍后重试。"
+                assert!(
+                    content
+                        .starts_with("模型服务暂不可用，请检查 Provider 配置或稍后重试。"),
+                    "degrade reply must keep the generic copy prefix, got: {content}"
+                );
+                assert!(
+                    content.contains("[错误详情]"),
+                    "degrade reply must surface the provider error detail, got: {content}"
                 );
                 assert!(
                     !content.contains("复古风管家"),
