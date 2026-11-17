@@ -67,6 +67,10 @@ function PanelToggles(): ReactNode {
   const rightPanel = useUiStore((s) => s.rightPanel);
   const setLeftPanel = useUiStore((s) => s.setLeftPanel);
   const setRightPanel = useUiStore((s) => s.setRightPanel);
+  // The right panel (explorer sidebar) only exists inside the workbench's
+  // EditorArea, which requires an open workspace. Without one the toggle
+  // would flip state invisibly — surface that as a toast instead.
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const base =
     "flex h-9 w-8 items-center justify-center text-xs focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-accent";
   const toggle = (
@@ -87,10 +91,10 @@ function PanelToggles(): ReactNode {
         aria-label={t("shell.leftPanelToggle")}
         title={
           leftPanel.hidden
-            ? t("shell.panelShow")
+            ? t("shell.panelShowLeft")
             : leftPanel.collapsed
-              ? t("shell.panelExpand")
-              : t("shell.panelCollapse")
+              ? t("shell.panelExpandLeft")
+              : t("shell.panelCollapseLeft")
         }
         data-testid="left-panel-toggle"
         onClick={() => toggle(leftPanel, setLeftPanel)}
@@ -104,13 +108,19 @@ function PanelToggles(): ReactNode {
         aria-label={t("shell.rightPanelToggle")}
         title={
           rightPanel.hidden
-            ? t("shell.panelShow")
+            ? t("shell.panelShowRight")
             : rightPanel.collapsed
-              ? t("shell.panelExpand")
-              : t("shell.panelCollapse")
+              ? t("shell.panelExpandRight")
+              : t("shell.panelCollapseRight")
         }
         data-testid="right-panel-toggle"
-        onClick={() => toggle(rightPanel, setRightPanel)}
+        onClick={() => {
+          if (activeWorkspaceId === null) {
+            toast.warn(t("shell.rightPanelNeedsWorkspace"));
+            return;
+          }
+          toggle(rightPanel, setRightPanel);
+        }}
         className={`${base} ${rightPanel.hidden ? "text-ink-muted/50" : "text-ink-muted"} hover:bg-surface-overlay hover:text-ink`}
       >
         <Icon name="panel-right" size={14} />
