@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useStickToBottom } from "../../components/ui/useStickToBottom";
 import { ipc } from "../../lib/ipc/client";
 import { toast } from "../../lib/store/toastStore";
 import { Icon } from "../../components/ui/Icon/Icon";
@@ -27,6 +28,7 @@ export function StewardChat(): ReactNode {
   const [panelOpen, setPanelOpen] = useState(false);
   const qc = useQueryClient();
   const { live, beginTurn, endTurn } = useStewardStream(currentSessionId);
+  const { scrollRef, scrollToBottomIfStuck } = useStickToBottom();
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +149,16 @@ export function StewardChat(): ReactNode {
     [sendText],
   );
 
+  // Snap to the latest content whenever the list grows or the live turn
+  // updates (stream deltas, tool state) — but only while the user is
+  // following the tail. Covers the resend path: the degraded commit and
+  // the next live turn both arrive through these dependencies.
+  const liveText = live?.authoritativeText ?? live?.streamText ?? "";
+  const liveTool = live?.activeTool ?? null;
+  useEffect(() => {
+    scrollToBottomIfStuck();
+  }, [messages.length, liveText, liveTool, sendMut.isPending, scrollToBottomIfStuck]);
+
   return (
     <div className="flex h-full">
       <div className="flex min-h-0 flex-1 flex-col">
@@ -160,7 +172,7 @@ export function StewardChat(): ReactNode {
             <Icon name="more" size={16} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           {currentSessionId === null ? (
             <div className="flex h-full items-center justify-center text-sm text-ink-muted">
               {ensureError
@@ -256,7 +268,13 @@ function MessageBubble({
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] whitespace-pre-wrap rounded bg-surface-raised px-3 py-2 text-sm text-ink">
+      <div
+        className={`max-w-[80%] whitespace-pre-wrap rounded px-3 py-2 text-sm text-ink ${
+          msg.failed === true
+            ? "border border-dashed border-state-danger bg-state-danger/10"
+            : "bg-surface-raised"
+        }`}
+      >
         {msg.text}
         {msg.failed === true && msg.resendText !== undefined && onResend !== undefined && (
           <div className="mt-2">

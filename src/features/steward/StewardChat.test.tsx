@@ -13,6 +13,15 @@ import { emitTestEvent } from "../../lib/events/transport";
 import { sessionChannel } from "../../lib/events/types";
 import { StewardChat } from "./StewardChat";
 
+// Scroll is asserted via the shared hook's snap call — jsdom has no layout,
+// so the real scrollTop assignment is not observable.
+const { scrollToBottomIfStuck } = vi.hoisted(() => ({
+  scrollToBottomIfStuck: vi.fn(),
+}));
+vi.mock("../../components/ui/useStickToBottom", () => ({
+  useStickToBottom: () => ({ scrollRef: { current: null }, scrollToBottomIfStuck }),
+}));
+
 const okResult = <T,>(data: T): Result<T, IpcError> => ({ status: "ok", data });
 const errResult = (code: string, message: string): Result<never, IpcError> => ({
   status: "error",
@@ -264,6 +273,50 @@ describe("StewardChat v2 — attachments", () => {
     // Draft and attachment chip kept for removal and retry.
     await waitFor(() => expect(input.value).toBe("总结这个文档"));
     expect(screen.getByText("gone.md")).toBeInTheDocument();
+  });
+});
+
+describe("StewardChat — stick-to-bottom", () => {
+  it("snaps to the latest content on history load, degraded commit, and resend turn start", async () => {
+    scrollToBottomIfStuck.mockClear();
+    let resolveSend: (r: Result<StewardReplyDto, IpcError>) => void = () => {};
+    const send = vi.fn(
+      () =>
+        new Promise<Result<StewardReplyDto, IpcError>>((res) => {
+          resolveSend = res;
+        }),
+    );
+    const sid = await setupStewardSession({ send });
+
+    // Initial mount (history load) snaps once.
+    expect(scrollToBottomIfStuck).toHaveBeenCalled();
+    const afterMount = scrollToBottomIfStuck.mock.calls.length;
+
+    await submitDraft("帮我诊断");
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    // beginTurn flips sendMut.isPending → optimistic bubble → snap.
+    expect(scrollToBottomIfStuck.mock.calls.length).toBeGreaterThan(afterMount);
+    const afterBegin = scrollToBottomIfStuck.mock.calls.length;
+
+    act(() => {
+      emitTestEvent(sessionChannel(sid), {
+        type: "steward.llm_failed",
+        sessionId: sid,
+        payload: { sessionId: sid, reason: "timeout", detail: null },
+      });
+    });
+    await act(async () => {
+      resolveSend(okResult({ type: "text", content: "模型服务响应超时，请重试。" }));
+    });
+    await screen.findByText("模型服务响应超时，请重试。");
+    // Degraded commit grows the list → snap.
+    expect(scrollToBottomIfStuck.mock.calls.length).toBeGreaterThan(afterBegin);
+    const afterCommit = scrollToBottomIfStuck.mock.calls.length;
+
+    // Resend: a new live turn starts → snap again.
+    fireEvent.click(screen.getByRole("button", { name: "重发" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(scrollToBottomIfStuck.mock.calls.length).toBeGreaterThan(afterCommit);
   });
 });
 

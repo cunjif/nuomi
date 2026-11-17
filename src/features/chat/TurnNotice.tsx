@@ -32,7 +32,11 @@ export function TurnNotice({ kind, summary, onRetry }: TurnNoticeProps): ReactNo
     <div
       data-testid="turn-notice"
       data-kind={kind}
-      className="sketch-card inline-flex animate-draw-in items-center gap-2 bg-surface-raised px-3 py-1.5 text-sm shadow-sketch-sm"
+      className={`sketch-card inline-flex animate-draw-in items-center gap-2 px-3 py-1.5 text-sm shadow-sketch-sm ${
+        kind === "failed"
+          ? "border border-dashed border-state-danger bg-state-danger/10"
+          : "bg-surface-raised"
+      }`}
     >
       <span className="truncate text-ink-muted" role="status">
         {text}
