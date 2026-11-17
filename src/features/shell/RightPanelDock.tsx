@@ -8,6 +8,7 @@ import type { WorkDirectoryDto } from "../../lib/ipc/bindings.gen";
 import { useWorkDirectoryOps } from "./useWorkDirectoryOps";
 import { DockIconButton } from "./DockIconButton";
 import { WorkspaceListDialog } from "./WorkspaceListDialog";
+import { DirBrowsePopover } from "./DirBrowsePopover";
 
 /**
  * Icon dock shown when the explorer sidebar is collapsed: the workspace's
@@ -26,8 +27,12 @@ export function RightPanelDock({ workspaceId }: { workspaceId: string }): ReactN
   const [addOpen, setAddOpen] = useState(false);
   const [menuForId, setMenuForId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [browseForId, setBrowseForId] = useState<string | null>(null);
   const addBtnRef = useRef<HTMLButtonElement>(null);
   const addPopRef = useRef<HTMLDivElement>(null);
+  // Ref of the badge whose browse popover is open (ref callback swaps per
+  // badge), so re-clicking the same badge toggles instead of re-opening.
+  const browseBtnRef = useRef<HTMLButtonElement | null>(null);
   useClickOutside([addBtnRef, addPopRef], {
     enabled: addOpen,
     onOutside: () => setAddOpen(false),
@@ -44,6 +49,16 @@ export function RightPanelDock({ workspaceId }: { workspaceId: string }): ReactN
       return;
     }
     void ops.removeDir(dir);
+  };
+
+  /** Badge click = focus + browse: focusing moves the sandbox root to this
+   * directory (the browse popover's FileTree lists the active root), so the
+   * popover shows exactly what was clicked. Stale directories stay
+   * popover-free — focusDir already toasts the removal/relocation hint. */
+  const handleBrowseClick = (dir: WorkDirectoryDto): void => {
+    ops.focusDir(dir);
+    if (!dir.available) return;
+    setBrowseForId(browseForId === dir.id ? null : dir.id);
   };
 
   const confirmDir = confirmRemoveId !== null ? ops.mountedDirs.find((d) => d.id === confirmRemoveId) : undefined;
@@ -69,8 +84,9 @@ export function RightPanelDock({ workspaceId }: { workspaceId: string }): ReactN
                 role="tab"
                 aria-selected={dir.isActive}
                 aria-label={dir.displayName}
-                title={dir.available ? dir.displayName : `${dir.displayName} — ${t("workspace.directoryMissing")}`}
-                onClick={() => ops.focusDir(dir)}
+                title={dir.available ? dir.absPath : `${dir.displayName} — ${t("workspace.directoryMissing")}`}
+                ref={browseForId === dir.id ? browseBtnRef : undefined}
+                onClick={() => handleBrowseClick(dir)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setMenuForId(menuForId === dir.id ? null : dir.id);
@@ -82,6 +98,14 @@ export function RightPanelDock({ workspaceId }: { workspaceId: string }): ReactN
               >
                 {initial}
               </button>
+              {browseForId === dir.id && (
+                <DirBrowsePopover
+                  workspaceId={workspaceId}
+                  dir={dir}
+                  buttonRef={browseBtnRef}
+                  onClose={() => setBrowseForId(null)}
+                />
+              )}
               {menuForId === dir.id && (
                 <div
                   className="absolute left-full top-0 z-30 ml-1 rounded border border-ink-muted/40 bg-surface-raised py-0.5 text-xs shadow-lg"
@@ -149,7 +173,7 @@ export function RightPanelDock({ workspaceId }: { workspaceId: string }): ReactN
       </div>
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <DockIconButton icon="eye-off" label={t("shell.panelHide")} onClick={() => setRightPanel({ hidden: true })} />
-        <DockIconButton icon="panel-right" label={t("shell.panelExpand")} onClick={() => setRightPanel({ collapsed: false })} />
+        <DockIconButton icon="panel-right" label={t("shell.panelExpandRight")} onClick={() => setRightPanel({ collapsed: false })} />
       </div>
       {switchOpen && <WorkspaceListDialog open onClose={() => setSwitchOpen(false)} />}
       <Dialog

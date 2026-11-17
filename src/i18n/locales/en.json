@@ -95,10 +95,17 @@
     "leftPanelToggle": "Left panel visibility",
     "rightPanelToggle": "Right panel visibility",
     "panelShow": "Show panel",
+    "panelShowLeft": "Show left panel",
+    "panelShowRight": "Show right panel",
     "panelHide": "Hide panel completely",
     "panelExpand": "Expand panel",
+    "panelExpandLeft": "Expand left panel",
+    "panelExpandRight": "Expand right panel",
     "panelCollapse": "Collapse panel",
-    "panelResize": "Drag to resize (double-click to reset)"
+    "panelCollapseLeft": "Collapse left panel",
+    "panelCollapseRight": "Collapse right panel",
+    "panelResize": "Drag to resize (double-click to reset)",
+    "rightPanelNeedsWorkspace": "The right panel is part of the workspace sidebar — open a workspace first"
   },
   "theme": {
     "toggle": "Change theme",
@@ -1234,6 +1241,7 @@
     "reclaimInto": "Reclaim into this workspace",
     "workDirs": "Work directories",
     "focusDir": "Focus this directory",
+    "dirBrowseLoading": "Focusing directory…",
     "removeDir": "Remove from workspace",
     "addDir": "Add directory",
     "browseNewDir": "Browse for a new directory…",

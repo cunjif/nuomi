@@ -95,10 +95,17 @@
     "leftPanelToggle": "左侧面板显示",
     "rightPanelToggle": "右侧面板显示",
     "panelShow": "显示面板",
+    "panelShowLeft": "显示左面板",
+    "panelShowRight": "显示右面板",
     "panelHide": "完全隐藏面板",
     "panelExpand": "展开面板",
+    "panelExpandLeft": "展开左面板",
+    "panelExpandRight": "展开右面板",
     "panelCollapse": "收起面板",
-    "panelResize": "拖拽调节面板宽度（双击重置）"
+    "panelCollapseLeft": "收起左面板",
+    "panelCollapseRight": "收起右面板",
+    "panelResize": "拖拽调节面板宽度（双击重置）",
+    "rightPanelNeedsWorkspace": "右面板是工作区侧栏，请先打开一个工作区"
   },
   "theme": {
     "toggle": "切换主题",
@@ -1241,6 +1248,7 @@
     "reclaimInto": "归入此工作区",
     "workDirs": "工作目录",
     "focusDir": "聚焦此目录",
+    "dirBrowseLoading": "正在聚焦目录…",
     "removeDir": "从工作区移除",
     "addDir": "添加目录",
     "browseNewDir": "浏览新目录…",
