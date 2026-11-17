@@ -227,7 +227,7 @@ describe("EditorArea — explorer panel layout states", () => {
 
     expect(await screen.findByTestId("right-panel-dock")).toBeInTheDocument();
     expect(screen.queryByTestId("panel-resizer-right")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开面板" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开右面板" }));
     expect(useUiStore.getState().rightPanel.collapsed).toBe(false);
     // The expanded panel (with its toolbar) is back.
     await screen.findByRole("button", { name: "切换工作区" });

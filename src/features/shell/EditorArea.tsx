@@ -167,7 +167,7 @@ export function EditorArea({ workspaceId }: { workspaceId: string }): ReactNode 
               onCollapse={() => setRightPanel({ collapsed: true })}
               onReset={() => setRightPanel({ width: PANEL_DEFAULT_WIDTH })}
               resizeLabel={t("shell.panelResize")}
-              collapseLabel={t("shell.panelCollapse")}
+              collapseLabel={t("shell.panelCollapseRight")}
             />
           </aside>
         )}

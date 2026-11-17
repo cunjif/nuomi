@@ -88,7 +88,7 @@ export function LeftPanelDock(): ReactNode {
       ))}
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <DockIconButton icon="eye-off" label={t("shell.panelHide")} onClick={() => setLeftPanel({ hidden: true })} />
-        <DockIconButton icon="panel-left" label={t("shell.panelExpand")} onClick={() => setLeftPanel({ collapsed: false })} />
+        <DockIconButton icon="panel-left" label={t("shell.panelExpandLeft")} onClick={() => setLeftPanel({ collapsed: false })} />
       </div>
       {newDialogOpen && <NewConversationDialog kind="chat" onClose={() => setNewDialogOpen(false)} />}
     </nav>

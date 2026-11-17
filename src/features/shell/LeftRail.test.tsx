@@ -55,7 +55,7 @@ describe("LeftRail — collapsed dock", () => {
     fireEvent.click(board);
     expect(useUiStore.getState().view).toBe("board");
     expect(screen.getByRole("button", { name: "看板" })).toHaveAttribute("aria-current", "page");
-    fireEvent.click(screen.getByRole("button", { name: "展开面板" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开左面板" }));
     expect(useUiStore.getState().leftPanel.collapsed).toBe(false);
     expect(screen.getByTestId("panel-resizer-left")).toBeInTheDocument();
   });

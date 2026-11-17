@@ -80,7 +80,7 @@ export function LeftRail(): ReactNode {
         onCollapse={() => setLeftPanel({ collapsed: true })}
         onReset={() => setLeftPanel({ width: PANEL_DEFAULT_WIDTH })}
         resizeLabel={t("shell.panelResize")}
-        collapseLabel={t("shell.panelCollapse")}
+        collapseLabel={t("shell.panelCollapseLeft")}
       />
     </nav>
   );
